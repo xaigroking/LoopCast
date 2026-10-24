@@ -123,7 +123,8 @@ class Handler(BaseHTTPRequestHandler):
         if not write and path == '/healthz':
             with store.transaction() as db:
                 db.execute('SELECT 1 FROM schema_version').fetchone()
-            return self.send_json(200, {'ready': not self.server.stopping.is_set()})
+            ready = not self.server.stopping.is_set() and self.server.worker.thread.is_alive()
+            return self.send_json(200 if ready else 503, {'ready': ready})
         if not write and path == '/v1/capabilities':
             return self.send_json(200, {'mode': 'fixture', 'video_generation': False, 'publishing': False, 'single_user': True})
         if path == '/v1/runs':
@@ -163,6 +164,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.asset('index.html', 'text/html; charset=utf-8')
         if not write and path in ('/app.js', '/style.css'):
             return self.asset(path[1:], 'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8')
+        if not write and not path.startswith('/v1/') and '.' not in path:
+            return self.asset('index.html', 'text/html; charset=utf-8')
         raise Problem('NOT_FOUND', 'This address does not exist.', 404)
 
     def asset(self, name, media_type):

@@ -1,6 +1,6 @@
 """Transactional task state. All execution and HTTP mutations pass through Store."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -67,7 +67,7 @@ class Store:
         self.artifact_dir = self.directory / 'artifacts'
         self.artifact_dir.mkdir(exist_ok=True)
         self.database = self.directory / 'state.sqlite3'
-        with self.connect() as db:
+        with closing(self.connect()) as db:
             db.execute('PRAGMA journal_mode=WAL')
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
@@ -90,6 +90,7 @@ class Store:
                     id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES runs(id),
                     version INTEGER NOT NULL, type TEXT NOT NULL, time TEXT NOT NULL, payload TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS events_run ON events(run_id,id);
+                CREATE UNIQUE INDEX IF NOT EXISTS events_version ON events(run_id,version);
                 CREATE TABLE IF NOT EXISTS artifacts (
                     id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id),
                     attempt_id TEXT NOT NULL REFERENCES attempts(id), media_type TEXT NOT NULL,
