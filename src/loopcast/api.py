@@ -5,6 +5,7 @@ from importlib.resources import files
 import json
 import re
 import threading
+import time
 from urllib.parse import urlsplit, parse_qs
 
 from .storage import Store, Problem, uid, TERMINAL
@@ -173,4 +174,42 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def events(self, run_id, query):
-        raise Problem('CAPABILITY_UNAVAILABLE', 'Event stream is not available.', 501, run_id)
+        params = parse_qs(query, keep_blank_values=True)
+        raw = self.headers.get('Last-Event-ID', params.get('after', [''])[0])
+        try:
+            after = int(raw)
+        except (ValueError, TypeError):
+            raise Problem('RESYNC_REQUIRED', 'Fetch a snapshot and supply its event cursor.', 409, run_id) from None
+        self.server.store.events(run_id, after)
+        if not self.server.stream_slots.acquire(blocking=False):
+            raise Problem('STREAM_LIMIT', 'Too many open event streams. Close an older view.', 429, run_id)
+        with self.server.stream_lock:
+            self.server.stream_count += 1
+        try:
+            self.connection.settimeout(2)
+            self._headers(200, 'text/event-stream; charset=utf-8')
+            heartbeat = 0
+            while not self.server.stopping.is_set():
+                events = self.server.store.events(run_id, after)
+                for event in events:
+                    frame = f"id: {event['id']}\nevent: snapshot\ndata: {event['payload']}\n\n"
+                    self.wfile.write(frame.encode())
+                    self.wfile.flush()
+                    after = event['id']
+                current = self.server.store.snapshot(run_id)
+                if after == current['last_event_id'] and current['state'] in TERMINAL:
+                    # A terminal snapshot is also sent to subscriptions opened at its cursor.
+                    self.wfile.write(('event: complete\ndata: ' + json.dumps(current) + '\n\n').encode())
+                    self.wfile.flush()
+                    break
+                if time.monotonic() - heartbeat >= .1:
+                    self.wfile.write(b': heartbeat\n\n')
+                    self.wfile.flush()
+                    heartbeat = time.monotonic()
+                self.server.stopping.wait(.05)
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+            pass
+        finally:
+            with self.server.stream_lock:
+                self.server.stream_count -= 1
+            self.server.stream_slots.release()
