@@ -251,7 +251,7 @@ class Store:
             db.execute('UPDATE runs SET state=? WHERE id=?', (state, run_id))
             db.execute("UPDATE tasks SET state=?,version=version+1 WHERE run_id=? AND state IN ('QUEUED','RUNNING')", (state, run_id))
             if artifact:
-                db.execute('INSERT INTO artifacts VALUES(?,?,?,?,?,?,?,?)', (artifact['id'], run_id, attempt['id'], 'text/plain; charset=utf-8', artifact['size'], artifact['sha256'], artifact['storage_ref']))
+                db.execute('INSERT INTO artifacts VALUES(?,?,?,?,?,?,?)', (artifact['id'], run_id, attempt['id'], 'text/plain; charset=utf-8', artifact['size'], artifact['sha256'], artifact['storage_ref']))
             self._event(db, run_id, 'finished')
             return True
 
