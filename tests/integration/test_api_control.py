@@ -75,3 +75,27 @@ class APITests(unittest.TestCase):
         self.assertEqual([x['input']['title'] for x in page['items'] + next_page['items']], ['3', '2', '1', '0'])
         self.assertIsNone(next_page['next_cursor'])
         self.assertEqual(self.server.request('/v1/nonexistent')[0], 404)
+
+    def test_success_report_survives_process_restart_and_lock(self):
+        _, run = self.server.request('/v1/runs', {}, 'report')
+        done = self.server.wait(run['run_id'], {'SUCCEEDED'})
+        path = '/v1/artifacts/' + done['artifacts'][0]['id'] + '/content'
+        content = self.server.request(path)
+        from loopcast.api import Service
+        with self.assertRaises(RuntimeError):
+            Service('127.0.0.1', 0, self.temp.name)
+        self.server.stop(kill=True)
+        self.server.start()
+        self.assertEqual(self.server.request(path), content)
+        self.assertEqual(self.server.request('/v1/runs/' + run['run_id'])[1], done)
+
+    def test_cancel_completion_races_have_one_actual_result(self):
+        for n in range(8):
+            _, run = self.server.request('/v1/runs', {'delay_ms': 0}, 'race' + str(n))
+            current = self.server.wait(run['run_id'], {'RUNNING', 'SUCCEEDED'})
+            code, response = self.server.request('/v1/runs/' + run['run_id'] + '/cancel', {'expected_version': current['state_version']}, 'cancel')
+            self.assertIn(code, (202, 409))
+            done = self.server.wait(run['run_id'], {'SUCCEEDED', 'CANCELLED'})
+            self.assertEqual(done['attempts'][0]['state'], done['state'])
+            self.assertIsNotNone(done['attempts'][0]['ended_at'])
+            self.assertEqual(bool(done['artifacts']), done['state'] == 'SUCCEEDED')

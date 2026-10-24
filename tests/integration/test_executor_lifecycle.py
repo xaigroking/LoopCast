@@ -89,3 +89,18 @@ class ExecutorTests(unittest.TestCase):
         current = reopened.snapshot(run['run_id'])
         self.assertFalse(reopened.finish(run['run_id'], old['token'], 'SUCCEEDED'))
         self.assertEqual(reopened.snapshot(run['run_id']), current)
+
+    def test_readiness_reports_dead_worker(self):
+        from loopcast.api import Service
+        from support import ServerProcess
+        import threading
+        self.worker.close()
+        service = Service('127.0.0.1', 0, self.temp.name)
+        thread = threading.Thread(target=service.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(service.server_close)
+        self.addCleanup(service.shutdown)
+        service.worker.close()
+        client = ServerProcess(self.temp.name)
+        client.url = 'http://127.0.0.1:' + str(service.server_address[1])
+        self.assertEqual(client.request('/healthz'), (503, {'ready': False}))

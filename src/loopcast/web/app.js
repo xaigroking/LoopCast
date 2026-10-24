@@ -9,7 +9,7 @@ let createIdentity = null;
 
 export const runURL = id => `/runs/${encodeURIComponent(id)}`;
 export function accept(snapshot) {
-  if (!snapshot || typeof snapshot.run_id !== 'string' || !Number.isInteger(snapshot.state_version) || !Number.isInteger(snapshot.last_event_id)) return false;
+  if (!snapshot || !(/^[a-f0-9]{32}$/).test(snapshot.run_id) || !Number.isInteger(snapshot.state_version) || !Number.isInteger(snapshot.last_event_id)) return false;
   const previous = entities.get(snapshot.run_id);
   if (previous && (snapshot.state_version < previous.state_version || snapshot.last_event_id < previous.last_event_id)) return false;
   entities.set(snapshot.run_id, snapshot);
@@ -187,6 +187,7 @@ async function loadDetail(id, generation = view) {
   try {
     const snapshot = await request(`/v1/runs/${id}`);
     if (generation !== view) return;
+    if (snapshot.run_id !== id) throw new Error('Response identity did not match this task.');
     accept(snapshot); const run = entities.get(id); renderDetail(run); follow(run, generation);
   } catch (error) {
     if (generation !== view) return;
@@ -217,6 +218,7 @@ async function command(id, action) {
   if (location.pathname === '/') renderList(); else renderDetail(run);
   try {
     const result = await request(`/v1/runs/${id}/${action}`, {method: 'POST', headers: {'Content-Type': 'application/json', 'Idempotency-Key': operation.key}, body: JSON.stringify({expected_version: operation.version})});
+    if (result.run_id !== id) throw new Error('Response identity did not match this task.');
     accept(result); pending.delete(identity);
     if (generation === view) { if (location.pathname === '/') renderList(); else { const current = entities.get(id); renderDetail(current); follow(current, generation); } }
   } catch (error) {
