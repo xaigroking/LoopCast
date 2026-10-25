@@ -18,7 +18,7 @@ function wait(ms: number, signal?: AbortSignal | null) {
   });
 }
 
-export async function requestJSON(path: string, options: RequestInit = {}, policy: RequestPolicy = defaultPolicy) {
+export async function requestJSON(path: string, options: RequestInit = {}, policy: RequestPolicy = defaultPolicy, format: 'json' | 'text' = 'json') {
   const read = ['GET', 'HEAD'].includes((options.method ?? 'GET').toUpperCase());
   const attempts = read ? Math.min(3, Math.max(1, policy.attempts)) : 1;
   const deadline = performance.now() + policy.totalMs;
@@ -36,7 +36,7 @@ export async function requestJSON(path: string, options: RequestInit = {}, polic
         await response.body?.cancel();
       } else {
         // The same deadline covers headers and reading the response body.
-        const data: unknown = await response.json().catch((error: unknown) => {
+        const data: unknown = await (format === 'text' ? response.text() : response.json()).catch((error: unknown) => {
           if (controller.signal.aborted) throw error;
           return null;
         });

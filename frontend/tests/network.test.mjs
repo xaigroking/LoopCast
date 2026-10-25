@@ -9,7 +9,9 @@ async function moduleURL(name) {
   if (urls.has(name)) return urls.get(name);
   const source = await readFile(new URL(`../src/lib/${name}.ts`, import.meta.url), 'utf8');
   let { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } });
-  if (outputText.includes("'./http'")) outputText = outputText.replace("'./http'", JSON.stringify(await moduleURL('http')));
+  for (const dependency of ['http', 'api']) {
+    if (outputText.includes("'./" + dependency + "'")) outputText = outputText.replace("'./" + dependency + "'", JSON.stringify(await moduleURL(dependency)));
+  }
   const url = 'data:text/javascript;base64,' + Buffer.from(outputText).toString('base64');
   urls.set(name, url); return url;
 }
@@ -146,4 +148,32 @@ test('invalid event processing stops instead of entering a reconnect loop', asyn
   sources[0].emit('snapshot', 1);
   assert.equal(states.at(-1), 'requestError'); assert.ok(sources[0].closed);
   await pause(40); assert.equal(sources.length, 1); subscription.close();
+});
+
+test('studio unknown writes retain original identity across hydration and never auto-replay', async (t) => {
+  const { StudioClient } = await load('studio-client');
+  const values = new Map(); const storage = { getItem: (k) => values.get(k) ?? null, setItem: (k,v) => values.set(k,v), removeItem: (k) => values.delete(k) };
+  const original = globalThis.fetch; t.after(() => { globalThis.fetch = original; });
+  const calls = [];
+  globalThis.fetch = async (path, options) => { calls.push({ path, options }); if (calls.length === 1) throw Error('lost response'); return new Response('{"id":"committed"}'); };
+  const first = new StudioClient(); first.hydrate(storage);
+  await assert.rejects(first.write('create', '/v1/studio/projects', { title: 'original' }));
+  assert.equal(calls.length, 1);
+  const second = new StudioClient(); second.hydrate(storage); assert.equal(calls.length, 1);
+  await assert.rejects(second.write('create', '/v1/studio/projects', { title: 'changed' }), /REQUEST_UNRESOLVED/);
+  await second.retry(); assert.equal(calls.length, 2); assert.equal(calls[0].options.headers['Idempotency-Key'], calls[1].options.headers['Idempotency-Key']);
+  assert.equal(calls[0].options.body, calls[1].options.body); assert.equal(second.pending.size, 0);
+});
+
+test('authorization controls never persist sensitive text and a definite rejection clears identity', async (t) => {
+  const { StudioClient } = await load('studio-client'); const values = new Map();
+  const storage = { getItem: (k) => values.get(k) ?? null, setItem: (k,v) => values.set(k,v), removeItem: (k) => values.delete(k) };
+  const original = globalThis.fetch; t.after(() => { globalThis.fetch = original; });
+  const client = new StudioClient(); client.hydrate(storage);
+  globalThis.fetch = async () => { throw Error('transport'); };
+  await assert.rejects(client.write('control','/v1/studio/authorizations/' + 'a'.repeat(32) + '/controls',{ kind:'text',text:'private-input-canary' },'POST',true));
+  assert.ok(!JSON.stringify([...values]).includes('private-input-canary'));
+  const restored = new StudioClient(); restored.hydrate(storage); assert.equal(restored.pending.size,0);
+  globalThis.fetch = async () => new Response('{"error":{"code":"AUTHORIZATION_CLOSED"}}',{ status:409 });
+  await assert.rejects(client.retry(), (e) => e instanceof ApiError); assert.equal(client.pending.size,0);
 });
