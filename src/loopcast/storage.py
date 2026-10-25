@@ -46,6 +46,10 @@ def actions(state):
 def validate_input(value):
     if not isinstance(value, dict) or set(value) - {'mode', 'title', 'scenario', 'delay_ms'}:
         raise Problem('INVALID_INPUT', 'Use mode, title, scenario and delay_ms fields only.', 400)
+    if value.get('mode') == 'mpt':
+        if set(value) - {'mode', 'title'} or not isinstance(value.get('title'), str) or not 1 <= len(value['title'].strip()) <= 120:
+            raise Problem('INVALID_INPUT', 'Provide a generation title of 1–120 characters.', 400)
+        return {'mode': 'mpt', 'title': value['title'].strip()}
     if value.get('mode', 'fixture') != 'fixture':
         raise Problem('CAPABILITY_UNAVAILABLE', 'Only fixture mode is available.', 422)
     title = value.get('title', 'Untitled fixture')
@@ -61,7 +65,8 @@ def validate_input(value):
 
 
 class Store:
-    def __init__(self, directory):
+    def __init__(self, directory, component=None):
+        self.component = component
         self.directory = Path(directory).resolve()
         self.directory.mkdir(parents=True, exist_ok=True)
         self.artifact_dir = self.directory / 'artifacts'
@@ -105,7 +110,14 @@ class Store:
             'attempts': [dict(x) for x in db.execute('SELECT id,number,state,started_at,ended_at,error,evidence FROM attempts WHERE run_id=? ORDER BY number', (run_id,))],
             'artifacts': [dict(x) for x in db.execute('SELECT id,attempt_id,media_type,size,sha256 FROM artifacts WHERE run_id=? ORDER BY rowid', (run_id,))],
             'allowed_actions': actions(run['state']),
+            'component': self._component(db, run_id),
+            'content_id': (dict(db.execute('SELECT id FROM contents WHERE run_id=?', (run_id,)).fetchone() or {}).get('id')),
+            'media': [dict(x) for x in db.execute('SELECT m.* FROM media m JOIN artifacts a ON a.id=m.artifact_id WHERE a.run_id=?', (run_id,))],
         }
+
+    def _component(self, db, run_id):
+        row = db.execute('SELECT c.manifest FROM components c JOIN generation_context g ON c.id=g.component_id WHERE g.run_id=?', (run_id,)).fetchone()
+        return json.loads(row[0]) if row else None
 
     def snapshot(self, run_id):
         with self.transaction() as db:
@@ -144,12 +156,20 @@ class Store:
 
     def create(self, value, key):
         value = validate_input(value)
+        if value['mode'] == 'mpt':
+            if self.component is None:
+                raise Problem('CAPABILITY_UNAVAILABLE', 'Configure an independently installed generator first.', 422)
+            value['component_id'] = digest(self.component)
         with self.transaction(True) as db:
             prior = self._reserve(db, 'create', key, value)
             if prior:
                 return prior, False
             run_id, time = uid(), now()
-            db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?)', (run_id, 'fixture', canonical(value), digest(value), 'QUEUED', 0, time, time))
+            db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?)', (run_id, value['mode'], canonical(value), digest(value), 'QUEUED', 0, time, time))
+            if value['mode'] == 'mpt':
+                db.execute('INSERT OR IGNORE INTO components VALUES(?,?)', (value['component_id'], canonical(self.component)))
+                db.execute('INSERT INTO generation_context VALUES(?,?)', (run_id, value['component_id']))
+                db.execute('INSERT INTO contents VALUES(?,?)', (uid(), run_id))
             for stage in STAGES:
                 db.execute('INSERT INTO tasks VALUES(?,?,?,?,?)', (uid(), run_id, stage, 'QUEUED', 1))
             self._attempt(db, run_id)
@@ -218,11 +238,14 @@ class Store:
                 return False
             # Cancellation is acknowledged only after execution has exited. A completed
             # execution may still win a race with the cancellation request.
-            db.execute('UPDATE attempts SET state=?,ended_at=?,error=?,evidence=? WHERE id=?', (state, now(), error, 'fixture subprocess exited', attempt['id']))
+            db.execute('UPDATE attempts SET state=?,ended_at=?,error=?,evidence=? WHERE id=?', (state, now(), error, 'bounded subprocess exited', attempt['id']))
             db.execute('UPDATE runs SET state=? WHERE id=?', (state, run_id))
             db.execute("UPDATE tasks SET state=?,version=version+1 WHERE run_id=? AND state IN ('QUEUED','RUNNING')", (state, run_id))
             if artifact:
-                db.execute('INSERT INTO artifacts VALUES(?,?,?,?,?,?,?)', (artifact['id'], run_id, attempt['id'], 'text/plain; charset=utf-8', artifact['size'], artifact['sha256'], artifact['storage_ref']))
+                db.execute('INSERT INTO artifacts VALUES(?,?,?,?,?,?,?)', (artifact['id'], run_id, attempt['id'], artifact.get('media_type', 'text/plain; charset=utf-8'), artifact['size'], artifact['sha256'], artifact['storage_ref']))
+                if artifact.get('media'):
+                    content_id = db.execute('SELECT id FROM contents WHERE run_id=?', (run_id,)).fetchone()[0]
+                    db.execute('INSERT INTO media VALUES(?,?,?,?)', (artifact['id'], content_id, None, canonical(artifact['media'])))
             self._event(db, run_id, 'finished')
             return True
 

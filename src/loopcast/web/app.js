@@ -102,7 +102,7 @@ function renderList() {
     const card = el('article', undefined, 'run-card'); card.dataset.runId = run.run_id;
     const main = el('div', undefined, 'run-main');
     const name = link(run.input.title, runURL(run.run_id)); name.className = 'run-title';
-    main.append(name, el('div', `Fixture · Attempt ${run.attempts.length} · v${run.state_version}`, 'run-meta'));
+    main.append(name, el('div', `${run.mode === 'fixture' ? 'Fixture' : 'MPT · live unverified'} · Attempt ${run.attempts.length} · v${run.state_version}`, 'run-meta'));
     const direct = actionButtons(run); direct.classList.add('direct-action');
     const menu = el('details'); menu.append(el('summary', '•••'), actionButtons(run, true));
     const controls = el('div', undefined, 'row-actions'); controls.append(direct, menu);
@@ -114,7 +114,7 @@ function renderList() {
 function panel(title) { const node = el('section', undefined, 'panel'); node.append(el('h2', title)); return node; }
 function renderDetail(run) {
   const back = link('← All tasks', '/'); back.className = 'back';
-  const title = heading('FIXTURE / TASK DETAIL', run.input.title, `Attempt ${run.attempts.length} · State version ${run.state_version}`);
+  const title = heading(run.mode === 'fixture' ? 'FIXTURE / TASK DETAIL' : 'GENERATION / TASK DETAIL', run.input.title, `Attempt ${run.attempts.length} · State version ${run.state_version}`);
   title.classList.add('detail-title');
   const controls = el('div', undefined, 'row-actions'); controls.append(status(run.state), actionButtons(run)); title.append(controls);
   const grid = el('div', undefined, 'detail-grid');
@@ -135,11 +135,13 @@ function renderDetail(run) {
   }
   left.append(history);
   const info = panel('Run information');
-  for (const [key, value] of [['Run identity', run.run_id], ['Mode', 'Fixture only'], ['Scenario', run.input.scenario], ['Created', new Date(run.created_at).toLocaleString()], ['Last activity', new Date(run.updated_at).toLocaleString()], ['Event cursor', String(run.last_event_id)]]) info.append(el('div', key, 'label'), el('div', value, 'value'));
+  for (const [key, value] of [['Run identity', run.run_id], ['Mode', run.mode === 'fixture' ? 'Fixture only' : 'MPT · contract tested, live unverified'], ['Scenario', run.input.scenario], ['Created', new Date(run.created_at).toLocaleString()], ['Last activity', new Date(run.updated_at).toLocaleString()], ['Event cursor', String(run.last_event_id)]]) info.append(el('div', key, 'label'), el('div', value, 'value'));
   right.append(info);
-  const reports = panel('Reports');
+  const reports = panel(run.mode === 'fixture' ? 'Reports' : 'Generated media');
+  if (run.component) reports.append(el('p', `Component ${run.component.revision} · ${run.component.verification} · real operation unverified`));
   for (const artifact of run.artifacts) {
-    const node = link(`↗ Open fixture report · ${artifact.size} bytes`, `/v1/artifacts/${encodeURIComponent(artifact.id)}/content`);
+    const node = link(`${artifact.media_type === 'video/mp4' ? '↗ Open video' : '↗ Open fixture report'} · ${artifact.size} bytes`, `/v1/artifacts/${encodeURIComponent(artifact.id)}/content`);
+    if (artifact.media_type === 'video/mp4') { const video = el('video'); video.controls = true; video.preload = 'metadata'; video.src = node.href; video.style.width = '100%'; reports.append(video); }
     node.className = 'report'; node.target = '_blank'; node.rel = 'noopener'; reports.append(node, el('small', `SHA256 ${artifact.sha256}`));
   }
   if (!run.artifacts.length) reports.append(el('p', 'No report is ready. A successful fixture creates a text report here.'));
@@ -243,7 +245,7 @@ document.querySelector('#create-form').addEventListener('submit', async event =>
   event.preventDefault();
   const form = event.currentTarget, submit = form.querySelector('button[type=submit]');
   if (submit.disabled) return;
-  const body = {mode: 'fixture', title: form.elements.title.value, scenario: form.elements.scenario.value, delay_ms: Number(form.elements.delay_ms.value)};
+  const body = form.elements.mode.value === 'mpt' ? {mode: 'mpt', title: form.elements.title.value} : {mode: 'fixture', title: form.elements.title.value, scenario: form.elements.scenario.value, delay_ms: Number(form.elements.delay_ms.value)};
   const signature = JSON.stringify(body);
   if (createIdentity?.signature !== signature) createIdentity = {signature, key: crypto.randomUUID()};
   submit.disabled = true; submit.textContent = 'Creating…'; document.querySelector('#form-error').textContent = '';
@@ -255,3 +257,5 @@ document.querySelector('#create-form').addEventListener('submit', async event =>
   finally { submit.disabled = false; submit.textContent = 'Create fixture →'; }
 });
 route();
+
+request('/v1/capabilities').then(caps => { const option = dialog.querySelector('option[value=mpt]'); option.disabled = !caps.video_generation; option.textContent = caps.video_generation ? 'MPT generation · real operation unverified' : 'Generation · configure runner first'; }).catch(() => {});

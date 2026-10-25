@@ -18,8 +18,10 @@ class Service(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 128
 
-    def __init__(self, host, port, directory):
-        self.store = Store(directory)
+    def __init__(self, host, port, directory, generator_settings=None):
+        from .generation import Generator
+        self.generator = Generator(generator_settings) if generator_settings is not None else None
+        self.store = Store(directory, self.generator.manifest if self.generator else None)
         self.lock = (self.store.directory / 'service.lock').open('a')
         try:
             fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -30,7 +32,7 @@ class Service(ThreadingHTTPServer):
         self.stream_slots = threading.BoundedSemaphore(16)
         self.stream_lock = threading.Lock()
         self.stream_count = 0
-        self.worker = Worker(self.store)
+        self.worker = Worker(self.store, generator=self.generator)
         try:
             super().__init__((host, port), Handler)
             self.worker.start()
@@ -126,7 +128,7 @@ class Handler(BaseHTTPRequestHandler):
             ready = not self.server.stopping.is_set() and self.server.worker.thread.is_alive()
             return self.send_json(200 if ready else 503, {'ready': ready})
         if not write and path == '/v1/capabilities':
-            return self.send_json(200, {'mode': 'fixture', 'video_generation': False, 'publishing': False, 'single_user': True})
+            return self.send_json(200, {'mode': 'fixture', 'video_generation': self.server.generator is not None, 'publishing': False, 'single_user': True, 'generation_verification': 'contract_tested_live_unverified' if self.server.generator else 'unavailable', 'real_platform_sending': False})
         if path == '/v1/runs':
             if write:
                 snapshot, created = store.create(self._body(), self.headers.get('Idempotency-Key'))

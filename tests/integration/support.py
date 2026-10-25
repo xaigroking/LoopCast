@@ -10,12 +10,13 @@ import urllib.error
 
 
 class ServerProcess:
-    def __init__(self, directory):
+    def __init__(self, directory, generator_config=None):
+        self.generator_config = generator_config
         self.directory = directory
         self.process = None
 
     def start(self):
-        self.process = subprocess.Popen([sys.executable, '-I', '-m', 'loopcast', 'serve', '--port', '0', '--data-dir', str(self.directory)], cwd='/tmp', stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.process = subprocess.Popen([sys.executable, '-I', '-m', 'loopcast', 'serve', '--port', '0', '--data-dir', str(self.directory)] + (['--generator-config',str(self.generator_config)] if self.generator_config else []), cwd='/tmp', stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         selector = selectors.DefaultSelector()
         selector.register(self.process.stdout, selectors.EVENT_READ)
         ready = selector.select(10)
