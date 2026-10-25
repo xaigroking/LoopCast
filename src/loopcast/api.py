@@ -33,9 +33,12 @@ class Service(ThreadingHTTPServer):
         self.stream_lock = threading.Lock()
         self.stream_count = 0
         self.worker = Worker(self.store, generator=self.generator)
+        self.publisher = None
         try:
             super().__init__((host, port), Handler)
             self.worker.start()
+            from .publisher import Publisher
+            self.publisher = Publisher(self.store)
         except BaseException:
             self.lock.close()
             raise
@@ -44,6 +47,7 @@ class Service(ThreadingHTTPServer):
         self.stopping.set()
         try:
             self.worker.close()
+            if self.publisher: self.publisher.close()
         finally:
             super().server_close()
             self.lock.close()

@@ -64,7 +64,10 @@ def validate_input(value):
     return {'mode': 'fixture', 'title': title.strip(), 'scenario': scenario, 'delay_ms': delay}
 
 
-class Store:
+from .ledger import PublicationMethods
+
+
+class Store(PublicationMethods):
     def __init__(self, directory, component=None):
         self.component = component
         self.directory = Path(directory).resolve()
@@ -110,6 +113,7 @@ class Store:
             'attempts': [dict(x) for x in db.execute('SELECT id,number,state,started_at,ended_at,error,evidence FROM attempts WHERE run_id=? ORDER BY number', (run_id,))],
             'artifacts': [dict(x) for x in db.execute('SELECT id,attempt_id,media_type,size,sha256 FROM artifacts WHERE run_id=? ORDER BY rowid', (run_id,))],
             'allowed_actions': actions(run['state']),
+            'publications': self._publications(db, run_id),
             'component': self._component(db, run_id),
             'content_id': (dict(db.execute('SELECT id FROM contents WHERE run_id=?', (run_id,)).fetchone() or {}).get('id')),
             'media': [dict(x) for x in db.execute('SELECT m.* FROM media m JOIN artifacts a ON a.id=m.artifact_id WHERE a.run_id=?', (run_id,))],
