@@ -208,6 +208,7 @@ export function WorkspacePage({ kind, runId }: { kind: Kind; runId?: string }) {
       });
       workspace.accept(result);
       workspace.putPending(identity, null);
+      workspace.refresh();
     } catch (error) {
       if (error instanceof ApiError) {
         workspace.putPending(identity, null);

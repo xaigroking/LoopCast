@@ -58,12 +58,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [refreshSignal, setRefreshSignal] = useState(0);
   const [snapshots, setSnapshots] = useState<Map<string, RunSnapshot>>(new Map());
   const snapshotsRef = useRef(snapshots);
-  snapshotsRef.current = snapshots;
   const [listing, setListing] = useState<string[]>([]);
   const [pageCursor, setPageCursor] = useState<number | null>(null);
   const [pending, setPending] = useState<Map<string, PendingOperation>>(new Map());
   const pendingRef = useRef(pending);
-  pendingRef.current = pending;
   const [drafts, setDrafts] = useState<Map<string, string | boolean>>(new Map());
   const [noticeCode, setNoticeCode] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
