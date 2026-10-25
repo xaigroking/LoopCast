@@ -220,7 +220,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.wfile.write(data)
         if not write and path in ('/app.js', '/requests.js', '/brand.js', '/preferences.js', '/localization.js', '/i18next.js', '/language-detector.js', '/style.css'):
             return self.asset(path[1:], 'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8')
-        if not write and not path.startswith('/v1/') and '.' not in path:
+        if not write and path != '/v1' and not path.startswith('/v1/') and '.' not in path:
             return self.asset('index.html', 'text/html; charset=utf-8')
         raise Problem('NOT_FOUND', 'This address does not exist.', 404)
 
