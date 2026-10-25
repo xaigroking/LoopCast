@@ -13,6 +13,7 @@ from .storage import Store, Problem, uid, TERMINAL
 from .worker import Worker
 
 ID = r'[a-f0-9]{32}'
+LANGUAGES = frozenset(item['code'] for item in json.loads(files('loopcast').joinpath('web', 'locales', 'registry.json').read_text()))
 
 
 class Service(ThreadingHTTPServer):
@@ -192,9 +193,14 @@ class Handler(BaseHTTPRequestHandler):
             info, content = store.artifact(match[1])
             self._headers(200, info['media_type'], len(content))
             return self.wfile.write(content)
+        language_asset = re.fullmatch(r'/locales/([A-Za-z0-9-]+)\.json', path)
+        if not write and language_asset and language_asset[1] in (LANGUAGES | {'registry'}):
+            return self.asset(path[1:], 'application/json; charset=utf-8')
+        if not write and path == '/settings':
+            return self.asset('index.html', 'text/html; charset=utf-8')
         if not write and (path == '/' or re.fullmatch('/runs/' + ID, path)):
             return self.asset('index.html', 'text/html; charset=utf-8')
-        if not write and path in ('/app.js', '/requests.js', '/style.css'):
+        if not write and path in ('/app.js', '/requests.js', '/preferences.js', '/localization.js', '/i18next.js', '/language-detector.js', '/style.css'):
             return self.asset(path[1:], 'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8')
         if not write and not path.startswith('/v1/') and '.' not in path:
             return self.asset('index.html', 'text/html; charset=utf-8')

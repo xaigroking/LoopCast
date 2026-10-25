@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+python scripts/check-ui-assets.py
 python -m build --no-isolation
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
