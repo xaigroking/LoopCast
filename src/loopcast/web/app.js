@@ -2,6 +2,7 @@ const app = document.querySelector('#app');
 const sync = document.querySelector('#sync');
 const dialog = document.querySelector('#create-dialog');
 const terminal = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED']);
+const settled = run => terminal.has(run.state) && !(run.publications || []).some(p => ['PREPARED', 'SENDING'].includes(p.state));
 const entities = new Map();
 const pending = new Map();
 let view = 0, subscription = null, timer = null, pageCursor = null, listing = [], paged = false;
@@ -84,6 +85,7 @@ function heading(eyebrow, title, subtitle, withCreate = false) {
   return node;
 }
 function renderList() {
+  document.querySelector('.badge').textContent = 'FIXTURE MODE';
   const runs = listing.map(id => entities.get(id)).filter(Boolean);
   app.replaceChildren(heading('WORKSPACE / TASKS', 'Your task console', 'A clear view of every local fixture run.', true));
   const stats = el('div', undefined, 'stats');
@@ -102,7 +104,7 @@ function renderList() {
     const card = el('article', undefined, 'run-card'); card.dataset.runId = run.run_id;
     const main = el('div', undefined, 'run-main');
     const name = link(run.input.title, runURL(run.run_id)); name.className = 'run-title';
-    main.append(name, el('div', `Fixture · Attempt ${run.attempts.length} · v${run.state_version}`, 'run-meta'));
+    main.append(name, el('div', `${run.mode === 'fixture' ? 'Fixture' : 'MPT · live unverified'} · Attempt ${run.attempts.length} · v${run.state_version}`, 'run-meta'));
     const direct = actionButtons(run); direct.classList.add('direct-action');
     const menu = el('details'); menu.append(el('summary', '•••'), actionButtons(run, true));
     const controls = el('div', undefined, 'row-actions'); controls.append(direct, menu);
@@ -113,8 +115,9 @@ function renderList() {
 }
 function panel(title) { const node = el('section', undefined, 'panel'); node.append(el('h2', title)); return node; }
 function renderDetail(run) {
+  document.querySelector('.badge').textContent = run.mode === 'fixture' ? 'FIXTURE MODE' : 'GENERATION · LIVE UNVERIFIED';
   const back = link('← All tasks', '/'); back.className = 'back';
-  const title = heading('FIXTURE / TASK DETAIL', run.input.title, `Attempt ${run.attempts.length} · State version ${run.state_version}`);
+  const title = heading(run.mode === 'fixture' ? 'FIXTURE / TASK DETAIL' : 'GENERATION / TASK DETAIL', run.input.title, `Attempt ${run.attempts.length} · State version ${run.state_version}`);
   title.classList.add('detail-title');
   const controls = el('div', undefined, 'row-actions'); controls.append(status(run.state), actionButtons(run)); title.append(controls);
   const grid = el('div', undefined, 'detail-grid');
@@ -133,13 +136,15 @@ function renderDetail(run) {
     if (attempt.evidence) node.append(el('small', attempt.evidence));
     history.append(node);
   }
-  left.append(history);
+  left.append(history, publicationPanel(run));
   const info = panel('Run information');
-  for (const [key, value] of [['Run identity', run.run_id], ['Mode', 'Fixture only'], ['Scenario', run.input.scenario], ['Created', new Date(run.created_at).toLocaleString()], ['Last activity', new Date(run.updated_at).toLocaleString()], ['Event cursor', String(run.last_event_id)]]) info.append(el('div', key, 'label'), el('div', value, 'value'));
+  for (const [key, value] of [['Run identity', run.run_id], ['Mode', run.mode === 'fixture' ? 'Fixture only' : 'MPT · contract tested, live unverified'], ['Scenario', run.input.scenario], ['Created', new Date(run.created_at).toLocaleString()], ['Last activity', new Date(run.updated_at).toLocaleString()], ['Event cursor', String(run.last_event_id)]]) info.append(el('div', key, 'label'), el('div', value, 'value'));
   right.append(info);
-  const reports = panel('Reports');
+  const reports = panel(run.mode === 'fixture' ? 'Reports' : 'Generated media');
+  if (run.component) reports.append(el('p', `Component ${run.component.revision} · ${run.component.verification} · real operation unverified`));
   for (const artifact of run.artifacts) {
-    const node = link(`↗ Open fixture report · ${artifact.size} bytes`, `/v1/artifacts/${encodeURIComponent(artifact.id)}/content`);
+    const node = link(`${artifact.media_type === 'video/mp4' ? '↗ Open video' : '↗ Open fixture report'} · ${artifact.size} bytes`, `/v1/artifacts/${encodeURIComponent(artifact.id)}/content`);
+    if (artifact.media_type === 'video/mp4') { const video = el('video'); video.controls = true; video.preload = 'metadata'; video.src = node.href; video.style.width = '100%'; reports.append(video); }
     node.className = 'report'; node.target = '_blank'; node.rel = 'noopener'; reports.append(node, el('small', `SHA256 ${artifact.sha256}`));
   }
   if (!run.artifacts.length) reports.append(el('p', 'No report is ready. A successful fixture creates a text report here.'));
@@ -161,7 +166,7 @@ async function loadList(more = false) {
 }
 function follow(run, generation) {
   clean();
-  if (terminal.has(run.state)) { setSync('Settled · refresh to sync'); return; }
+  if (settled(run)) { setSync('Settled · refresh to sync'); return; }
   if (!navigator.onLine) { setSync('Offline · stale'); return; }
   const source = new EventSource(`/v1/runs/${run.run_id}/events?after=${run.last_event_id}`);
   subscription = source;
@@ -173,7 +178,7 @@ function follow(run, generation) {
     if (snapshot.run_id !== run.run_id) return;
     if (event.lastEventId && Number(event.lastEventId) !== snapshot.last_event_id) return;
     if (accept(snapshot)) renderDetail(entities.get(run.run_id));
-    if (terminal.has(entities.get(run.run_id).state)) { clean(); setSync('Settled · refresh to sync'); }
+    if (settled(entities.get(run.run_id))) { clean(); setSync('Settled · refresh to sync'); }
   };
   source.addEventListener('snapshot', receive);
   source.addEventListener('complete', receive);
@@ -243,15 +248,73 @@ document.querySelector('#create-form').addEventListener('submit', async event =>
   event.preventDefault();
   const form = event.currentTarget, submit = form.querySelector('button[type=submit]');
   if (submit.disabled) return;
-  const body = {mode: 'fixture', title: form.elements.title.value, scenario: form.elements.scenario.value, delay_ms: Number(form.elements.delay_ms.value)};
+  const body = form.elements.mode.value === 'mpt' ? {mode: 'mpt', title: form.elements.title.value} : {mode: 'fixture', title: form.elements.title.value, scenario: form.elements.scenario.value, delay_ms: Number(form.elements.delay_ms.value)};
   const signature = JSON.stringify(body);
   if (createIdentity?.signature !== signature) createIdentity = {signature, key: crypto.randomUUID()};
   submit.disabled = true; submit.textContent = 'Creating…'; document.querySelector('#form-error').textContent = '';
   try {
     const result = await request('/v1/runs', {method: 'POST', headers: {'Content-Type': 'application/json', 'Idempotency-Key': createIdentity.key}, body: signature});
-    accept(result); createIdentity = null; dialog.close(); form.reset();
+    accept(result); createIdentity = null; dialog.close(); form.reset(); form.elements.mode.dispatchEvent(new Event('change'));
     history.pushState(null, '', runURL(result.run_id)); route();
   } catch (error) { document.querySelector('#form-error').textContent = error.message + ' You can retry safely.'; }
-  finally { submit.disabled = false; submit.textContent = 'Create fixture →'; }
+  finally { submit.disabled = false; submit.textContent = form.elements.mode.value === 'mpt' ? 'Generate video →' : 'Create fixture →'; }
 });
 route();
+
+request('/v1/capabilities').then(caps => { const option = dialog.querySelector('option[value=mpt]'); option.disabled = !caps.video_generation; option.textContent = caps.video_generation ? 'MPT generation · real operation unverified' : 'Generation · configure runner first'; }).catch(() => {});
+
+function publicationPanel(run) {
+  const node = panel('Publication simulator');
+  node.append(el('p', 'Controlled local receipts only. Real platform sending is unavailable.'));
+  const accountLabel = el('label', 'Simulator account');
+  const account = el('input'); account.value = 'demo'; account.maxLength = 64; accountLabel.append(account);
+  const create = button('Add simulated target', () => publicationCommand(run, null, null, {platform: 'simulator', account: account.value}));
+  create.disabled = !run.allowed_actions.add_simulated_target?.enabled;
+  node.append(accountLabel, create);
+  for (const intent of run.publications || []) {
+    const target = el('div', undefined, 'attempt'); target.dataset.intentId = intent.id;
+    target.append(el('strong', `${intent.platform} / ${intent.account} · simulated `), status(intent.state));
+    const label = el('label', 'Simulator outcome');
+    const scenario = el('select'); scenario.setAttribute('aria-label', 'Simulator outcome');
+    for (const [value, text] of [['success','Confirmed simulator receipt'], ['submitted','Submitted without receipt'], ['lost_response','Receipt saved, response lost'], ['not_sent','Rejected before sending'], ['slow','Interrupted local sender']]) {
+      const option = el('option', text); option.value = value; scenario.append(option);
+    }
+    label.append(scenario); target.append(label);
+    for (const [action, text] of [['dispatch','Dispatch simulation'], ['verify','Check simulator receipt']]) {
+      const actionButton = button(text, () => publicationCommand(run, intent.id, action, action === 'dispatch' ? {scenario: scenario.value} : {}));
+      actionButton.disabled = !intent.allowed_actions[action].enabled || pending.get(`${intent.id}:${action}`)?.busy === true;
+      actionButton.title = intent.allowed_actions[action].reason_code; target.append(actionButton);
+    }
+    if (intent.state === 'UNKNOWN') target.append(el('p', 'Result unknown. Another send is blocked until evidence resolves the previous publisher.'));
+    for (const attempt of intent.attempts) target.append(el('small', `Dispatch ${attempt.id}: ${attempt.state}`));
+    for (const receipt of intent.receipts) target.append(el('p', `${receipt.source} · ${receipt.outcome} · ${receipt.work_id || 'no work identity'} · ${receipt.evidence}`));
+    node.append(target);
+  }
+  return node;
+}
+async function publicationCommand(run, intentId, action, extra) {
+  const identity = `${intentId || run.run_id}:${action || 'target'}`;
+  let operation = pending.get(identity);
+  if (operation?.busy) return;
+  const signature = JSON.stringify(extra);
+  if (!operation || operation.signature !== signature) operation = {key: crypto.randomUUID(), version: run.state_version, signature};
+  operation.busy = true; pending.set(identity, operation);
+  const path = `/v1/runs/${run.run_id}/publications` + (intentId ? `/${intentId}/${action}` : '');
+  try {
+    const result = await request(path, {method: 'POST', headers: {'Content-Type':'application/json','Idempotency-Key':operation.key}, body:JSON.stringify({...extra, expected_version:operation.version})});
+    accept(result); pending.delete(identity);
+    if (location.pathname === runURL(run.run_id)) { renderDetail(entities.get(run.run_id)); follow(entities.get(run.run_id), view); }
+  } catch (error) {
+    if (error.status) pending.delete(identity); else operation.busy = false;
+    notice(error.message); if (location.pathname === runURL(run.run_id)) loadDetail(run.run_id);
+  }
+}
+
+dialog.querySelector('select[name=mode]').addEventListener('change', event => {
+  const generation = event.target.value === 'mpt';
+  dialog.querySelector('h2').textContent = generation ? 'Generate a video.' : 'Give your workflow a test run.';
+  dialog.querySelector('.eyebrow').textContent = generation ? 'ISOLATED GENERATION' : 'NEW FIXTURE';
+  dialog.querySelector('form > p').textContent = generation ? 'Uses your configured local MPT environment and generation provider. Real platform sending is unavailable; real operation remains unverified.' : 'Run fixed local stages and generate a real text report. No models or publishing services are called.';
+  for (const name of ['scenario', 'delay_ms']) dialog.querySelector(`[name=${name}]`).closest('label').hidden = generation;
+  dialog.querySelector('button[type=submit]').textContent = generation ? 'Generate video →' : 'Create fixture →';
+});

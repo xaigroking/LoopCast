@@ -8,11 +8,12 @@ import sys
 import threading
 import time
 
-from .storage import STAGES, uid
+from .storage import STAGES, uid, digest
 
 
 class Worker:
-    def __init__(self, store, timeout=8):
+    def __init__(self, store, timeout=8, generator=None):
+        self.generator = generator
         self.store, self.timeout = store, timeout
         self.stop_event = threading.Event()
         self.wake = threading.Event()
@@ -46,6 +47,8 @@ class Worker:
                 self.store.finish(attempt['run_id'], attempt['token'], 'FAILED', 'EXECUTOR_ERROR')
 
     def _execute(self, attempt):
+        if attempt['input']['mode'] == 'mpt':
+            return self._generate(attempt)
         run_id, token = attempt['run_id'], attempt['token']
         deadline = time.monotonic() + self.timeout
         output = b''
@@ -105,3 +108,41 @@ class Worker:
         metadata = {'id': artifact_id, 'size': len(output), 'sha256': hashlib.sha256(output).hexdigest(), 'storage_ref': path.name}
         if not self.store.finish(run_id, token, 'SUCCEEDED', artifact=metadata):
             path.unlink(missing_ok=True)
+
+    def _generate(self, attempt):
+        from .runner import RunnerError
+        import shutil
+        run_id, token = attempt['run_id'], attempt['token']
+        if self.generator is None or attempt['input']['component_id'] != digest(self.generator.manifest):
+            self.store.finish(run_id, token, 'FAILED', 'COMPONENT_UNAVAILABLE')
+            return
+        work = self.store.directory / 'work' / attempt['id']
+        artifact_path = None
+        def cancelled():
+            return self.stop_event.is_set() or self.store.snapshot(run_id)['state'] == 'CANCEL_REQUESTED'
+        try:
+            self.store.stage(run_id, token, 'prepare', 'RUNNING')
+            self.store.stage(run_id, token, 'prepare', 'SUCCEEDED')
+            self.store.stage(run_id, token, 'execute', 'RUNNING')
+            source, media = self.generator.generate(attempt['input'], work, cancelled)
+            self.store.stage(run_id, token, 'execute', 'SUCCEEDED')
+            self.store.stage(run_id, token, 'report', 'RUNNING')
+            identity = uid()
+            artifact_path = self.store.artifact_dir / (identity + '.mp4')
+            with source.open('rb') as origin, artifact_path.open('xb') as target:
+                shutil.copyfileobj(origin, target)
+                target.flush()
+                os.fsync(target.fileno())
+            content = artifact_path.read_bytes()
+            metadata = {'id': identity, 'size': len(content), 'sha256': hashlib.sha256(content).hexdigest(),
+                        'storage_ref': artifact_path.name, 'media_type': 'video/mp4', 'media': media}
+            self.store.stage(run_id, token, 'report', 'SUCCEEDED')
+            if self.store.finish(run_id, token, 'SUCCEEDED', artifact=metadata):
+                artifact_path = None
+        except RunnerError as error:
+            stopped = self.stop_event.is_set()
+            self.store.finish(run_id, token, 'CANCELLED' if error.code == 'CANCELLED' and not stopped else 'FAILED',
+                              None if error.code == 'CANCELLED' and not stopped else 'INTERRUPTED' if stopped else error.code)
+        finally:
+            if artifact_path: artifact_path.unlink(missing_ok=True)
+            shutil.rmtree(work, ignore_errors=True)
