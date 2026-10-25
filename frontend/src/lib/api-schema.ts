@@ -402,7 +402,7 @@ export interface components {
             /** Expected Version */
             expected_version: number;
             /** Platform */
-            platform: string;
+            platform: string | number | boolean | null;
         };
         /** PublicationDispatch */
         PublicationDispatch: {
