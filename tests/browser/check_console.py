@@ -183,7 +183,7 @@ async def main():
         first, second = await context.new_page(), await context.new_page()
         await first.goto(BASE + "/runs/" + conflict_seed["run_id"])
         await second.goto(BASE + "/runs/" + conflict_seed["run_id"])
-        await first.route("**/events?*", lambda route: route.abort())
+        # Keep the second view stale while the first follows its live retry.
         await second.route("**/events?*", lambda route: route.abort())
         await first.get_by_role("button", name="Retry", exact=True).click()
         await expect(first.locator('[data-state="SUCCEEDED"]').first).to_be_visible(timeout=10000)

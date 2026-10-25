@@ -171,7 +171,7 @@ export function WorkspacePage({ kind, runId }: { kind: Kind; runId?: string }) {
       if (result.run_id !== id) throw new ApiError(500, 'INTERNAL_ERROR');
       workspace.accept(result);
       workspace.putPending(identity, null);
-      if (kind === 'list') workspace.refresh();
+      workspace.refresh();
     } catch (error) {
       if (error instanceof ApiError) {
         workspace.putPending(identity, null);
