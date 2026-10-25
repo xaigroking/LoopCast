@@ -168,6 +168,7 @@ async def main():
         await page.get_by_role("button", name="Create fixture →").click()
         await page.wait_for_url("**/runs/*")
         await expect(page.locator('[data-state="RUNNING"]').first).to_be_visible(timeout=10000)
+        await expect(page.locator('.stage').nth(1).locator('[data-state="RUNNING"]')).to_be_visible(timeout=10000)
         await page.get_by_role("button", name="Cancel", exact=True).click()
         await expect(page.locator('[data-state="CANCELLED"]').first).to_be_visible(timeout=10000)
 
