@@ -9,6 +9,7 @@ import uuid
 from .contracts import manifest
 from .runner import run, RunnerError
 from .diagnostics import child_context, log_event
+from .network import proxy_environment
 
 # Check installed files against the exact wheel before loading third-party code.
 VERIFY = r'''
@@ -53,7 +54,7 @@ def config_text(path):
 class Generator:
     def __init__(self, settings):
         required = {'manifest', 'python', 'wheel', 'ffprobe', 'ffprobe_sha256'}
-        if not isinstance(settings, dict) or set(settings) - (required | {'config_ref', 'timeout'}) or not required <= set(settings):
+        if not isinstance(settings, dict) or set(settings) - (required | {'config_ref', 'timeout', 'voices', 'network'}) or not required <= set(settings):
             raise ValueError('Invalid generator configuration')
         self.manifest = manifest(settings['manifest'])
         self.python = Path(settings['python']).resolve(strict=True)
@@ -65,7 +66,13 @@ class Generator:
             raise ValueError('Media probe digest mismatch')
         self.probe_hash = settings['ffprobe_sha256']
         self.config_ref = settings.get('config_ref')
-        config_text(self.config_ref)  # Validate without exposing secrets or storing them in state.
+        self.network = proxy_environment(settings.get('network'))
+        self.voices = settings.get('voices', ['no-voice', 'en-US-AriaNeural-Female', 'zh-CN-XiaoxiaoNeural-Female'])
+        if not isinstance(self.voices, list) or not self.voices or not all(isinstance(v, str) and 1 <= len(v) <= 100 for v in self.voices):
+            raise ValueError('Invalid voice allowlist')
+        provider = tomllib.loads(config_text(self.config_ref)).get('app', {})
+        self.sources = ['local'] + [name for name, key in [('pexels', 'pexels_api_keys'), ('pixabay', 'pixabay_api_keys')] if provider.get(key)]
+        self.script_generation = bool(provider.get('openai_api_key') or provider.get('azure_api_key'))
         self.timeout = settings.get('timeout', 300)
         if type(self.timeout) not in (int, float) or not 1 <= self.timeout <= 3600:
             raise ValueError('Invalid execution deadline')
@@ -106,7 +113,7 @@ class Generator:
             task_id = str(uuid.uuid4())
             argv = [self.python, '-I', '-c', 'from app.launcher import main; raise SystemExit(main())',
                     'cli', '--video-subject=' + value['title'], '--task-id', task_id]
-            raw = run(argv, work, self.environment(work), self.timeout, cancelled)
+            raw = run(argv, work, self.environment(work) | self.network, self.timeout, cancelled)
             try:
                 result = json.loads(raw)
                 videos = result['result']['videos']
