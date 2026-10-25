@@ -103,6 +103,8 @@ async def main():
             await page.goto(BASE+'/settings')
             await page.locator('#language-select').select_option(language['code'])
             await expect(page.locator('html')).to_have_attribute('lang',language['code'])
+            if language['code'] in {'ar','he'}:
+                await expect(page.get_by_role('button',name='Run configuration diagnostics',exact=True)).to_be_visible()
             for path in ['/create','/library','/accounts','/publish',project_url.removeprefix(BASE)]:
                 await page.goto(BASE+path)
                 await expect(page.locator('main h1')).to_be_visible()
