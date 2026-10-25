@@ -12,9 +12,11 @@ from .domain import STAGES, TERMINAL, uid, now, canonical, digest, Problem, acti
 
 from .ledger import PublicationMethods
 from .studio_storage import StudioMethods
+from .account_storage import AccountMethods
+from .release_storage import ReleaseMethods
 
 
-class Store(PublicationMethods, StudioMethods):
+class Store(PublicationMethods, StudioMethods, AccountMethods, ReleaseMethods):
     def __init__(self, directory, component=None):
         self.component = component
         self.directory = Path(directory).resolve()

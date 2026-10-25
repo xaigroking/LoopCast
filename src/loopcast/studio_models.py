@@ -10,7 +10,7 @@ Number = StrictInt | StrictFloat
 
 
 class Model(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True)
+    model_config = ConfigDict(extra='forbid', strict=True, json_schema_serialization_defaults_required=True)
 
 
 class Scene(Model):
@@ -27,6 +27,7 @@ class CreationSettings(Model):
     aspect: Literal['9:16', '16:9', '1:1'] = '9:16'
     source: Literal['local', 'pexels', 'pixabay'] = 'local'
     material_ids: Annotated[list[Id], Field(max_length=30)] = Field(default_factory=list)
+    parent_video_id: Id | None = None
     audio_id: Id | None = None
     music_id: Id | None = None
     music_volume: Annotated[Number, Field(ge=0, le=1)] = 0.2
@@ -68,6 +69,8 @@ class Generation(Model):
     run_id: Id
     stage: str
     input_digest: str
+    component_revision: str
+    component_sha256: str
     state: str
     asset_ids: list[Id]
     created_at: str
@@ -112,6 +115,9 @@ class Asset(Model):
     family_id: Id
     parent_id: Id | None
     origin: Literal['import', 'generation']
+    source: str
+    generation_id: Id | None
+    attempt_id: Id | None
     metadata: MediaMetadata
     created_at: str
 
@@ -132,6 +138,7 @@ class PlatformCapability(Model):
     thumbnail: bool
     title_limit: int
     requires_category: bool
+    visibility_options: list[Literal['public', 'unlisted', 'private']]
 
 
 class StudioCapabilities(Model):
@@ -141,6 +148,8 @@ class StudioCapabilities(Model):
     evidence_mode: EvidenceMode
     platforms: list[PlatformCapability]
     voices: list[str]
+    sources: list[Literal['local', 'pexels', 'pixabay']]
+    script_generation: bool
 
 
 class Account(Model):
@@ -170,6 +179,10 @@ class AuthorizationCreate(Model):
     method: Literal['browser', 'qr'] = 'browser'
 
 
+class AuthorizationCancel(Model):
+    pass
+
+
 class Authorization(Model):
     id: Id
     platform: Platform
@@ -191,6 +204,7 @@ class Interaction(Model):
 class PlatformFields(Model):
     category: Annotated[StrictInt, Field(ge=1, le=10000)] | None = None
     visibility: Literal['public', 'unlisted', 'private'] = 'public'
+    declaration: Annotated[StrictStr, Field(min_length=1, max_length=80)] | None = None
 
 
 class ReleaseTargetInput(Model):
@@ -252,6 +266,9 @@ class ReleaseTarget(Model):
     evidence_mode: EvidenceMode
     can_dispatch: bool
     can_verify: bool
+    can_cancel: bool
+    fields: PlatformFields
+    asset_sha256: str
     attempts: list[ReleaseAttempt]
     receipts: list[ReleaseReceipt]
 

@@ -10,6 +10,9 @@ def validate_draft(draft):
         raise Problem('INVALID_INPUT', 'Use unique scenes and a duration of at most one hour.', 400)
     if scenes and any(not scene['narration'].strip() for scene in scenes):
         raise Problem('INVALID_INPUT', 'Each scene needs narration.', 400)
+    narration = '\n\n'.join(s['narration'] for s in scenes)
+    if len(narration) > 20000 or scenes and draft['script'] != narration:
+        raise Problem('INVALID_INPUT', 'Scene narration must match the saved script and fit its limit.', 400)
     if len(set(draft['settings']['material_ids'])) != len(draft['settings']['material_ids']):
         raise Problem('INVALID_INPUT', 'Choose each material once.', 400)
     return draft

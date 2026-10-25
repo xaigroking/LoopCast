@@ -1,5 +1,6 @@
 """FastAPI adapter. Domain state and worker ownership live in runtime/storage."""
 import asyncio
+import hashlib
 from contextlib import asynccontextmanager
 import ipaddress
 import json
@@ -207,10 +208,10 @@ class ErrorEnvelope(StrictModel):
 class Capabilities(StrictModel):
     mode: Literal["fixture"]
     video_generation: bool
-    publishing: Literal[False]
+    publishing: bool
     single_user: Literal[True]
     generation_verification: str
-    real_platform_sending: Literal[False]
+    real_platform_sending: bool
 
 
 ERROR_RESPONSES = {
@@ -221,8 +222,10 @@ def _instrument_response(request, response, started):
     request_id = request.state.request_id
     response.headers["X-Request-ID"] = request_id
     response.headers["traceparent"] = request.state.trace["traceparent"]
+    if getattr(request.state, 'new_owner', False):
+        response.set_cookie('loopcast_owner', request.state.owner_token, httponly=True, secure=request.state.public_https, samesite='strict', max_age=86400)
     route = request.scope.get("route")
-    ids = {key: value for key, value in request.path_params.items() if key in {"run_id", "intent_id"} and re.fullmatch(ID, value)}
+    ids = {key: value for key, value in request.path_params.items() if key in {"run_id", "intent_id", "project_id", "revision_id", "asset_id", "account_id", "session_id", "batch_id", "target_id"} and re.fullmatch(ID, value)}
     log_event("request", "request.completed", request.state.trace,
               method=request.method if request.method in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} else "<other>",
               route=getattr(route, "path", "<unmatched>"),
@@ -259,6 +262,8 @@ def create_app(
     *,
     public_origin: str | None = None,
     trusted_proxies: tuple[str, ...] = (),
+    media_settings=None,
+    social_settings=None,
 ):
     """Create an app factory; resources are acquired only inside ASGI lifespan."""
     proxy_networks = tuple(ipaddress.ip_network(item, strict=False) for item in trusted_proxies)
@@ -272,7 +277,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        runtime = ApplicationRuntime(data_dir, generator_settings)
+        runtime = ApplicationRuntime(data_dir, generator_settings, media_settings, social_settings)
         app.state.runtime = runtime
         try:
             yield
@@ -286,6 +291,11 @@ def create_app(
         started = time.monotonic()
         request.state.request_id = uid()
         request.state.trace = new_context(request.headers.get("traceparent"), request.state.request_id)
+        owner = request.cookies.get('loopcast_owner', '')
+        request.state.new_owner = not bool(re.fullmatch(ID, owner))
+        request.state.owner_token = uid() if request.state.new_owner else owner
+        request.state.owner_hash = hashlib.sha256(request.state.owner_token.encode()).hexdigest()
+        request.state.public_https = bool(public_origin and public_origin.startswith('https://'))
         def reject(problem):
             return _instrument_response(request, _error(problem, request.state.request_id), started)
         method = request.method.upper()
@@ -321,12 +331,13 @@ def create_app(
             return reject(Problem("INVALID_HOST", "Use the local listening address.", 403))
 
         if is_write and (request.url.path == "/v1" or request.url.path.startswith("/v1/")):
-            body_limit = 1048576 if request.url.path.startswith('/v1/studio/') else 16384
+            uploading = method == 'POST' and request.url.path == '/v1/studio/assets/import'
+            body_limit = 128 * 1024 * 1024 if uploading else 1048576 if request.url.path.startswith('/v1/studio/') else 16384
             expected_origin = public_origin if public_origin else f"{scheme}://{effective_host}"
             if request.headers.get("origin") != expected_origin or request.headers.get("sec-fetch-site") == "cross-site":
                 return reject(Problem("ORIGIN_REJECTED", "Writes require the exact public Origin.", 403))
-            if request.headers.get("content-type", "").split(";", 1)[0].strip() != "application/json":
-                return reject(Problem("INVALID_INPUT", "Use application/json.", 415))
+            if request.headers.get("content-type", "").split(";", 1)[0].strip() != ('application/octet-stream' if uploading else 'application/json'):
+                return reject(Problem("INVALID_INPUT", "Use application/octet-stream." if uploading else "Use application/json.", 415))
             raw_length = request.headers.get("content-length")
             if raw_length is not None:
                 try:
@@ -334,15 +345,16 @@ def create_app(
                 except ValueError:
                     size = -1
                 if size < 0 or size > body_limit:
-                    return reject(Problem("INVALID_INPUT", "Provide a JSON object of at most 16 KiB.", 400))
-            chunks = []
-            size = 0
-            async for chunk in request.stream():
-                size += len(chunk)
-                if size > body_limit:
-                    return reject(Problem("INVALID_INPUT", "Provide a JSON object of at most 16 KiB.", 400))
-                chunks.append(chunk)
-            request._body = b"".join(chunks)
+                    return reject(Problem("INVALID_INPUT", "Request body exceeds its size limit.", 400))
+            if not uploading:
+                chunks = []
+                size = 0
+                async for chunk in request.stream():
+                    size += len(chunk)
+                    if size > body_limit:
+                        return reject(Problem("INVALID_INPUT", "Request body exceeds its size limit.", 400))
+                    chunks.append(chunk)
+                request._body = b"".join(chunks)
 
         try:
             response = await call_next(request)
@@ -384,7 +396,8 @@ def create_app(
     @app.get("/v1/capabilities", response_model=Capabilities, responses=ERROR_RESPONSES)
     async def capabilities(request: Request):
         runtime = request.app.state.runtime
-        return Capabilities(mode="fixture", video_generation=runtime.generator is not None, publishing=False, single_user=True, generation_verification="contract_tested_live_unverified" if runtime.generator else "unavailable", real_platform_sending=False)
+        real = runtime.social.backend == 'sau' and runtime.social.sending_enabled
+        return Capabilities(mode="fixture", video_generation=runtime.generator is not None, publishing=real, single_user=True, generation_verification="contract_tested_live_unverified" if runtime.generator else "unavailable", real_platform_sending=real)
 
     @app.get("/v1/runs", response_model=RunPage, responses=ERROR_RESPONSES)
     async def list_runs(request: Request, limit: str = "30", before: str | None = None):

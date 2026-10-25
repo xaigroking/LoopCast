@@ -17,6 +17,7 @@ CONTEXT_FIELDS = ("trace_id", "span_id", "parent_span_id", "request_id", "tracep
 _LOG_FIELDS = set(CONTEXT_FIELDS) - {"traceparent"} | {
     "run_id", "attempt_id", "intent_id", "publication_attempt_id", "attempt_number",
     "method", "route", "status", "result", "duration_ms", "error_code",
+    "project_id", "revision_id", "asset_id", "account_id", "session_id", "batch_id", "target_id", "job_id",
 }
 
 
@@ -65,7 +66,7 @@ def log_event(component, event, context=None, **fields):
     """Callers supply fixed event names and safe fields, never arbitrary data."""
     data = {key: value for key, value in {**(context or {}), **fields}.items() if key in _LOG_FIELDS}
     # Defense in depth for correlation fields read back from a private database.
-    for key in ("trace_id", "span_id", "parent_span_id", "request_id", "run_id", "attempt_id", "intent_id", "publication_attempt_id"):
+    for key in ("trace_id", "span_id", "parent_span_id", "request_id", "run_id", "attempt_id", "intent_id", "publication_attempt_id", "project_id", "revision_id", "asset_id", "account_id", "session_id", "batch_id", "target_id", "job_id"):
         if key in data and data[key] is not None and not re.fullmatch(r"[a-f0-9]{16,32}", str(data[key])):
             data[key] = None
     logger = logging.getLogger("loopcast." + component)

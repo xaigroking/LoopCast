@@ -25,7 +25,9 @@ class StudioMethods:
         for r in db.execute('SELECT * FROM studio_revisions WHERE project_id=? ORDER BY number DESC', (project_id,)):
             generations = []
             for g in db.execute('SELECT g.*,r.state FROM studio_generations g JOIN runs r ON r.id=g.run_id WHERE revision_id=? ORDER BY g.rowid DESC', (r['id'],)):
+                component = self._component(db, g['run_id'])
                 generations.append({key: g[key] for key in ('id', 'revision_id', 'run_id', 'stage', 'input_digest', 'state', 'created_at')} | {
+                    'component_revision': component['revision'], 'component_sha256': component['artifact_sha256'],
                     'asset_ids': [a[0] for a in db.execute('SELECT asset_id FROM generation_assets WHERE generation_id=?', (g['id'],))]})
             revisions.append({'id': r['id'], 'number': r['number'], 'draft': json.loads(r['draft']),
                               'input_digest': r['input_digest'], 'created_at': r['created_at'], 'generations': generations})
@@ -100,6 +102,8 @@ class StudioMethods:
             if stage != 'script' and not draft['script'].strip() and not draft['scenes']:
                 raise Problem('SCRIPT_REQUIRED', 'Save a script before generating this stage.', 400)
             settings = draft['settings']
+            if stage in {'video', 'materials'} and settings['source'] == 'local' and not settings['material_ids']:
+                raise Problem('MATERIAL_REQUIRED', 'Choose local materials or an available provider.', 400)
             for identity in settings['material_ids'] + [v for v in (settings['audio_id'], settings['music_id']) if v]:
                 self._asset(db, identity)
             run, _ = self.create_within(db, {'mode': 'mpt', 'title': draft['title']}, 'studio:' + uid(), trace)
@@ -112,8 +116,8 @@ class StudioMethods:
 
     def studio_generation_input(self, run_id):
         with self.transaction() as db:
-            row = db.execute('SELECT g.*,r.draft FROM studio_generations g JOIN studio_revisions r ON r.id=g.revision_id WHERE g.run_id=?', (run_id,)).fetchone()
-            return ({'generation_id': row['id'], 'draft': json.loads(row['draft']), 'stage': row['stage'], 'input_digest': row['input_digest']} if row else None)
+            row = db.execute('SELECT g.*,r.draft,r.project_id FROM studio_generations g JOIN studio_revisions r ON r.id=g.revision_id WHERE g.run_id=?', (run_id,)).fetchone()
+            return ({'generation_id': row['id'], 'revision_id': row['revision_id'], 'project_id': row['project_id'], 'draft': json.loads(row['draft']), 'stage': row['stage'], 'input_digest': row['input_digest']} if row else None)
 
     def _family_root(self, db, identity):
         seen = set()
@@ -136,7 +140,9 @@ class StudioMethods:
         row = db.execute('SELECT * FROM studio_assets WHERE id=?', (identity,)).fetchone()
         if row is None:
             raise Problem('NOT_FOUND', 'Asset does not exist.', 404)
-        return {key: row[key] for key in ('id', 'name', 'kind', 'media_type', 'size', 'sha256', 'family_id', 'parent_id', 'origin', 'created_at')} | {'metadata': json.loads(row['metadata'])}
+        link = db.execute('SELECT generation_id,attempt_id FROM generation_assets WHERE asset_id=?', (identity,)).fetchone()
+        return {key: row[key] for key in ('id', 'name', 'kind', 'media_type', 'size', 'sha256', 'family_id', 'parent_id', 'origin', 'source', 'created_at')} | {
+            'metadata': json.loads(row['metadata']), 'generation_id': link['generation_id'] if link else None, 'attempt_id': link['attempt_id'] if link else None}
 
     def studio_assets(self):
         with self.transaction() as db:
@@ -153,9 +159,12 @@ class StudioMethods:
                 raise Problem('NOT_FOUND', 'Asset does not exist.', 404)
             return dict(row)
 
-    def studio_register_asset(self, value, key, parent_id=None, generation_id=None):
+    def studio_register_asset(self, value, key, parent_id=None, generation_id=None, attempt=None):
         request = {'sha256': value['sha256'], 'kind': value['kind'], 'parent_id': parent_id, 'generation_id': generation_id}
         with self.transaction(True) as db:
+            active = self._active(db, *attempt) if attempt else None
+            if generation_id and not active:
+                raise Problem('ATTEMPT_RETIRED', 'The generation attempt is no longer active.', 409)
             prior = self._studio_prior(db, 'asset.import', key, request)
             if prior:
                 return self._asset(db, prior['id']), False
@@ -181,11 +190,11 @@ class StudioMethods:
                 family = uid()
                 db.execute('INSERT INTO media_families VALUES(?,NULL)', (family,))
             identity = value['id']
-            db.execute('INSERT INTO studio_assets VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', (
+            db.execute('INSERT INTO studio_assets VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', (
                 identity, value['name'], value['kind'], value['media_type'], value['size'], value['sha256'], value['storage_ref'], family,
-                parent_id, value['origin'], canonical(value['metadata']), canonical(fingerprint) if fingerprint else None, now()))
+                parent_id, value['origin'], value['source'], canonical(value['metadata']), canonical(fingerprint) if fingerprint else None, now()))
             if generation_id:
-                db.execute('INSERT INTO generation_assets VALUES(?,?)', (generation_id, identity))
+                db.execute('INSERT INTO generation_assets VALUES(?,?,?)', (generation_id, identity, active['id']))
             self._studio_remember(db, 'asset.import', key, request, {'id': identity})
             return self._asset(db, identity), True
 
@@ -194,4 +203,5 @@ class StudioMethods:
         if abs(first['duration'] - second['duration']) > max(.15, first['duration'] * .01):
             return False
         a, b = first['frames'], second['frames']
-        return len(a) == len(b) and all((int(x, 16) ^ int(y, 16)).bit_count() <= 4 for x, y in zip(a, b))
+        return (len(a) == len(b) and all((int(x, 16) ^ int(y, 16)).bit_count() <= 4 for x, y in zip(a, b))
+                and all(abs(x-y) <= 1 for x, y in zip(first['colors'], second['colors'])))
