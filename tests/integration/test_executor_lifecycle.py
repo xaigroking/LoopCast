@@ -55,7 +55,18 @@ class ExecutorTests(unittest.TestCase):
         queued = self.create()
         cancelled, _ = self.store.command(queued['run_id'], 'cancel', 'cancel-q', queued['state_version'])
         self.assertEqual(cancelled['state'], 'CANCELLED')
-        running = self.store.snapshot(slow['run_id'])
+        # RUNNING also covers prepare/execute transitions, which legitimately
+        # advance the optimistic version. Wait for the actual slow subprocess;
+        # its execute stage does not publish intermediate state changes.
+        end = time.monotonic() + 5
+        while time.monotonic() < end:
+            running = self.store.snapshot(slow['run_id'])
+            process = self.worker.active_process
+            if running['tasks'][1]['state'] == 'RUNNING' and process is not None and process.poll() is None:
+                break
+            time.sleep(.01)
+        else:
+            self.fail('Slow executor did not reach its active execute stage')
         stopping, _ = self.store.command(slow['run_id'], 'cancel', 'cancel-r', running['state_version'])
         self.assertEqual(stopping['state'], 'CANCEL_REQUESTED')
         done = wait(self.store, slow['run_id'], {'CANCELLED', 'SUCCEEDED'})
