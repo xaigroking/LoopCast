@@ -4,6 +4,7 @@ set -euo pipefail
 python scripts/check-ui-assets.py
 python scripts/check-architecture.py
 python -m build --no-isolation
+python scripts/check-licenses.py
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
 python -m venv --without-pip "$work_dir/installed"
