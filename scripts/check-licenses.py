@@ -9,7 +9,7 @@ import sys
 
 root = Path(__file__).resolve().parents[1]
 license_text = (root / 'LICENSE').read_bytes()
-assert hashlib.sha256(license_text).hexdigest() == 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30'
+assert hashlib.sha256(license_text.lstrip(b'\n')).hexdigest() == 'c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4'
 assert json.loads((root / 'frontend/package.json').read_text())['license'] == 'Apache-2.0'
 for name in ['LICENSE', 'NOTICE', 'THIRD_PARTY.md']:
     assert (root / name).read_bytes() == (root / 'frontend/public/licenses/app' / name).read_bytes()

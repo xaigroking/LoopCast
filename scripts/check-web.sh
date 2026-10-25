@@ -56,3 +56,6 @@ browser_python=${LOOPCAST_BROWSER_PYTHON:-$(command -v python)}
 LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" "$browser_python" -I "$root_dir/tests/browser/check_console.py"
 
 LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" LOOPCAST_TEST_MEDIA="$generator_dir/sample.mp4" "$browser_python" -I "$root_dir/tests/browser/check_studio.py"
+
+installed_bridge=$("$work_dir/backend/bin/python" -I -c 'import loopcast.social_bridge; print(loopcast.social_bridge.__file__)')
+LOOPCAST_INSTALLED_BRIDGE="$installed_bridge" "$browser_python" -I "$root_dir/tests/browser/check_authorization.py"
