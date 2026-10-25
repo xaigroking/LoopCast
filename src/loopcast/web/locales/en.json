@@ -86,7 +86,8 @@
     "bytes": "{{size}} bytes",
     "packError": "Language pack could not load; English is shown.",
     "taskCount_one": "{{count, number}} task",
-    "taskCount_other": "{{count, number}} tasks"
+    "taskCount_other": "{{count, number}} tasks",
+    "actions": "Actions"
   },
   "state": {
     "QUEUED": "QUEUED",

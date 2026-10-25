@@ -85,7 +85,8 @@
     "attempt": "試行 {{number}}",
     "bytes": "{{size}} バイト",
     "packError": "言語パックを読み込めないため英語で表示します。",
-    "taskCount_other": "{{count, number}} 件のタスク"
+    "taskCount_other": "{{count, number}} 件のタスク",
+    "actions": "操作"
   },
   "state": {
     "QUEUED": "待機中",

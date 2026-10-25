@@ -85,7 +85,8 @@
     "attempt": "Percobaan {{number}}",
     "bytes": "{{size}} bita",
     "packError": "Paket bahasa gagal dimuat; bahasa Inggris ditampilkan.",
-    "taskCount_other": "{{count, number}} tugas"
+    "taskCount_other": "{{count, number}} tugas",
+    "actions": "Tindakan"
   },
   "state": {
     "QUEUED": "DALAM ANTREAN",

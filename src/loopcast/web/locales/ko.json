@@ -85,7 +85,8 @@
     "attempt": "시도 {{number}}",
     "bytes": "{{size}} 바이트",
     "packError": "언어 팩을 불러올 수 없어 영어로 표시합니다.",
-    "taskCount_other": "작업 {{count, number}}개"
+    "taskCount_other": "작업 {{count, number}}개",
+    "actions": "작업"
   },
   "state": {
     "QUEUED": "대기 중",

@@ -85,7 +85,8 @@
     "attempt": "第 {{number}} 次尝试",
     "bytes": "{{size}} 字节",
     "packError": "语言包加载失败，暂时显示英文。",
-    "taskCount_other": "{{count, number}} 项任务"
+    "taskCount_other": "{{count, number}} 项任务",
+    "actions": "操作"
   },
   "state": {
     "QUEUED": "排队中",

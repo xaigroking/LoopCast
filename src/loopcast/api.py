@@ -200,7 +200,25 @@ class Handler(BaseHTTPRequestHandler):
             return self.asset('index.html', 'text/html; charset=utf-8')
         if not write and (path == '/' or re.fullmatch('/runs/' + ID, path)):
             return self.asset('index.html', 'text/html; charset=utf-8')
-        if not write and path in ('/app.js', '/requests.js', '/preferences.js', '/localization.js', '/i18next.js', '/language-detector.js', '/style.css'):
+        font_asset = re.fullmatch(r'/fonts/(NotoCJK\.otf|NotoArabic\.ttf|NotoHebrew\.ttf|NotoDevanagari\.ttf|NotoThai\.ttf|NotoSans\.ttf)', path)
+        if not write and font_asset:
+            return self.asset(path[1:], 'font/otf' if path.endswith('.otf') else 'font/ttf')
+        if not write and path == '/brand.svg':
+            params = parse_qs(url.query)
+            size = params.get('size',['128'])[0]
+            variant = params.get('variant',['light'])[0]
+            if set(params) - {'size','variant'} or size not in {'16','24','32','128'} or variant not in {'light','dark','mono'}:
+                raise Problem('INVALID_INPUT','Unknown brand derivative.',400)
+            content = files('loopcast').joinpath('web','brand.svg').read_text()
+            content = content.replace('width="128" height="128"',f'width="{size}" height="{size}"')
+            if variant == 'dark':
+                content = content.replace('#a73407','#ff9c61').replace('#ffad42','#ffd18a').replace('#e65b0a','#ff9347')
+            elif variant == 'mono':
+                content = content.replace('stroke="url(#ribbon)"','stroke="#595959"')
+            data = content.encode()
+            self._headers(200,'image/svg+xml',len(data))
+            return self.wfile.write(data)
+        if not write and path in ('/app.js', '/requests.js', '/brand.js', '/preferences.js', '/localization.js', '/i18next.js', '/language-detector.js', '/style.css'):
             return self.asset(path[1:], 'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8')
         if not write and not path.startswith('/v1/') and '.' not in path:
             return self.asset('index.html', 'text/html; charset=utf-8')

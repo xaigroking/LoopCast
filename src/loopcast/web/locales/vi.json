@@ -85,7 +85,8 @@
     "attempt": "Lần thử {{number}}",
     "bytes": "{{size}} byte",
     "packError": "Không tải được gói ngôn ngữ; đang hiển thị tiếng Anh.",
-    "taskCount_other": "{{count, number}} tác vụ"
+    "taskCount_other": "{{count, number}} tác vụ",
+    "actions": "Thao tác"
   },
   "state": {
     "QUEUED": "ĐANG CHỜ",

@@ -1,3 +1,4 @@
+import {brandImage} from './brand.js';
 import {requestKey} from './requests.js';
 import {t, registry, number, date, locale, errorText, packError} from './localization.js';
 const app = document.querySelector('#app'), sync = document.querySelector('#sync'), dialog = document.querySelector('#create-dialog');
@@ -6,7 +7,7 @@ const terminal = new Set(['SUCCEEDED','FAILED','CANCELLED']);
 const settled = run => terminal.has(run.state) && !(run.publications || []).some(p => ['PREPARED','SENDING'].includes(p.state));
 const entities = new Map(), pending = new Map(), drafts = new Map();
 let view=0, subscription=null, timer=null, pageCursor=null, listing=[], paged=false, createIdentity=null, generatorAvailable=false;
-let syncKey='syncing', createOpener=null;
+let syncKey='syncing', createOpener=null, lastNotice=null;
 export const runURL = id => `/runs/${encodeURIComponent(id)}`;
 export function accept(snapshot) {
   if (!snapshot || !(/^[a-f0-9]{32}$/).test(snapshot.run_id) || !Number.isInteger(snapshot.state_version) || !Number.isInteger(snapshot.last_event_id)) return false;
@@ -17,10 +18,13 @@ export function accept(snapshot) {
 function el(tag,text,cls) { const node=document.createElement(tag); if(text!==undefined)node.textContent=text; if(cls)node.className=cls; return node; }
 function button(text,action,cls='') { const node=el('button',text,cls);node.type='button';node.addEventListener('click',action);return node; }
 function link(text,href) {const node=el('a',text);node.href=href;if(href==='/' || href==='/settings' || href.startsWith('/runs/'))node.dataset.route='';return node;}
+function documentIcon(className){const box=el('div',undefined,className);const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('width','24');svg.setAttribute('height','24');svg.setAttribute('aria-hidden','true');const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('d','M6 2h7l5 5v15H6z M13 2v6h5 M9 12h6 M9 16h6');path.setAttribute('fill','none');path.setAttribute('stroke','currentColor');path.setAttribute('stroke-width','1.7');path.setAttribute('stroke-linejoin','round');svg.append(path);box.append(svg);return box;}
 function isolated(tag,text,cls='') {const node=el(tag,text,cls);node.dir='auto';return node;}
 function code(text) {const node=el('bdi',text);node.dir='ltr';return node;}
 function status(state) {const node=el('span',t('state:'+state),'state');node.dataset.state=state;return node;}
-function notice(message) { const node=document.querySelector('#notice');node.replaceChildren(el('span',message),button(t('dismiss'),()=>node.hidden=true,'quiet'));node.hidden=false; }
+function notice(error) {lastNotice=error;const node=document.querySelector('#notice');const message=error?.code?errorText(error):t('retrySafe');node.replaceChildren(el('span',message),button(t('dismiss'),()=>{node.hidden=true;lastNotice=null;},'quiet'));node.hidden=false;}
+function formError(error){const node=document.querySelector('#form-error');node.dataset.code=error?.code||'';node.dataset.retry=error?.code?'false':'true';node.textContent=error?.code?errorText(error):t('retrySafe');}
+
 async function request(path,options={}) {
   const response=await fetch(path,{cache:'no-store',...options});const data=await response.json();
   if(!response.ok) { if(data.error?.snapshot)accept(data.error.snapshot);const error=new Error();error.status=response.status;error.code=data.error?.code;throw error; }
@@ -37,7 +41,7 @@ function replaceApp(...nodes){
 }
 document.addEventListener('input',event=>{if(event.target.dataset.draftKey)drafts.set(event.target.dataset.draftKey,event.target.value);});
 document.addEventListener('change',event=>{if(event.target.dataset.draftKey)drafts.set(event.target.dataset.draftKey,event.target.value);});
-function openCreate(){createOpener=document.activeElement;document.querySelector('#form-error').textContent='';dialog.showModal();dialog.querySelector('input').focus();}
+function openCreate(){createOpener=document.activeElement;document.querySelector('#form-error').textContent='';document.querySelector('#form-error').dataset.code='';document.querySelector('#form-error').dataset.retry='false';dialog.showModal();dialog.querySelector('input').focus();}
 dialog.addEventListener('close',()=>{const target=createOpener?.isConnected?createOpener:document.querySelector('.heading .primary');target?.focus({preventScroll:true});});
 function actionButtons(run,menu=false){
  const group=el('div',undefined,menu?'menu':'row-actions');
@@ -54,14 +58,14 @@ function renderList(){
  for(const [key,count] of [['loaded',runs.length],['active',runs.filter(r=>!settled(r)).length],['completed',runs.filter(r=>r.state==='SUCCEEDED').length]]){
  const node=el('div',undefined,'stat');node.append(el('strong',number(count)),el('span',t(key)));stats.append(node);}app.append(stats);
  const section=el('div',undefined,'section-head');section.append(el('h2',t('recent')),el('small',t('taskCount',{count:runs.length})));app.append(section);
- if(!runs.length){const empty=el('section',undefined,'empty');empty.append(el('div','▤','empty-icon'),el('h2',t('empty')),el('p',t('fixtureNotice')) );app.append(empty);}
+ if(!runs.length){const empty=el('section',undefined,'empty');empty.append(documentIcon('empty-icon'),el('h2',t('empty')),el('p',t('fixtureNotice')) );app.append(empty);}
  const cards=el('div',undefined,'cards');
  for(const run of runs){const card=el('article',undefined,'run-card');card.dataset.runId=run.run_id;const main=el('div',undefined,'run-main');
  const name=link(run.input.title,runURL(run.run_id));name.dir='auto';name.className='run-title';
  main.append(name,el('div',`${t(run.mode==='fixture'?'fixture':'unverified')} · ${t('attemptVersion',{number:number(run.attempts.length),version:number(run.state_version)})}`,'run-meta'));
  const direct=actionButtons(run);direct.classList.add('direct-action');const menu=el('details');menu.open=drafts.get(run.run_id+':menu')===true;menu.addEventListener('toggle',()=>drafts.set(run.run_id+':menu',menu.open));
- const summary=el('summary','•••');summary.setAttribute('aria-label',t('settings')+' · '+run.input.title);menu.append(summary,actionButtons(run,true));
- const controls=el('div',undefined,'row-actions');controls.append(direct,menu);card.append(el('div','▤','run-icon'),main,status(run.state),controls);cards.append(card);}
+ const summary=el('summary','•••');summary.setAttribute('aria-label',t('actions')+' · '+run.input.title);menu.append(summary,actionButtons(run,true));
+ const controls=el('div',undefined,'row-actions');controls.append(direct,menu);card.append(documentIcon('run-icon'),main,status(run.state),controls);cards.append(card);}
  app.append(cards);if(pageCursor){const more=button(t('older'),()=>loadList(true));more.id='load-more';app.append(more);}
 }
 function renderDetail(run){
@@ -98,6 +102,7 @@ function publicationPanel(run){
 }
 function renderSettings(){
  const title=heading(t('settings'),t('preferencesHint')),content=panel(t('language'));
+ const identity=el('div',undefined,'settings-brand');identity.append(brandImage(48),el('strong','LoopCast'));title.append(identity);
  const search=field(el('input'),'language-search','');search.type='search';search.setAttribute('aria-label',t('searchLanguage'));search.placeholder=t('searchLanguage');
  const label=el('label',t('language')),select=el('select');select.id='language-select';select.dataset.focusKey='language-select';
  function options(){const query=search.value.toLocaleLowerCase(locale());const saved=preferences.value.language;select.replaceChildren();
@@ -111,7 +116,7 @@ function renderSettings(){
  const grid=el('div',undefined,'settings-grid');grid.append(content,appearance);replaceApp(link(t('back'),'/'),title,grid);
 }
 function showError(error){const node=el('section',undefined,'empty');node.append(el('h2',t(error.status===404?'missing':'failedLoad')),el('p',errorText(error)),link(t('back'),'/'));replaceApp(node);setSync(error.status?'requestError':'offline');}
-function route(){++view;clean();replaceApp(el('p',t('loading')));setSync(navigator.onLine?'syncing':'offline');if(location.pathname==='/settings')return renderSettings();if(location.pathname==='/')return loadList();const match=location.pathname.match(/^\/runs\/([a-f0-9]{32})$/);if(match)return loadDetail(match[1]);showError({status:404,code:'NOT_FOUND'});}
+function route(){++view;clean();localizeShell();document.querySelectorAll('nav a').forEach(node=>{if(new URL(node.href).pathname===location.pathname)node.setAttribute('aria-current','page');else node.removeAttribute('aria-current');});replaceApp(el('p',t('loading')));setSync(navigator.onLine?'syncing':'offline');if(location.pathname==='/settings')return renderSettings();if(location.pathname==='/')return loadList();const match=location.pathname.match(/^\/runs\/([a-f0-9]{32})$/);if(match)return loadDetail(match[1]);showError({status:404,code:'NOT_FOUND'});}
 
 async function loadList(more = false) {
   const generation = view;
@@ -168,7 +173,7 @@ async function command(id, action) {
   if (operation?.busy || !run.allowed_actions[action].enabled) return;
   if (!operation && action === 'cancel' && !confirm(t('cancelConfirm'))) return;
   try { operation ||= {key: requestKey(), version: run.state_version}; }
-  catch (error) { notice(errorText(error)); return; }
+  catch (error) { notice(error); return; }
   operation.busy = true; pending.set(identity, operation);
   const generation = view;
   if (location.pathname === '/') renderList(); else renderDetail(run);
@@ -179,7 +184,7 @@ async function command(id, action) {
     if (generation === view) { if (location.pathname === '/') renderList(); else { const current = entities.get(id); renderDetail(current); follow(current, generation); } }
   } catch (error) {
     if (error.status) pending.delete(identity); else operation.busy = false;
-    notice(error.status ? errorText(error) : t('retrySafe'));
+    notice(error);
     if (generation === view) { if (location.pathname === '/') loadList(); else loadDetail(id, generation); }
   }
 }
@@ -189,7 +194,7 @@ async function publicationCommand(run, intentId, action, extra) {
   if (operation?.busy) return;
   const signature = JSON.stringify(extra);
   try { if (!operation || operation.signature !== signature) operation = {key: requestKey(), version: run.state_version, signature}; }
-  catch (error) { notice(errorText(error)); return; }
+  catch (error) { notice(error); return; }
   operation.busy = true; pending.set(identity, operation);
   const path = `/v1/runs/${run.run_id}/publications` + (intentId ? `/${intentId}/${action}` : '');
   try {
@@ -198,7 +203,7 @@ async function publicationCommand(run, intentId, action, extra) {
     if (location.pathname === runURL(run.run_id)) { renderDetail(entities.get(run.run_id)); follow(entities.get(run.run_id), view); }
   } catch (error) {
     if (error.status) pending.delete(identity); else operation.busy = false;
-    notice(errorText(error)); if (location.pathname === runURL(run.run_id)) loadDetail(run.run_id);
+    notice(error); if (location.pathname === runURL(run.run_id)) loadDetail(run.run_id);
   }
 }
 
@@ -221,17 +226,21 @@ document.querySelector('#create-form').addEventListener('submit', async event =>
   const body = form.elements.mode.value === 'mpt' ? {mode: 'mpt', title: form.elements.title.value} : {mode: 'fixture', title: form.elements.title.value, scenario: form.elements.scenario.value, delay_ms: Number(form.elements.delay_ms.value)};
   const signature = JSON.stringify(body);
   try { if (createIdentity?.signature !== signature) createIdentity = {signature, key: requestKey()}; }
-  catch (error) { document.querySelector('#form-error').textContent = errorText(error); return; }
+  catch (error) { formError(error); return; }
   submit.disabled = true; submit.textContent = t('creating'); document.querySelector('#form-error').textContent = '';
   try {
     const result = await request('/v1/runs', {method: 'POST', headers: {'Content-Type': 'application/json', 'Idempotency-Key': createIdentity.key}, body: signature});
     accept(result); createIdentity = null; dialog.close(); form.reset(); form.elements.mode.dispatchEvent(new Event('change'));
     history.pushState(null, '', runURL(result.run_id)); route();
-  } catch (error) { document.querySelector('#form-error').textContent = error.status ? errorText(error) : t('retrySafe'); }
+  } catch (error) { formError(error); }
   finally { submit.disabled = false; submit.textContent = t(form.elements.mode.value === 'mpt' ? 'generate' : 'create'); }
 });
 
 function localizeShell(){
+ const error=document.querySelector('#form-error');if(error.dataset.code)error.textContent=errorText({code:error.dataset.code});else if(error.dataset.retry==='true')error.textContent=t('retrySafe');
+ if(lastNotice)notice(lastNotice);
+
+ document.querySelectorAll('[data-brand]').forEach(node=>{if(!node.firstChild)node.append(brandImage(node.closest('header')?24:38,true));});
  document.querySelectorAll('[data-i18n]').forEach(node=>node.textContent=t(node.dataset.i18n));
  document.title='LoopCast · '+t(location.pathname==='/settings'?'settings':'console');
  document.querySelector('#language-shortcut').textContent=registry.find(x=>x.code===locale())?.name||'English';
@@ -239,6 +248,7 @@ function localizeShell(){
 }
 function localizeForm(){
  const form=document.querySelector('#create-form'),generation=form.elements.mode.value==='mpt';
+ form.querySelectorAll('input').forEach(input=>{if(input.validity.customError)input.setCustomValidity(t('invalid'));});
  document.querySelector('#form-title').textContent=t(generation?'generate':'new');
  document.querySelector('#form-description').textContent=t(generation?'unverified':'fixtureNotice');
  const option=form.querySelector('option[value=mpt]');option.disabled=!generatorAvailable;option.textContent=t(generatorAvailable?'unverified':'unavailable');

@@ -86,7 +86,8 @@
     "bytes": "{{size}} बाइट",
     "packError": "भाषा पैक लोड नहीं हुआ; अंग्रेज़ी दिखाई जा रही है।",
     "taskCount_one": "{{count, number}} कार्य",
-    "taskCount_other": "{{count, number}} कार्य"
+    "taskCount_other": "{{count, number}} कार्य",
+    "actions": "क्रियाएँ"
   },
   "state": {
     "QUEUED": "कतार में",

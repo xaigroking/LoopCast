@@ -87,7 +87,8 @@
     "packError": "Impossibile caricare la lingua; viene mostrato l’inglese.",
     "taskCount_one": "{{count, number}} attività",
     "taskCount_many": "{{count, number}} attività",
-    "taskCount_other": "{{count, number}} attività"
+    "taskCount_other": "{{count, number}} attività",
+    "actions": "Azioni"
   },
   "state": {
     "QUEUED": "IN CODA",

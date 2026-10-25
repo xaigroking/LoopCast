@@ -87,7 +87,8 @@
     "packError": "Não foi possível carregar o idioma; exibindo inglês.",
     "taskCount_one": "{{count, number}} tarefa",
     "taskCount_many": "{{count, number}} tarefas",
-    "taskCount_other": "{{count, number}} tarefas"
+    "taskCount_other": "{{count, number}} tarefas",
+    "actions": "Ações"
   },
   "state": {
     "QUEUED": "NA FILA",

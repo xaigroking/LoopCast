@@ -14,4 +14,4 @@ dependencies = []
 where = ["src"]
 
 [tool.setuptools.package-data]
-loopcast = ["web/*.html", "web/*.css", "web/*.js", "web/*.txt", "web/locales/*.json", "web/*.svg"]
+loopcast = ["web/*.html", "web/*.css", "web/*.js", "web/*.txt", "web/locales/*.json", "web/*.svg", "web/fonts/*.otf", "web/fonts/*.ttf", "web/fonts/*.txt"]

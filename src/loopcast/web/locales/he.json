@@ -87,7 +87,8 @@
     "packError": "לא ניתן לטעון את חבילת השפה; מוצגת אנגלית.",
     "taskCount_one": "משימה אחת ({{count, number}})",
     "taskCount_two": "שתי משימות ({{count, number}})",
-    "taskCount_other": "{{count, number}} משימות"
+    "taskCount_other": "{{count, number}} משימות",
+    "actions": "פעולות"
   },
   "state": {
     "QUEUED": "בתור",

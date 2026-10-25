@@ -88,7 +88,8 @@
     "taskCount_one": "{{count, number}} zadanie",
     "taskCount_few": "{{count, number}} zadania",
     "taskCount_many": "{{count, number}} zadań",
-    "taskCount_other": "{{count, number}} zadania"
+    "taskCount_other": "{{count, number}} zadania",
+    "actions": "Działania"
   },
   "state": {
     "QUEUED": "W KOLEJCE",

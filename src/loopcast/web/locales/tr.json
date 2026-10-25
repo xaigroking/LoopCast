@@ -86,7 +86,8 @@
     "bytes": "{{size}} bayt",
     "packError": "Dil paketi yüklenemedi; İngilizce gösteriliyor.",
     "taskCount_one": "{{count, number}} görev",
-    "taskCount_other": "{{count, number}} görev"
+    "taskCount_other": "{{count, number}} görev",
+    "actions": "İşlemler"
   },
   "state": {
     "QUEUED": "SIRADA",

@@ -87,7 +87,8 @@
     "packError": "Impossible de charger la langue ; affichage en anglais.",
     "taskCount_one": "{{count, number}} tâche",
     "taskCount_many": "{{count, number}} tâches",
-    "taskCount_other": "{{count, number}} tâches"
+    "taskCount_other": "{{count, number}} tâches",
+    "actions": "Actions"
   },
   "state": {
     "QUEUED": "EN ATTENTE",

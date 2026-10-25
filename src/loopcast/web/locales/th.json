@@ -85,7 +85,8 @@
     "attempt": "ครั้งที่ {{number}}",
     "bytes": "{{size}} ไบต์",
     "packError": "โหลดชุดภาษาไม่ได้ จะแสดงภาษาอังกฤษ",
-    "taskCount_other": "{{count, number}} งาน"
+    "taskCount_other": "{{count, number}} งาน",
+    "actions": "การดำเนินการ"
   },
   "state": {
     "QUEUED": "อยู่ในคิว",

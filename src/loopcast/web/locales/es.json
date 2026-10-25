@@ -87,7 +87,8 @@
     "packError": "No se pudo cargar el idioma; se muestra inglés.",
     "taskCount_one": "{{count, number}} tarea",
     "taskCount_many": "{{count, number}} tareas",
-    "taskCount_other": "{{count, number}} tareas"
+    "taskCount_other": "{{count, number}} tareas",
+    "actions": "Acciones"
   },
   "state": {
     "QUEUED": "EN COLA",

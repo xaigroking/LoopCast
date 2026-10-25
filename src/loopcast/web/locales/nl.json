@@ -86,7 +86,8 @@
     "bytes": "{{size}} bytes",
     "packError": "Taalpakket kon niet laden; Engels wordt getoond.",
     "taskCount_one": "{{count, number}} taak",
-    "taskCount_other": "{{count, number}} taken"
+    "taskCount_other": "{{count, number}} taken",
+    "actions": "Acties"
   },
   "state": {
     "QUEUED": "IN WACHTRIJ",

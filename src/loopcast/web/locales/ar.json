@@ -90,7 +90,8 @@
     "taskCount_two": "مهمتان ({{count, number}})",
     "taskCount_few": "{{count, number}} مهام",
     "taskCount_many": "{{count, number}} مهمة",
-    "taskCount_other": "{{count, number}} مهمة"
+    "taskCount_other": "{{count, number}} مهمة",
+    "actions": "الإجراءات"
   },
   "state": {
     "QUEUED": "في الانتظار",

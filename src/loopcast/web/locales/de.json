@@ -86,7 +86,8 @@
     "bytes": "{{size}} Byte",
     "packError": "Sprachpaket nicht geladen; Anzeige auf Englisch.",
     "taskCount_one": "{{count, number}} Aufgabe",
-    "taskCount_other": "{{count, number}} Aufgaben"
+    "taskCount_other": "{{count, number}} Aufgaben",
+    "actions": "Aktionen"
   },
   "state": {
     "QUEUED": "IN WARTESCHLANGE",

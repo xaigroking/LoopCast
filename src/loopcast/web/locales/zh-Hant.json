@@ -85,7 +85,8 @@
     "attempt": "第 {{number}} 次嘗試",
     "bytes": "{{size}} 位元組",
     "packError": "語言包載入失敗，暫時顯示英文。",
-    "taskCount_other": "{{count, number}} 項任務"
+    "taskCount_other": "{{count, number}} 項任務",
+    "actions": "操作"
   },
   "state": {
     "QUEUED": "排隊中",

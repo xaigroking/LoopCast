@@ -4,13 +4,14 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LoopCast</title>
 <script src="/preferences.js"></script>
+<link rel="icon" type="image/svg+xml" sizes="16x16" href="/brand.svg?size=16"><link rel="icon" type="image/svg+xml" sizes="24x24" href="/brand.svg?size=24"><link rel="icon" type="image/svg+xml" sizes="32x32" href="/brand.svg?size=32">
 <link rel="stylesheet" href="/style.css">
 <script src="/i18next.js"></script><script src="/language-detector.js"></script>
 <script type="module" src="/app.js"></script>
 </head>
 <body>
-<aside><a class="brand" href="/" data-route><span>LoopCast</span></a><span class="eyebrow" data-i18n="workspace">Local workspace</span><nav><a href="/" class="nav" data-route data-i18n="console">Your task console</a><a href="/settings" class="nav" data-route data-i18n="settings">Settings</a></nav><div class="aside-foot"><span class="dot"></span><span data-i18n="preferencesHint">Preferences affect this browser only.</span></div></aside>
-<div class="workspace"><header><div class="badge" data-i18n="fixtureBadge">FIXTURE MODE</div><a href="/settings" id="language-shortcut" data-route>English</a><button id="refresh" class="quiet" data-i18n="refresh">Refresh</button><span id="sync" role="status"></span></header>
+<aside><a class="brand" href="/" data-route><span data-brand></span><span>LoopCast</span></a><span class="eyebrow" data-i18n="workspace">Local workspace</span><nav><a href="/" class="nav" data-route data-i18n="console">Your task console</a><a href="/settings" class="nav" data-route data-i18n="settings">Settings</a></nav><div class="aside-foot"><span class="dot"></span><span data-i18n="preferencesHint">Preferences affect this browser only.</span></div></aside>
+<div class="workspace"><header><span data-brand></span><div class="badge" data-i18n="fixtureBadge">FIXTURE MODE</div><a href="/settings" id="language-shortcut" data-route>English</a><button id="refresh" class="quiet" data-i18n="refresh">Refresh</button><span id="sync" role="status"></span></header>
 <main id="app" aria-live="polite"></main><footer><span>LoopCast</span><span data-i18n="subtitle">Local history. Real platform sending unavailable.</span></footer></div>
 <dialog id="create-dialog" aria-labelledby="form-title"><form id="create-form"><div class="eyebrow" data-i18n="workspace">Local workspace</div><h2 id="form-title"></h2><p id="form-description"></p>
 <label><span data-i18n="mode">Mode</span><select name="mode"><option value="fixture" data-i18n="fixture">Fixture</option><option value="mpt" disabled></option></select></label>
