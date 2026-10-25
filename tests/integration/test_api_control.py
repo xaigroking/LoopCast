@@ -12,6 +12,12 @@ class APITests(unittest.TestCase):
         self.server = ServerProcess(self.temp.name).start()
         self.addCleanup(self.server.stop)
 
+    def test_api_root_and_unknown_paths_never_return_spa(self):
+        for path in ['/v1','/v1/unknown','/v1/missing/deep']:
+            status,payload=self.server.request(path)
+            self.assertEqual(status,404)
+            self.assertEqual(payload['error']['code'],'NOT_FOUND')
+
     def test_concurrent_creation_and_restart_identity(self):
         with ThreadPoolExecutor(20) as pool:
             result = list(pool.map(lambda _: self.server.request('/v1/runs', {'title': 'concurrent'}, 'same'), range(100)))

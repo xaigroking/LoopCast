@@ -1,14 +1,23 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" dir="ltr">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LoopCast · Fixture studio</title><link rel="stylesheet" href="/style.css">
+<title>LoopCast</title>
+<script src="/preferences.js"></script>
+<link rel="icon" type="image/svg+xml" sizes="16x16" href="/brand.svg?size=16"><link rel="icon" type="image/svg+xml" sizes="24x24" href="/brand.svg?size=24"><link rel="icon" type="image/svg+xml" sizes="32x32" href="/brand.svg?size=32">
+<link rel="stylesheet" href="/style.css">
+<script src="/i18next.js"></script><script src="/language-detector.js"></script>
 <script type="module" src="/app.js"></script>
 </head>
 <body>
-<aside><a class="brand" href="/" data-route>◈ <span>LoopCast</span></a><span class="eyebrow">LOCAL WORKSPACE</span><a href="/" class="nav" data-route>▦ &nbsp; Task console</a><div class="aside-foot"><span class="dot"></span> Single-user workspace<br><small>Data stays on this machine.</small></div></aside>
-<div class="workspace"><header><div class="badge">FIXTURE MODE</div><span>Fixture by default · Real platform sending unavailable</span><button id="refresh" class="quiet">Refresh</button><span id="sync" role="status">Connecting…</span></header>
-<main id="app" aria-live="polite"></main><footer>LoopCast / Control-plane preview <span>Persistent local history.</span></footer></div>
-<dialog id="create-dialog"><form id="create-form"><div class="eyebrow">NEW FIXTURE</div><h2>Give your workflow a test run.</h2><p>Run fixed local stages and generate a real text report. No models or publishing services are called.</p><label>Mode<select name="mode"><option value="fixture">Fixture · local text report</option><option value="mpt" disabled>Generation · configure runner first</option></select></label><label>Task name<input name="title" required maxlength="120" placeholder="My first fixture" autocomplete="off"></label><label>Scenario<select name="scenario"><option value="success">Successful run</option><option value="fail_once">Fail first attempt, then succeed</option><option value="fail">Controlled failure</option><option value="slow">Slow run · test cancellation</option></select></label><label>Execution delay (ms)<input name="delay_ms" type="number" min="0" max="3000" value="300" required></label><p id="form-error" class="error" role="alert"></p><div class="dialog-actions"><button type="button" id="dismiss" class="quiet">Go back</button><button type="submit" class="primary">Create fixture →</button></div></form></dialog>
+<aside><a class="brand" href="/" data-route><span data-brand></span><span>LoopCast</span></a><span class="eyebrow" data-i18n="workspace">Local workspace</span><nav><a href="/" class="nav" data-route data-i18n="console">Your task console</a><a href="/settings" class="nav" data-route data-i18n="settings">Settings</a></nav><div class="aside-foot"><span class="dot"></span><span data-i18n="preferencesHint">Preferences affect this browser only.</span></div></aside>
+<div class="workspace"><header><span data-brand></span><div class="badge" data-i18n="fixtureBadge">FIXTURE MODE</div><a href="/settings" id="language-shortcut" data-route>English</a><button id="refresh" class="quiet" data-i18n="refresh">Refresh</button><span id="sync" role="status"></span></header>
+<p id="language-warning" class="resource-warning" role="status" hidden></p><main id="app" aria-live="polite"></main><footer><span>LoopCast</span><span data-i18n="subtitle">Local history. Real platform sending unavailable.</span></footer></div>
+<dialog id="create-dialog" aria-labelledby="form-title"><form id="create-form"><div class="eyebrow" data-i18n="workspace">Local workspace</div><h2 id="form-title"></h2><p id="form-description"></p>
+<label><span data-i18n="mode">Mode</span><select name="mode"><option value="fixture" data-i18n="fixture">Fixture</option><option value="mpt" disabled></option></select></label>
+<label><span data-i18n="name">Task name</span><input name="title" required maxlength="120" autocomplete="off" dir="auto"></label>
+<label><span data-i18n="scenario">Scenario</span><select name="scenario"><option value="success" data-i18n="success">Successful run</option><option value="fail_once" data-i18n="failOnce"></option><option value="fail" data-i18n="fail"></option><option value="slow" data-i18n="slow"></option></select></label>
+<label><span data-i18n="delay">Execution delay (ms)</span><input name="delay_ms" type="number" min="0" max="3000" value="300" required></label>
+<p id="form-error" class="error" role="alert"></p><div class="dialog-actions"><button type="button" id="dialog-settings" data-i18n="settings">Settings</button><button type="button" id="dismiss" class="quiet" data-i18n="dismiss">Dismiss</button><button type="submit" class="primary" data-i18n="create">Create fixture →</button></div></form></dialog>
 <div id="notice" role="alert" hidden></div>
 </body></html>
