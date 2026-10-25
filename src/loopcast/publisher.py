@@ -1,4 +1,4 @@
-"""Bounded local simulator jobs; never a real uploader."""
+"""Single bounded execution owner for simulated and isolated platform jobs."""
 import json
 import queue
 import sys
@@ -10,14 +10,16 @@ from .diagnostics import child_context, log_event
 
 
 class Publisher:
-    def __init__(self, store):
+    def __init__(self, store, studio=None):
         self.store = store
+        self.studio = studio
         self.stopping = threading.Event()
         self.jobs = queue.Queue(maxsize=32)
-        self.thread = threading.Thread(target=self._loop, name='publication-simulator', daemon=True)
+        self.thread = threading.Thread(target=self._loop, name='publication-worker', daemon=True)
         self.directory = store.directory / 'simulator'
         self.directory.mkdir(exist_ok=True)
         self.store.publication_recover()
+        if self.studio: self.store.studio_recover()
         self.thread.start()
 
     def close(self):
@@ -33,6 +35,11 @@ class Publisher:
 
     def _loop(self):
         while not self.stopping.is_set():
+            if self.studio:
+                durable = self.store.studio_claim_job()
+                if durable:
+                    self.studio.execute_job(durable, self.stopping)
+                    continue
             try: job, scenario = self.jobs.get(timeout=.1)
             except queue.Empty: continue
             context = child_context(job.get('trace'))

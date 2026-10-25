@@ -55,3 +55,9 @@ export function acceptsSnapshot(previous: RunSnapshot | undefined, next: RunSnap
 }
 
 export type ApiPaths = paths;
+
+export async function assetText(id: string): Promise<string> {
+  const { response, data } = await requestJSON(`/v1/studio/assets/${encodeURIComponent(id)}/content`, {}, undefined, 'text');
+  if (!response.ok || typeof data !== 'string' || data.length > 20000) throw new ApiError(response.status, 'INVALID_MEDIA');
+  return data;
+}

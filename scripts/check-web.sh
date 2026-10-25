@@ -26,16 +26,15 @@ generator_dir="$work_dir/generator"
 mkdir -p "$generator_dir"
 PYTHONPATH="$root_dir/src:$root_dir/tests/integration" python - "$generator_dir" <<'PY'
 import json, pathlib, sys
-from generation_support import settings
+from studio_support import configurations
 directory = pathlib.Path(sys.argv[1])
-config = settings(directory)
-(directory / "generator.json").write_text(json.dumps(config))
+configurations(directory)
 PY
 
 public_port=18889
 data_dir="$work_dir/data"
 mkdir -p "$data_dir"
-"$work_dir/backend/bin/python" -I -m loopcast serve --host 127.0.0.1 --port 18888 --data-dir "$data_dir" --generator-config "$generator_dir/generator.json" --public-origin "http://127.0.0.1:$public_port" --trusted-proxy 127.0.0.1/32 >"$work_dir/backend.log" 2>&1 &
+"$work_dir/backend/bin/python" -I -m loopcast serve --host 127.0.0.1 --port 18888 --data-dir "$data_dir" --generator-config "$generator_dir/generator.json" --media-config "$generator_dir/media.json" --social-config "$generator_dir/social.json" --public-origin "http://127.0.0.1:$public_port" --trusted-proxy 127.0.0.1/32 >"$work_dir/backend.log" 2>&1 &
 backend_pid=$!
 (cd "$work_dir" && HOSTNAME=127.0.0.1 PORT=18887 NODE_ENV=production node server.js) >"$work_dir/frontend.log" 2>&1 &
 frontend_pid=$!
@@ -55,3 +54,8 @@ done
 curl -fsS "http://127.0.0.1:$public_port/healthz" | "$work_dir/backend/bin/python" -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
 browser_python=${LOOPCAST_BROWSER_PYTHON:-$(command -v python)}
 LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" "$browser_python" -I "$root_dir/tests/browser/check_console.py"
+
+LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" LOOPCAST_TEST_MEDIA="$generator_dir/sample.mp4" "$browser_python" -I "$root_dir/tests/browser/check_studio.py"
+
+installed_bridge=$("$work_dir/backend/bin/python" -I -c 'import loopcast.social_bridge; print(loopcast.social_bridge.__file__)')
+LOOPCAST_INSTALLED_BRIDGE="$installed_bridge" "$browser_python" -I "$root_dir/tests/browser/check_authorization.py"

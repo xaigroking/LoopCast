@@ -52,7 +52,7 @@ function detectLanguage(): string {
 async function installPack(code: string) {
   if (engine.hasResourceBundle(code, 'ui')) return;
   const pack = await loadPack(code);
-  for (const namespace of ['ui', 'state', 'errors'] as const) {
+  for (const namespace of ['ui', 'state', 'errors', 'studio'] as const) {
     engine.addResourceBundle(code, namespace, pack[namespace], true, true);
   }
 }
@@ -69,7 +69,7 @@ export async function initializeLanguage(): Promise<{ language: string; packErro
           supportedLngs: codes,
           load: 'currentOnly',
           resources: { en: english },
-          ns: ['ui', 'state', 'errors'],
+          ns: ['ui', 'state', 'errors', 'studio'],
           defaultNS: 'ui',
           interpolation: { escapeValue: false },
           returnNull: false,

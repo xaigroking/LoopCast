@@ -44,6 +44,7 @@ class RunnerTests(unittest.TestCase):
     def test_config_rejects_autopublish_and_undeclared_channels(self):
         with tempfile.TemporaryDirectory() as work:
             path = Path(work) / 'config.toml'
+            path.touch(mode=0o600)
             for text in ['[app]\nupload_post_enabled=true', '[app]\nupload_post_auto_upload=true', '[app]\nother_publish_key="secret"', '[publish]\nkey="secret"']:
                 path.write_text(text)
                 with self.assertRaises(ValueError): config_text(path)

@@ -63,7 +63,7 @@ async def main():
         await language.select_option("en")
         await page.locator("#theme-select").select_option("dark")
         await expect(page.locator("html")).to_have_attribute("data-theme", "dark")
-        await page.get_by_role("link", name="Your task console").click()
+        await page.locator('aside nav a[href="/"]').click()
         await page.get_by_role("button", name="+ New fixture").click()
         await page.get_by_label("Task name").fill("preserved browser draft")
         await page.get_by_label("Scenario").select_option("fail_once")
@@ -77,7 +77,7 @@ async def main():
         await page.locator("#dismiss").click()
         await page.locator('aside nav a[href="/settings"]').click()
         await page.locator("#language-select").select_option("en")
-        await page.get_by_role("link", name="Your task console").click()
+        await page.locator('aside nav a[href="/"]').click()
 
         seen_keys = []
         async def lose_first_create(route):

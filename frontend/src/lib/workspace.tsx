@@ -87,10 +87,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       if (!active) return;
       setLanguage(languageResult.language);
       setPackError(languageResult.packError);
-      setReady(true);
-      void apiRequest<{ video_generation: boolean }>('/v1/capabilities')
-        .then((caps) => active && setGeneratorAvailable(caps.video_generation))
-        .catch(() => undefined);
+      try {
+        const caps = await apiRequest<{ video_generation: boolean }>('/v1/capabilities');
+        if (active) setGeneratorAvailable(caps.video_generation);
+      } catch { /* An unavailable backend does not hide the workspace. */ }
+      if (active) setReady(true);
     })();
     const onPreferences = () => {
       const next = currentPreferences();

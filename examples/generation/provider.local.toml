@@ -1,0 +1,5 @@
+# Private runtime copy: chmod 0600. Supplied script/local media/custom audio or
+# no-voice mode can avoid model, stock-material and online TTS calls.
+[app]
+upload_post_enabled = false
+upload_post_auto_upload = false

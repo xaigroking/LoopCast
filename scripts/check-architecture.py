@@ -12,12 +12,22 @@ forbidden = {"fastapi", "starlette", "uvicorn", "next", "react"}
 allowed = {
     "domain": set(), "contracts": set(), "fixture": set(), "runner": set(),
     "migrations": set(), "diagnostics": set(), "publisher_cli": set(),
-    "storage": {"domain", "ledger", "migrations"}, "ledger": {"domain"},
-    "generation": {"contracts", "runner", "diagnostics"}, "worker": {"domain", "runner", "diagnostics"},
+    "storage": {"domain", "ledger", "migrations", "studio_storage", "account_storage", "release_storage"}, "ledger": {"domain"},
+    "mpt_bridge": set(), "mpt_install": {"contracts","media","network","runner"},
+    "generator_diagnostics": {"contracts","generation","media","runner"},
+    "studio_models": set(), "studio_rules": {"domain"},
+    "studio_storage": {"domain", "studio_models", "studio_rules"},
+    "studio_api": {"studio_models", "domain", "media", "generator_diagnostics"},
+    "account_storage": {"domain"}, "release_storage": {"domain", "studio_rules"},
+    "media": {"domain", "runner"}, "network": set(),
+    "creation": {"domain", "generation", "media", "runner", "diagnostics"},
+    "social": {"domain", "media", "network", "runner"}, "social_bridge": set(),
+    "studio_service": {"domain", "runner", "diagnostics"},
+    "generation": {"contracts", "runner", "diagnostics", "network"}, "worker": {"domain", "runner", "diagnostics"},
     "publisher": {"runner", "diagnostics"},
-    "runtime": {"storage", "worker", "generation", "publisher"},
-    "api": {"runtime", "storage", "diagnostics"}, "openapi": {"api"},
-    "__main__": {"api", "diagnostics"}, "__init__": set(),
+    "runtime": {"storage", "worker", "generation", "publisher", "media", "creation", "social", "studio_service"},
+    "api": {"runtime", "storage", "diagnostics", "studio_api"}, "openapi": {"api"},
+    "__main__": {"api", "diagnostics", "generator_diagnostics", "mpt_install"}, "__init__": set(),
 }
 graph = {name: set() for name in modules}
 for name, path in modules.items():

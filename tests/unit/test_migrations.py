@@ -33,7 +33,7 @@ class MigrationTests(unittest.TestCase):
                         after = [row[:8] for row in after]
                     self.assertEqual(after, before[table])
                 self.assertEqual(db.execute('PRAGMA foreign_keys').fetchone()[0], 1)
-                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0], 4)
+                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0], migrations.CURRENT_VERSION)
                 self.assertIsNone(db.execute("SELECT trace_id FROM runs WHERE id='run'").fetchone()[0])
             self.assertEqual(store.events('run', 0)[0]['id'], 1)
 
@@ -76,7 +76,7 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(snapshot['publications'][0]['state'], 'UNKNOWN')
             self.assertEqual(snapshot['publications'][0]['receipts'][0]['evidence'], 'uncertain canary')
             with store.transaction() as db:
-                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0], 4)
+                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0], migrations.CURRENT_VERSION)
                 for table, rows in before.items():
                     self.assertEqual([tuple(row) for row in db.execute('SELECT * FROM ' + table)], rows)
 
@@ -110,4 +110,4 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(attempt['trace']['trace_id'], trace)
             with store.transaction() as db:
                 self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(), [])
-                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0], 4)
+                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0], migrations.CURRENT_VERSION)

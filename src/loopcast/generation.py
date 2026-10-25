@@ -9,6 +9,7 @@ import uuid
 from .contracts import manifest
 from .runner import run, RunnerError
 from .diagnostics import child_context, log_event
+from .network import proxy_environment
 
 # Check installed files against the exact wheel before loading third-party code.
 VERIFY = r'''
@@ -33,12 +34,18 @@ APP_KEYS = {'llm_provider', 'openai_api_key', 'openai_base_url', 'openai_model_n
 
 
 def config_text(path):
+    if path and (Path(path).stat().st_size > 65536 or Path(path).stat().st_mode & 0o077): raise ValueError('Provider configuration must be private and bounded')
     value = tomllib.loads(Path(path).read_text()) if path else {'app': {}}
     if set(value) - {'app'} or not isinstance(value.get('app', {}), dict):
         raise ValueError('Only generation provider configuration is allowed')
     app = value.get('app', {})
     if set(app) - APP_KEYS:
         raise ValueError('Undeclared provider setting')
+    for key, value in app.items():
+        if key in {'pexels_api_keys', 'pixabay_api_keys'}:
+            if not isinstance(value, list) or not all(isinstance(item, str) and len(item) <= 4096 for item in value): raise ValueError('Invalid provider key list')
+        elif key not in {'upload_post_enabled', 'upload_post_auto_upload'} and (not isinstance(value, str) or len(value) > 4096):
+            raise ValueError('Invalid provider field type')
     for key in ('upload_post_enabled', 'upload_post_auto_upload'):
         if app.get(key, False) is not False:
             raise ValueError('Automatic publication is forbidden')
@@ -53,7 +60,7 @@ def config_text(path):
 class Generator:
     def __init__(self, settings):
         required = {'manifest', 'python', 'wheel', 'ffprobe', 'ffprobe_sha256'}
-        if not isinstance(settings, dict) or set(settings) - (required | {'config_ref', 'timeout'}) or not required <= set(settings):
+        if not isinstance(settings, dict) or set(settings) - (required | {'config_ref', 'timeout', 'voices', 'network', 'ffmpeg', 'ffmpeg_sha256'}) or not required <= set(settings):
             raise ValueError('Invalid generator configuration')
         self.manifest = manifest(settings['manifest'])
         self.python = Path(settings['python']).resolve(strict=True)
@@ -64,8 +71,18 @@ class Generator:
         if hashlib.sha256(self.probe.read_bytes()).hexdigest() != settings['ffprobe_sha256']:
             raise ValueError('Media probe digest mismatch')
         self.probe_hash = settings['ffprobe_sha256']
+        if ('ffmpeg' in settings) != ('ffmpeg_sha256' in settings): raise ValueError('Incomplete renderer configuration')
+        self.ffmpeg = Path(settings['ffmpeg']).resolve(strict=True) if settings.get('ffmpeg') else None
+        self.ffmpeg_hash = settings.get('ffmpeg_sha256')
+        if self.ffmpeg and hashlib.sha256(self.ffmpeg.read_bytes()).hexdigest() != self.ffmpeg_hash: raise ValueError('Renderer digest mismatch')
         self.config_ref = settings.get('config_ref')
-        config_text(self.config_ref)  # Validate without exposing secrets or storing them in state.
+        self.network = proxy_environment(settings.get('network'))
+        self.voices = settings.get('voices', ['no-voice', 'en-US-AriaNeural-Female', 'zh-CN-XiaoxiaoNeural-Female'])
+        if not isinstance(self.voices, list) or not self.voices or not all(isinstance(v, str) and 1 <= len(v) <= 100 for v in self.voices):
+            raise ValueError('Invalid voice allowlist')
+        provider = tomllib.loads(config_text(self.config_ref)).get('app', {})
+        self.sources = ['local'] + [name for name, key in [('pexels', 'pexels_api_keys'), ('pixabay', 'pixabay_api_keys')] if provider.get(key)]
+        self.script_generation = bool(provider.get('openai_api_key') or provider.get('azure_api_key'))
         self.timeout = settings.get('timeout', 300)
         if type(self.timeout) not in (int, float) or not 1 <= self.timeout <= 3600:
             raise ValueError('Invalid execution deadline')
@@ -73,8 +90,18 @@ class Generator:
 
     @staticmethod
     def environment(work):
-        return {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'HOME': str(work),
-                'MPT_HOME': str(work), 'TMPDIR': str(work)}
+        return {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'HOME': str(work), 'MPT_HOME': str(work), 'TMPDIR': str(work)}
+
+    def execution_environment(self, work):
+        env = self.environment(work)
+        if self.ffmpeg:
+            if hashlib.sha256(self.ffmpeg.read_bytes()).hexdigest() != self.ffmpeg_hash: raise RunnerError('RENDERER_CHANGED')
+            env.update({'IMAGEIO_FFMPEG_EXE': str(self.ffmpeg), 'FFMPEG_BINARY': str(self.ffmpeg), 'PATH': str(self.ffmpeg.parent) + ':' + str(self.probe.parent) + ':/usr/bin:/bin'})
+        if self.network.get('HTTPS_PROXY'): env['LOOPCAST_EDGE_PROXY'] = self.network['HTTPS_PROXY']
+        return env
+
+    def command(self):
+        return [self.python, '-I', str(Path(__file__).with_name('mpt_bridge.py')), 'cli']
 
     def verify(self):
         if hashlib.sha256(self.wheel.read_bytes()).hexdigest() != self.manifest['artifact_sha256']:
@@ -104,9 +131,8 @@ class Generator:
         try:
             config.write_text(config_text(self.config_ref))
             task_id = str(uuid.uuid4())
-            argv = [self.python, '-I', '-c', 'from app.launcher import main; raise SystemExit(main())',
-                    'cli', '--video-subject=' + value['title'], '--task-id', task_id]
-            raw = run(argv, work, self.environment(work), self.timeout, cancelled)
+            argv = self.command() + ['--video-subject=' + value['title'], '--task-id', task_id]
+            raw = run(argv, work, self.execution_environment(work) | self.network, self.timeout, cancelled)
             try:
                 result = json.loads(raw)
                 videos = result['result']['videos']

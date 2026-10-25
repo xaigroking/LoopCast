@@ -10,10 +10,12 @@ from .worker import Worker
 class ApplicationRuntime:
     """One process-local owner for storage, recovery, worker and publisher."""
 
-    def __init__(self, directory: str | Path, generator_settings=None):
+    def __init__(self, directory: str | Path, generator_settings=None, media_settings=None, social_settings=None):
         from .generation import Generator
 
-        self.generator = Generator(generator_settings) if generator_settings is not None else None
+        self.generator_settings, self.media_settings = generator_settings, media_settings
+        try: self.generator = Generator(generator_settings) if generator_settings is not None else None
+        except (OSError, ValueError, RuntimeError): self.generator = None
         self.directory = Path(directory).expanduser().resolve()
         self.directory.mkdir(parents=True, exist_ok=True)
         self._lock_file = (self.directory / "service.lock").open("a")
@@ -31,10 +33,19 @@ class ApplicationRuntime:
         self.publisher = None
         try:
             self.store = Store(self.directory, self.generator.manifest if self.generator else None)
-            self.worker = Worker(self.store, generator=self.generator)
+            from .media import MediaLibrary
+            from .creation import CreationExecutor
+            from .social import SocialAdapter
+            from .studio_service import StudioControl
+            try: self.media = MediaLibrary(self.store, media_settings)
+            except (OSError, ValueError, RuntimeError): self.media = MediaLibrary(self.store, None)
+            self.social = SocialAdapter(self.directory, social_settings)
+            self.studio = StudioControl(self.store, self.media, self.social, self.generator)
+            creation = CreationExecutor(self.generator, self.media) if self.generator else None
+            self.worker = Worker(self.store, generator=self.generator, creation=creation)
             self.worker.start()
             from .publisher import Publisher
-            self.publisher = Publisher(self.store)
+            self.publisher = Publisher(self.store, studio=self.studio)
         except BaseException:
             if self.worker is not None:
                 self.worker.close()
@@ -42,7 +53,7 @@ class ApplicationRuntime:
             raise
 
     def ready(self) -> bool:
-        return not self.stopping.is_set() and self.worker is not None and self.worker.thread.is_alive()
+        return not self.stopping.is_set() and self.worker is not None and self.worker.thread.is_alive() and self.publisher is not None and self.publisher.thread.is_alive()
 
     def close(self):
         self.stopping.set()

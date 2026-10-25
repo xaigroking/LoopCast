@@ -14,6 +14,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self): self.forward()
     def do_HEAD(self): self.forward()
     def do_POST(self): self.forward()
+    def do_PUT(self): self.forward()
+    def do_PATCH(self): self.forward()
 
     def forward(self):
         path = urlsplit(self.path).path

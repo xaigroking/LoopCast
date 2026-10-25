@@ -18,8 +18,9 @@ def _log_attempt(event, attempt, **extra):
 
 
 class Worker:
-    def __init__(self, store, timeout=8, generator=None):
+    def __init__(self, store, timeout=8, generator=None, creation=None):
         self.generator = generator
+        self.creation = creation
         self.store, self.timeout = store, timeout
         self.stop_event = threading.Event()
         self.wake = threading.Event()
@@ -138,6 +139,28 @@ class Worker:
             self.store.stage(run_id, token, 'prepare', 'RUNNING')
             self.store.stage(run_id, token, 'prepare', 'SUCCEEDED')
             self.store.stage(run_id, token, 'execute', 'RUNNING')
+            recipe = self.store.studio_generation_input(run_id)
+            if recipe:
+                if self.creation is None: raise RunnerError('COMPONENT_UNAVAILABLE')
+                assets = self.creation.execute(recipe, work, attempt, cancelled)
+                self.store.stage(run_id, token, 'execute', 'SUCCEEDED')
+                self.store.stage(run_id, token, 'report', 'RUNNING')
+                videos = [asset for asset in assets if asset['kind'] == 'video']
+                identity = uid()
+                if videos:
+                    asset = videos[-1]
+                    artifact_path = self.store.artifact_dir / (identity + '.mp4')
+                    shutil.copyfile(self.creation.library.path(asset['id']), artifact_path)
+                    content = artifact_path.read_bytes()
+                    metadata = {'id': identity, 'size': len(content), 'sha256': hashlib.sha256(content).hexdigest(), 'storage_ref': artifact_path.name, 'media_type': asset['media_type'], 'media': asset['metadata']}
+                else:
+                    artifact_path = self.store.artifact_dir / (identity + '.txt')
+                    content = json.dumps({'stage': recipe['stage'], 'assets': [{'id': a['id'], 'sha256': a['sha256']} for a in assets]}).encode()
+                    artifact_path.write_bytes(content)
+                    metadata = {'id': identity, 'size': len(content), 'sha256': hashlib.sha256(content).hexdigest(), 'storage_ref': artifact_path.name}
+                self.store.stage(run_id, token, 'report', 'SUCCEEDED')
+                if self.store.finish(run_id, token, 'SUCCEEDED', artifact=metadata): artifact_path = None
+                return
             source, media = self.generator.generate(attempt['input'], work, cancelled,
                                                     {**attempt['trace'], 'run_id': run_id, 'attempt_id': attempt['id']})
             self.store.stage(run_id, token, 'execute', 'SUCCEEDED')
