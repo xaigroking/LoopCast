@@ -384,6 +384,7 @@ function SettingsView() {
           <option value="auto">{t('autoLanguage')}</option>
           {languageOptions.map((item) => <option key={item.code} value={item.code}>{item.name} · {names.of(item.code)}</option>)}
         </select></label>
+        <p>{t('languageCoverage')}</p>
         {workspace.packError && <p className="error">{t('packError')}</p>}
       </Panel>
       <Panel title={t('appearance')}>

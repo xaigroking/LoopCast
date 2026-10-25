@@ -86,7 +86,8 @@
     "bytes": "{{size}} 字节",
     "packError": "语言包加载失败，暂时显示英文。",
     "taskCount_other": "{{count, number}} 项任务",
-    "actions": "操作"
+    "actions": "操作",
+    "languageCoverage": "新增和更新流程以英文、简体中文维护；其他语言保留既有翻译，缺失内容回退英文。"
   },
   "state": {
     "QUEUED": "排队中",

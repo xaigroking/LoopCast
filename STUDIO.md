@@ -1,6 +1,8 @@
 # Creation and controlled publishing
 
-The six workspace routes share the same brand, theme and 20 language packs.
+The six workspace routes share the same brand and themes. English and Simplified Chinese are maintained for new
+workflows. The other 18 selectable language packs retain existing translations
+and fall back to English for missing content.
 `/create` owns editable drafts and immutable revisions; `/library` owns verified
 media; `/accounts` owns connections and short-lived authorization sessions;
 `/publish` freezes exact media and account targets before any send. `/` retains
@@ -156,7 +158,7 @@ classification, lineage and duplicate guards. `scripts/check-web.sh` installs
 the release wheel and extracted standalone frontend outside the source tree,
 then exercises original workflows and creation-to-publishing with isolated
 fixtures. It checks video/audio outputs, playback, draft preservation, target
-states, all 20 locales, RTL and 1440/390 layouts. CI performs no real account login
+states, English/Simplified Chinese, representative RTL packs and 1440/390 layouts. CI performs no real account login
 or live send.
 
 `scripts/build-release.sh` requires committed source, checks generated API types,

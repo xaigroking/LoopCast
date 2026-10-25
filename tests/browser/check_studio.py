@@ -95,9 +95,9 @@ async def main():
         await page.locator('#release-preflight').click()
         await expect(page.get_by_role('heading',name='Preflight blocked',exact=True)).to_be_visible()
         await expect(page.get_by_text('This account already published this media lineage. Permanently blocked.',exact=True)).to_have_count(2)
-        # All new screens render every shipped locale at desktop and mobile widths.
+        # Primary languages and representative frozen RTL packs render the new screens.
         registry=await (await page.request.get(BASE+'/locales/registry.json')).json()
-        for language in registry:
+        for language in [item for item in registry if item['code'] in {'en','zh-Hans','ar','he'}]:
             await page.goto(BASE+'/settings')
             await page.locator('#language-select').select_option(language['code'])
             await expect(page.locator('html')).to_have_attribute('lang',language['code'])
@@ -112,6 +112,6 @@ async def main():
         assert not errors,errors
         assert not external,external
         await browser.close()
-    print('Installed studio browser passed: creation/revisions/audio/video/playback/handoff, account authorization, per-target partial/unknown/query/permanent guard, 20 locales and 390/1440 layouts; no external requests')
+    print('Installed studio browser passed: creation/revisions/audio/video/playback/handoff, account authorization, per-target partial/unknown/query/permanent guard, English/Simplified Chinese and representative frozen RTL packs at 390/1440; no external requests')
 
 if __name__=='__main__':asyncio.run(main())

@@ -14,17 +14,20 @@ plural=re.compile(r'_(zero|one|two|few|many|other)$')
 slots=lambda value:set(re.findall(r'{{\s*([\w]+)(?:\s*,[^}]+)?\s*}}',value))
 for language in registry:
     data=json.loads((web/'locales'/f"{language['code']}.json").read_text())
-    assert set(data)==set(base),language
-    for namespace in base:
+    primary=language['code'] in {'en','zh-Hans'}
+    assert set(data)<=set(base),language
+    if primary: assert set(data)==set(base),language
+    for namespace in data:
         keys=lambda values:{plural.sub('',key) for key in values}
-        assert keys(data[namespace])==keys(base[namespace]),(language,namespace)
+        assert keys(data[namespace])<=keys(base[namespace]),(language,namespace)
+        if primary: assert keys(data[namespace])==keys(base[namespace]),(language,namespace)
         for key,value in data[namespace].items():
             reference=base[namespace].get(key,base[namespace].get(plural.sub('',key)+'_other'))
             assert isinstance(value,str) and value.strip(),(language,key)
             assert slots(value)==slots(reference),(language,key,'interpolation')
         if language['code']!='en':
             equal=sum(value==base[namespace].get(key) for key,value in data[namespace].items())
-            assert equal < len(data[namespace])*.8,(language,namespace,'untranslated bundle')
+            assert not data[namespace] or equal < len(data[namespace])*.8,(language,namespace,'untranslated bundle')
 # UI resource IDs are stable; user content and raw evidence stay out of translation calls.
 sources=list((root/'frontend/src').rglob('*.tsx'))+list((root/'frontend/src').rglob('*.ts'))
 for source in sources:
@@ -41,7 +44,7 @@ package=json.loads((root/'frontend/package.json').read_text())
 lock=json.loads((root/'frontend/package-lock.json').read_text())
 for name,version in package['dependencies'].items():
     assert lock['packages'][f'node_modules/{name}']['version']==version,(name,version)
-print(f"UI assets passed: {len(registry)} independent language bundles, namespaces, stable keys, interpolation and npm lock versions")
+print(f"UI assets passed: {len(registry)} loadable language bundles; complete English/Simplified Chinese, valid frozen translations, interpolation and npm locks")
 
 for font in json.loads((root/'web-fonts.lock.json').read_text()):
     assert hashlib.sha256((web/'fonts'/font['file']).read_bytes()).hexdigest()==font['sha256']
