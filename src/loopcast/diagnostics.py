@@ -52,9 +52,13 @@ def child_context(parent=None):
     carrier = parent.get("traceparent")
     # Older persisted links carry only trace_id; retain their correlation when
     # resuming queued work after an upgrade, without inventing a request ID.
-    if not carrier and re.fullmatch(r"(?!0{32})[a-f0-9]{32}", parent.get("trace_id") or ""):
+    legacy = not carrier and re.fullmatch(r"(?!0{32})[a-f0-9]{32}", parent.get("trace_id") or "")
+    if legacy:
         carrier = f"00-{parent['trace_id']}-{secrets.token_hex(8)}-00"
-    return new_context(carrier, parent.get("request_id"))
+    context = new_context(carrier, parent.get("request_id"))
+    if legacy:
+        context['parent_span_id'] = None  # v3 did not record the originating span
+    return context
 
 
 def log_event(component, event, context=None, **fields):

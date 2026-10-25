@@ -239,6 +239,19 @@ def _snapshot_response(value, status=200):
     return JSONResponse(snapshot.model_dump(), status_code=status)
 
 
+def _event_snapshot(payload):
+    value = json.loads(payload)
+    # Early fixture history predates generation/publication. Upcast only those
+    # additive fields when reading an event; never rewrite the recorded payload
+    # or copy today's publication facts into a historical snapshot.
+    if isinstance(value, dict) and value.get('mode') == 'fixture':
+        for key, default in {'publications': [], 'component': None, 'content_id': None, 'media': []}.items():
+            value.setdefault(key, default)
+        if isinstance(value.get('allowed_actions'), dict):
+            value['allowed_actions'].setdefault('add_simulated_target', {'enabled': False, 'reason_code': 'SIMULATOR_ONLY'})
+    return RunSnapshot.model_validate(value)
+
+
 def create_app(
     data_dir="~/.local/share/loopcast",
     generator_settings=None,
@@ -446,7 +459,7 @@ def create_app(
                 while not runtime.stopping.is_set():
                     events = await asyncio.to_thread(runtime.store.events, run_id, cursor)
                     for event in events:
-                        value = RunSnapshot.model_validate_json(event["payload"])
+                        value = _event_snapshot(event["payload"])
                         yield f"id: {event['id']}\nevent: snapshot\ndata: {value.model_dump_json()}\n\n"
                         cursor = event["id"]
                     current = await asyncio.to_thread(runtime.store.snapshot, run_id)

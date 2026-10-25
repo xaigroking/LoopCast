@@ -20,6 +20,7 @@ class ASGIThread:
             log_level="critical",
             lifespan="on",
             proxy_headers=False,
+            timeout_graceful_shutdown=5,
         ))
         self.thread = threading.Thread(target=self.server.run, daemon=True)
 

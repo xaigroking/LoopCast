@@ -30,6 +30,10 @@ class StorageTests(unittest.TestCase):
         attempt = self.store.claim()
         self.assertEqual(attempt['run_id'], run['run_id'])
         self.assertEqual(attempt['trace_id'], trace_id)
+        from loopcast.diagnostics import child_context
+        resumed = child_context(attempt['trace'])
+        self.assertEqual(resumed['trace_id'], trace_id)
+        self.assertIsNone(resumed['parent_span_id'])
         with self.store.transaction() as db:
             self.assertEqual(db.execute('SELECT trace_id FROM runs WHERE id=?', (run['run_id'],)).fetchone()[0], trace_id)
             link = db.execute('SELECT trace_id,attempt_id,operation FROM trace_links WHERE run_id=?', (run['run_id'],)).fetchone()

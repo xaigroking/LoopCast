@@ -22,7 +22,7 @@ async def _serve(args, settings):
     sock.setblocking(False)
     port = sock.getsockname()[1]
     app = create_app(args.data_dir, settings, public_origin=args.public_origin, trusted_proxies=tuple(args.trusted_proxy))
-    config = uvicorn.Config(app, host=args.host, port=port, workers=1, reload=False, access_log=False, proxy_headers=False, lifespan="on")
+    config = uvicorn.Config(app, host=args.host, port=port, workers=1, reload=False, access_log=False, proxy_headers=False, lifespan="on", timeout_graceful_shutdown=5)
     server = uvicorn.Server(config)
     task = asyncio.create_task(server.serve(sockets=[sock]))
     try:

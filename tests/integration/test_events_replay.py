@@ -3,6 +3,10 @@ import tempfile
 import time
 import unittest
 import urllib.request
+import sqlite3
+from pathlib import Path
+from loopcast import migrations
+from loopcast.domain import canonical, digest
 from support import ServerProcess
 from asgi_support import ASGIThread
 
@@ -88,3 +92,56 @@ class EventTests(unittest.TestCase):
             time.sleep(.02)
         self.assertEqual(service.runtime.stream_count, 0)
         self.assertEqual(service.runtime.store.snapshot(run['run_id']), run)
+
+    def test_previous_fixture_history_replays_through_installed_api_without_rewriting_it(self):
+        self.server.stop()
+        # Use a separate real v1 database and the original fixture snapshot shape.
+        directory = Path(self.temp.name) / 'previous'
+        directory.mkdir()
+        run_id, attempt_id = '1' * 32, '2' * 32
+        value = {'mode': 'fixture', 'title': 'historical fixture', 'scenario': 'fail', 'delay_ms': 10}
+        historical = {
+            'run_id': run_id, 'mode': 'fixture', 'input': value, 'input_digest': digest(value),
+            'state': 'FAILED', 'state_version': 1, 'created_at': 'time', 'updated_at': 'time',
+            'last_event_id': 1, 'tasks': [], 'artifacts': [],
+            'attempts': [{'id': attempt_id, 'number': 1, 'state': 'FAILED', 'started_at': 'time', 'ended_at': 'time', 'error': 'FIXTURE_FAILED', 'evidence': None}],
+            'allowed_actions': {'cancel': {'enabled': False, 'reason_code': 'CANCEL_NOT_APPLICABLE'}, 'retry': {'enabled': True, 'reason_code': 'AVAILABLE'}},
+        }
+        payload = canonical(historical)
+        with sqlite3.connect(directory / 'state.sqlite3') as db:
+            db.executescript(migrations.VERSION_ONE)
+            db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?)', (run_id, 'fixture', canonical(value), digest(value), 'FAILED', 1, 'time', 'time'))
+            db.execute('INSERT INTO attempts VALUES(?,?,?,?,?,?,?,?,?)', (attempt_id, run_id, 1, '3' * 32, 'FAILED', 'time', 'time', 'FIXTURE_FAILED', None))
+            db.execute('INSERT INTO events VALUES(?,?,?,?,?,?)', (1, run_id, 1, 'finished', 'time', payload))
+            db.execute('INSERT INTO idempotency VALUES(?,?,?,?)', ('create', 'historical-key', digest(value), run_id))
+        previous = ServerProcess(directory).start()
+        self.addCleanup(previous.stop)
+        status, current = previous.request('/v1/runs/' + run_id)
+        self.assertEqual(status, 200)
+        self.assertEqual(current['input_digest'], digest(current['input']))
+        self.assertEqual(previous.request('/v1/runs', value, 'historical-key'), (200, current))
+        with stream(previous.url + '/v1/runs/' + run_id + '/events', 0) as response:
+            replayed = snapshots(response)
+        self.assertEqual(replayed[0]['attempts'], historical['attempts'])
+        self.assertEqual(replayed[0]['state_version'], 1)
+        self.assertEqual(replayed[0]['publications'], [])
+        self.assertEqual(replayed[-1], current)
+        with sqlite3.connect(directory / 'state.sqlite3') as db:
+            self.assertEqual(db.execute('SELECT payload FROM events WHERE id=1').fetchone()[0], payload)
+
+    def test_shutdown_cancels_an_idle_stream_and_releases_the_directory_owner(self):
+        self.server.stop()
+        service = ASGIThread(self.temp.name).start()
+        self.addCleanup(service.stop)
+        service.runtime.worker.close()
+        run, _ = service.runtime.store.create({}, 'shutdown-stream')
+        response = stream(service.url + '/v1/runs/' + run['run_id'] + '/events', run['last_event_id'])
+        self.addCleanup(response.close)
+        self.assertEqual(response.readline(), b': connected\n')
+        started = time.monotonic()
+        service.stop()
+        self.assertLess(time.monotonic() - started, 8)
+        self.assertEqual(service.runtime.stream_count, 0)
+        from loopcast.runtime import ApplicationRuntime
+        owner = ApplicationRuntime(self.temp.name)
+        owner.close()

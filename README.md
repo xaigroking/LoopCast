@@ -55,8 +55,13 @@ mode for that directory.
 The `python -m loopcast serve` CLI remains as a backend-only launch command; it
 no longer serves pages or static assets. Stop the old service before starting
 the new backend on the same data directory. SQLite and domain tables remain in
-place. For rollback, stop and drain the new backend, reinstall the previous
-code and keep the current database; do not restore an older snapshot over new
+place. Shutdown drains HTTP requests for at most five seconds, then cancels
+remaining streams before stopping the executor and publisher. Queued work stays
+durable; interrupted active work records an interruption and is recovered at
+restart. For code rollback, stop both services and choose a binary that supports
+the current database schema. Schema v4 adds diagnostic links; pre-v4 binaries
+reject it. If no compatible prior binary exists, use a forward fix. Keep the
+current database and immutable media; do not restore an older snapshot over new
 writes.
 
 ## Task behavior
