@@ -17,6 +17,8 @@ Host/Origin checks prevent cross-site writes but do not authenticate users.
 python3.12 -m pip install --require-hashes -r requirements-ci.lock
 python3.12 -m pip install --require-hashes -r requirements-runtime.lock
 python3.12 -m build --no-isolation
+python3.12 -m pip install --no-deps --force-reinstall dist/*.whl
+python3.12 -m loopcast.openapi > dist/openapi.json
 cd frontend
 npm ci
 npm run types:api
@@ -93,8 +95,14 @@ and an `Idempotency-Key`. Reuse a key only with the same normalized input.
 Replays return the current snapshot; conflicts return 409 with a refreshable
 snapshot when available. Errors contain a stable code, message and request ID.
 Requests accept and return W3C `traceparent`; invalid or all-zero caller context
-is replaced with a fresh trace. Request logs use structured route templates and
-correlate asynchronous run attempts through a durable trace link. Trace IDs do
+is replaced with a fresh trace using the pinned OpenTelemetry propagator. Each
+HTTP operation gets a local span and server-generated request ID. Durable links
+connect that request to run/attempt and publication intent/attempt identities;
+worker, generation adapter and publisher diagnostics create child spans. The CLI
+emits application diagnostics as JSON to stderr and preserves stdout machine
+protocols. Logs contain fixed events, route templates and safe correlation fields;
+headers, baggage, raw paths, account names, request bodies, provider configuration
+and child output are excluded. No telemetry collector is required. Trace IDs do
 not authorize actions or replace idempotency keys.
 
 ```sh
@@ -113,6 +121,39 @@ without pruning. Event streams are capped at 16 and release on disconnect or
 terminal state. The Web client rejects older versions/cursors, closes streams
 when navigating, and labels disconnected views as stale. Lists poll; terminal
 details settle until refresh, focus, or a local command starts a new attempt.
+
+JSON reads have a 10-second total budget, at most three attempts and a 4-second
+per-attempt limit, including the response body. Only transient read failures use
+bounded exponential backoff with jitter. Writes run once with a 10-second budget;
+ambiguous responses retain the original pending key for an explicit retry. A
+publication in UNKNOWN remains blocked until receipt evidence resolves it.
+Generation runs in the separately configured process with bounded execution and
+probe deadlines; the control plane does not automatically replay provider work.
+
+Streams send an initial frame immediately and an application heartbeat every five
+seconds. The client detects 20 seconds without traffic, closes the failed source
+and resumes from its last accepted cursor. An outage has at most five reconnects
+and a 60-second budget; opening a connection without data does not reset it.
+Heartbeat/data traffic keeps healthy long streams open. Exhaustion shows the
+existing refresh feedback; route changes and offline transitions cancel reads,
+timers and streams.
+
+## Code boundaries
+
+`domain.py` owns pure run validation, action rules and shared value types;
+`contracts.py` validates component manifests. `Store` and its publication methods
+own all durable writes and transactional identities. `ApplicationRuntime` owns
+the sole executor and publication worker. `Worker` calls the generation adapter;
+the publisher calls the bounded simulator adapter. These adapters cannot write a
+second business database or change state outside Store's guarded operations.
+FastAPI owns only HTTP validation, error envelopes, streaming and calls into
+those interfaces. The frontend's API client consumes generated OpenAPI types;
+its cache holds monotonic view snapshots rather than authoritative state.
+
+`scripts/check-architecture.py` checks permitted Python dependencies and cycles,
+including deferred imports. `npm run check:architecture` parses frontend imports
+to check UI/library boundaries, backend imports and cycles. Installed-artifact
+contract and integration tests cover the behavior behind these static guards.
 
 Report bytes are served at `/v1/artifacts/{id}/content`. The backend publishes
 typed OpenAPI models and structured errors; unknown API paths return JSON 404
@@ -140,6 +181,11 @@ report access, retry, offline recovery, stale responses and repeated navigation.
 Browser tooling is locked for Linux x86_64 and CPython 3.12. Node/npm, frontend
 runtime packages and Python runtime dependencies are pinned. Fonts and language
 bundles are included in the frontend archive, with no runtime CDN requests.
+The release build also runs `npm run test:network` with local fault servers and
+controlled event sources. To exercise the actual Caddy template locally, set
+`LOOPCAST_CADDY` to the provisioned Caddy executable when running
+`scripts/check-web.sh`; otherwise the fixture proxy is used. Template upstreams
+can be set with `LOOPCAST_API_UPSTREAM` and `LOOPCAST_WEB_UPSTREAM`.
 
 ## Optional isolated video generation
 

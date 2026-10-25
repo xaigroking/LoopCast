@@ -23,6 +23,14 @@ class GenerationApiTests(unittest.TestCase):
                 content=server.request('/v1/artifacts/'+artifact['id']+'/content')[1]
                 self.assertEqual(hashlib.sha256(content).hexdigest(),artifact['sha256'])
                 self.assertFalse(any((data/'work').rglob('config.toml')))
+                entries = [json.loads(line) for line in server.diagnostics if line.startswith('{')]
+                adapter = next(entry for entry in entries if entry['event'] == 'adapter.completed')
+                worker = next(entry for entry in entries if entry['event'] == 'attempt.started')
+                self.assertEqual(adapter['result'], 'SUCCEEDED')
+                self.assertEqual(adapter['run_id'], run['run_id'])
+                self.assertEqual(adapter['trace_id'], worker['trace_id'])
+                self.assertEqual(adapter['request_id'], worker['request_id'])
+                self.assertEqual(adapter['parent_span_id'], worker['span_id'])
                 server.stop();server.start()
                 replay=server.request('/v1/runs',{'mode':'mpt','title':'orange video'},'video')[1]
                 self.assertEqual(replay,final)

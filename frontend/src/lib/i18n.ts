@@ -6,6 +6,7 @@ import { initReactI18next } from 'react-i18next';
 import registry from '../../public/locales/registry.json';
 import english from '../../public/locales/en.json';
 import { currentPreferences } from './preferences';
+import { requestJSON } from './http';
 
 export type LocaleItem = (typeof registry)[number];
 export const locales = registry as LocaleItem[];
@@ -29,9 +30,10 @@ export function canonicalLocale(tag: string): string {
 }
 
 async function loadPack(code: string) {
-  const response = await fetch(`/locales/${encodeURIComponent(code)}.json`, { cache: 'force-cache' });
+  const { response, data } = await requestJSON(`/locales/${encodeURIComponent(code)}.json`, { cache: 'force-cache' });
   if (!response.ok) throw new Error(`Language pack ${code} failed with ${response.status}`);
-  return response.json() as Promise<typeof english>;
+  if (!data) throw new Error('Language pack is invalid');
+  return data as typeof english;
 }
 
 function detectLanguage(): string {

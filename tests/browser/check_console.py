@@ -118,6 +118,36 @@ async def main():
         assert api("/v1", body={})[0] == 404
         assert api("/v1/unknown")[0] == 404
 
+        # Malformed success and server errors are ambiguous write outcomes too.
+        # Each explicit retry must keep its identity; no automatic POST replay.
+        ambiguous_keys = []
+        async def ambiguous_create(route):
+            if route.request.method != 'POST':
+                await route.continue_(); return
+            ambiguous_keys.append(route.request.headers.get('idempotency-key'))
+            result = await route.fetch()
+            if len(ambiguous_keys) == 1:
+                await route.fulfill(status=200, content_type='application/json', body='{')
+            elif len(ambiguous_keys) == 2:
+                await route.fulfill(status=500, content_type='application/json', body='{"error":{"code":"INTERNAL_ERROR"}}')
+            else:
+                await route.fulfill(response=result)
+        await page.goto(BASE + '/')
+        await page.get_by_role('button', name='+ New fixture').click()
+        await page.get_by_label('Task name').fill('ambiguous response identity')
+        await page.get_by_label('Scenario').select_option('success')
+        await page.route('**/v1/runs', ambiguous_create)
+        for count in (1, 2):
+            await page.get_by_role('button', name='Create fixture →').click()
+            await expect(page.locator('#form-error')).to_contain_text('retry safely')
+            assert len(ambiguous_keys) == count
+        await page.get_by_role('button', name='Create fixture →').click()
+        await page.wait_for_url('**/runs/*')
+        await page.unroute('**/v1/runs', ambiguous_create)
+        assert len(ambiguous_keys) == 3 and len(set(ambiguous_keys)) == 1
+        await expect(page.locator('[data-state="SUCCEEDED"]').first).to_be_visible(timeout=15000)
+        assert len([item for item in api('/v1/runs?limit=100')[1]['items'] if item['input']['title'] == 'ambiguous response identity']) == 1
+
         await page.goto(BASE + "/")
         await page.get_by_role("button", name="+ New fixture").click()
         await page.get_by_label("Task name").fill("retry from production UI")
@@ -162,6 +192,23 @@ async def main():
         await expect(second.get_by_role("alert")).to_be_visible()
         await first.close()
         await second.close()
+
+        # An external retry changes a settled detail back into an active run.
+        # Refresh must subscribe using the newly accepted snapshot.
+        status, stale_seed = api('/v1/runs', {'title': 'refresh after external retry', 'scenario': 'fail_once', 'delay_ms': 700}, 'external-retry')
+        assert status == 202
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            _, stale_seed = api('/v1/runs/' + stale_seed['run_id'])
+            if stale_seed['state'] == 'FAILED': break
+            await asyncio.sleep(.05)
+        assert stale_seed['state'] == 'FAILED'
+        await page.goto(BASE + '/runs/' + stale_seed['run_id'])
+        await expect(page.locator('[data-state="FAILED"]').first).to_be_visible()
+        assert api('/v1/runs/' + stale_seed['run_id'] + '/retry', {'expected_version': stale_seed['state_version']}, 'external-command')[0] == 202
+        await page.locator('#refresh').click()
+        await expect(page.locator('[data-state="RUNNING"]').first).to_be_visible(timeout=2000)
+        await expect(page.locator('[data-state="SUCCEEDED"]').first).to_be_visible(timeout=15000)
 
         page.set_default_timeout(15000)
         await page.set_viewport_size({"width": 390, "height": 844})

@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import urllib.error
 import urllib.request
+from loopcast.domain import digest
 
 from support import ServerProcess
 from asgi_support import ASGIThread
@@ -90,6 +91,20 @@ class ASGIContractTests(unittest.TestCase):
         status, _, content = self.post('/v1/runs', b'{"title":', key='malformed')
         self.assertEqual(status, 400, content)
         self.assertEqual(json.loads(content)['error']['code'], 'INVALID_INPUT')
+
+    def test_defaults_and_nulls_preserve_domain_validation_without_coercion(self):
+        status, _, content = self.post('/v1/runs', {}, key='defaults')
+        self.assertEqual(status, 202)
+        run = json.loads(content)
+        self.assertEqual(run['input'], {'mode': 'fixture', 'title': 'Untitled fixture', 'scenario': 'success', 'delay_ms': 150})
+        self.assertEqual(digest(run['input']), run['input_digest'])
+        for body in ({'title': None}, {'delay_ms': None}, {'delay_ms': '150'}, {'delay_ms': 150.0}, {'scenario': None}):
+            status, _, content = self.post('/v1/runs', body, key='strict')
+            self.assertEqual(status, 400, content)
+            self.assertEqual(json.loads(content)['error']['code'], 'INVALID_INPUT')
+        path = '/v1/runs/' + run['run_id'] + '/cancel'
+        for body in ({}, {'expected_version': None}, {'expected_version': '1'}):
+            self.assertEqual(self.post(path, body)[0], 400)
 
     def test_trace_context_is_validated_returned_and_linked_to_async_run(self):
         parent_trace = '1234567890abcdef1234567890abcdef'

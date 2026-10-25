@@ -1,68 +1,13 @@
 """Transactional task state. All execution and HTTP mutations pass through Store."""
 
 from contextlib import contextmanager, closing
-from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
 import re
 import sqlite3
-import uuid
 
-STAGES = ('prepare', 'execute', 'report')
-TERMINAL = {'SUCCEEDED', 'FAILED', 'CANCELLED'}
-
-
-def uid():
-    return uuid.uuid4().hex
-
-
-def now():
-    return datetime.now(timezone.utc).isoformat()
-
-
-def canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
-
-
-def digest(value):
-    return hashlib.sha256(canonical(value).encode()).hexdigest()
-
-
-class Problem(Exception):
-    def __init__(self, code, message, status=409, run_id=None):
-        super().__init__(message)
-        self.code, self.status, self.run_id = code, status, run_id
-
-
-def actions(state):
-    return {
-        'cancel': {'enabled': state in {'QUEUED', 'RUNNING'},
-                   'reason_code': 'AVAILABLE' if state in {'QUEUED', 'RUNNING'} else 'CANCEL_NOT_APPLICABLE'},
-        'retry': {'enabled': state == 'FAILED',
-                  'reason_code': 'AVAILABLE' if state == 'FAILED' else 'RETRY_REQUIRES_FAILURE'},
-    }
-
-
-def validate_input(value):
-    if not isinstance(value, dict) or set(value) - {'mode', 'title', 'scenario', 'delay_ms'}:
-        raise Problem('INVALID_INPUT', 'Use mode, title, scenario and delay_ms fields only.', 400)
-    if value.get('mode') == 'mpt':
-        if set(value) - {'mode', 'title'} or not isinstance(value.get('title'), str) or not 1 <= len(value['title'].strip()) <= 120:
-            raise Problem('INVALID_INPUT', 'Provide a generation title of 1–120 characters.', 400)
-        return {'mode': 'mpt', 'title': value['title'].strip()}
-    if value.get('mode', 'fixture') != 'fixture':
-        raise Problem('CAPABILITY_UNAVAILABLE', 'Only fixture mode is available.', 422)
-    title = value.get('title', 'Untitled fixture')
-    scenario = value.get('scenario', 'success')
-    delay = value.get('delay_ms', 150)
-    if not isinstance(title, str) or not title.strip() or len(title) > 120:
-        raise Problem('INVALID_INPUT', 'Title must contain 1–120 characters.', 400)
-    if scenario not in ('success', 'fail_once', 'fail', 'slow'):
-        raise Problem('INVALID_INPUT', 'Unknown fixture scenario.', 400)
-    if type(delay) is not int or not 0 <= delay <= 3000:
-        raise Problem('INVALID_INPUT', 'delay_ms must be an integer between 0 and 3000.', 400)
-    return {'mode': 'fixture', 'title': title.strip(), 'scenario': scenario, 'delay_ms': delay}
+from .domain import STAGES, TERMINAL, uid, now, canonical, digest, Problem, actions, validate_input
 
 
 from .ledger import PublicationMethods
@@ -163,13 +108,29 @@ class Store(PublicationMethods):
         n = db.execute('SELECT COALESCE(MAX(number),0)+1 FROM attempts WHERE run_id=?', (run_id,)).fetchone()[0]
         db.execute('INSERT INTO attempts(id,run_id,number,token,state) VALUES(?,?,?,?,?)', (uid(), run_id, n, uid(), 'QUEUED'))
 
-    def _link_trace(self, db, trace_id, run_id, operation):
-        if trace_id is None:
+    def _link_trace(self, db, trace, run_id, operation, intent_id=None, publication_attempt_id=None):
+        if trace is None:
             return
+        context = dict(trace) if isinstance(trace, dict) else {'trace_id': trace}
+        trace_id = context.get('trace_id')
         if not isinstance(trace_id, str) or not re.fullmatch(r"[a-f0-9]{32}", trace_id) or trace_id == "0" * 32:
             raise Problem('INVALID_INPUT', 'Trace context is invalid.', 400, run_id)
         attempt = db.execute("SELECT id FROM attempts WHERE run_id=? ORDER BY number DESC LIMIT 1", (run_id,)).fetchone()
-        db.execute('INSERT INTO trace_links VALUES(?,?,?,?,?,?)', (uid(), trace_id, run_id, attempt[0] if attempt else None, operation, now()))
+        db.execute('''INSERT INTO trace_links(id,trace_id,run_id,attempt_id,operation,created_at,
+                   request_id,span_id,parent_span_id,traceparent,intent_id,publication_attempt_id)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',
+                   (uid(), trace_id, run_id, attempt[0] if attempt else None, operation, now(),
+                    context.get('request_id'), context.get('span_id'), context.get('parent_span_id'),
+                    context.get('traceparent'), intent_id, publication_attempt_id))
+
+    def _execution_trace(self, db, *, attempt_id=None, publication_attempt_id=None):
+        # Use the originating mutation, never a later read/cancel/idempotent replay.
+        if publication_attempt_id:
+            where, key = "publication_attempt_id=? AND operation='publication.dispatch'", publication_attempt_id
+        else:
+            where, key = "attempt_id=? AND operation IN ('run.create','run.retry')", attempt_id
+        row = db.execute('SELECT trace_id,request_id,span_id,parent_span_id,traceparent FROM trace_links WHERE ' + where + ' ORDER BY rowid DESC LIMIT 1', (key,)).fetchone()
+        return dict(row) if row else {}
 
     def create(self, value, key, trace_id=None):
         value = validate_input(value)
@@ -183,7 +144,7 @@ class Store(PublicationMethods):
                 self._link_trace(db, trace_id, prior['run_id'], 'create.replay')
                 return prior, False
             run_id, time = uid(), now()
-            db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)', (run_id, value['mode'], canonical(value), digest(value), 'QUEUED', 0, time, time, trace_id))
+            db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)', (run_id, value['mode'], canonical(value), digest(value), 'QUEUED', 0, time, time, trace_id.get('trace_id') if isinstance(trace_id, dict) else trace_id))
             if value['mode'] == 'mpt':
                 db.execute('INSERT OR IGNORE INTO components VALUES(?,?)', (value['component_id'], canonical(self.component)))
                 db.execute('INSERT INTO generation_context VALUES(?,?)', (run_id, value['component_id']))
@@ -226,10 +187,12 @@ class Store(PublicationMethods):
 
     def claim(self):
         with self.transaction(True) as db:
-            row = db.execute("SELECT a.*,(SELECT trace_id FROM trace_links WHERE attempt_id=a.id ORDER BY created_at DESC LIMIT 1) AS trace_id FROM attempts a WHERE state='QUEUED' ORDER BY rowid LIMIT 1").fetchone()
+            row = db.execute("SELECT * FROM attempts WHERE state='QUEUED' ORDER BY rowid LIMIT 1").fetchone()
             if row is None:
                 return None
             attempt = dict(row)
+            attempt['trace'] = self._execution_trace(db, attempt_id=attempt['id'])
+            attempt['trace_id'] = attempt['trace'].get('trace_id')
             run_id = attempt['run_id']
             db.execute("UPDATE attempts SET state='RUNNING', started_at=? WHERE id=?", (now(), attempt['id']))
             db.execute("UPDATE runs SET state='RUNNING' WHERE id=?", (run_id,))

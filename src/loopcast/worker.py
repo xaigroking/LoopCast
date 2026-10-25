@@ -1,33 +1,20 @@
 """One bounded executor; SQLite is the durable queue, never an HTTP request."""
 import hashlib
 import json
-import logging
 import os
 from pathlib import Path
 import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
 
-from .storage import STAGES, uid, digest
-
-_logger = logging.getLogger("loopcast.worker")
-_logger.setLevel(logging.INFO)
+from .domain import STAGES, uid, digest
+from .diagnostics import child_context, log_event
 
 
 def _log_attempt(event, attempt, **extra):
-    _logger.info(json.dumps({
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "level": "INFO",
-        "component": "worker",
-        "event": event,
-        "trace_id": attempt.get("trace_id"),
-        "run_id": attempt.get("run_id"),
-        "attempt_id": attempt.get("id"),
-        "attempt_number": attempt.get("number"),
-        **extra,
-    }, separators=(",", ":")))
+    log_event("worker", event, attempt.get("trace"), run_id=attempt.get("run_id"),
+              attempt_id=attempt.get("id"), attempt_number=attempt.get("number"), **extra)
 
 
 class Worker:
@@ -60,6 +47,7 @@ class Worker:
                 self.wake.clear()
                 continue
             started = time.monotonic()
+            attempt['trace'] = child_context(attempt.get('trace'))
             _log_attempt("attempt.started", attempt)
             try:
                 self._execute(attempt)
@@ -150,7 +138,8 @@ class Worker:
             self.store.stage(run_id, token, 'prepare', 'RUNNING')
             self.store.stage(run_id, token, 'prepare', 'SUCCEEDED')
             self.store.stage(run_id, token, 'execute', 'RUNNING')
-            source, media = self.generator.generate(attempt['input'], work, cancelled)
+            source, media = self.generator.generate(attempt['input'], work, cancelled,
+                                                    {**attempt['trace'], 'run_id': run_id, 'attempt_id': attempt['id']})
             self.store.stage(run_id, token, 'execute', 'SUCCEEDED')
             self.store.stage(run_id, token, 'report', 'RUNNING')
             identity = uid()

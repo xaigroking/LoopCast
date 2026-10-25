@@ -8,6 +8,7 @@ import { apiRequest, ApiError, requestKey, type RunAction, type RunCreate, type 
 import { locales } from '@/lib/i18n';
 import { currentPreferences, type Preferences } from '@/lib/preferences';
 import { useWorkspace } from '@/lib/workspace';
+import { subscribeEvents } from '@/lib/events';
 
 const terminal = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED']);
 const settled = (run: RunSnapshot) => terminal.has(run.state) && !run.publications.some((item) => ['PREPARED', 'SENDING'].includes(item.state));
@@ -25,7 +26,7 @@ export function WorkspacePage({ kind, runId }: { kind: Kind; runId?: string }) {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const generation = useRef(0);
-  const subscription = useRef<EventSource | null>(null);
+  const subscription = useRef<{ close: () => void } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const run = runId ? workspace.snapshots.get(runId) : undefined;
   const rows = workspace.listing.map((id) => workspace.snapshots.get(id)).filter((item): item is RunSnapshot => Boolean(item));
@@ -37,6 +38,7 @@ export function WorkspacePage({ kind, runId }: { kind: Kind; runId?: string }) {
     }
     const currentGeneration = ++generation.current;
     let active = true;
+    const requests = new AbortController();
     if (subscription.current) subscription.current.close();
     subscription.current = null;
     if (timer.current) clearTimeout(timer.current);
@@ -48,7 +50,7 @@ export function WorkspacePage({ kind, runId }: { kind: Kind; runId?: string }) {
       try {
         const query = new URLSearchParams({ limit: '30' });
         if (more && workspace.pageCursor) query.set('before', String(workspace.pageCursor));
-        const page = await apiRequest<RunPage>(`/v1/runs?${query.toString()}`);
+        const page = await apiRequest<RunPage>(`/v1/runs?${query.toString()}`, { signal: requests.signal });
         if (!active || generation.current !== currentGeneration) return;
         page.items.forEach(workspace.accept);
         const ids = page.items.map((item) => item.run_id);
@@ -77,13 +79,13 @@ export function WorkspacePage({ kind, runId }: { kind: Kind; runId?: string }) {
         return;
       }
       try {
-        const snapshot = await apiRequest<RunSnapshot>(`/v1/runs/${runId}`);
+        const snapshot = await apiRequest<RunSnapshot>(`/v1/runs/${runId}`, { signal: requests.signal });
         if (!active || generation.current !== currentGeneration) return;
         if (snapshot.run_id !== runId || !workspace.accept(snapshot)) {
-          const latest = workspace.snapshots.get(runId);
+          const latest = workspace.getSnapshot(runId);
           if (!latest || latest.run_id !== runId) throw new ApiError(500, 'INTERNAL_ERROR');
         }
-        const latest = workspace.snapshots.get(runId) ?? snapshot;
+        const latest = workspace.getSnapshot(runId) ?? snapshot;
         setPageError(null);
         setLoading(false);
         if (settled(latest)) {
@@ -94,31 +96,18 @@ export function WorkspacePage({ kind, runId }: { kind: Kind; runId?: string }) {
           workspace.setSyncKey('offline');
           return;
         }
-        const source = new EventSource(`/v1/runs/${runId}/events?after=${latest.last_event_id}`);
-        subscription.current = source;
-        source.onopen = () => active && workspace.setSyncKey('live');
-        const receive = (event: MessageEvent<string>) => {
-          if (!active || subscription.current !== source) return;
-          try {
+        let cursor = latest.last_event_id;
+        subscription.current = subscribeEvents({
+          url: () => `/v1/runs/${runId}/events?after=${cursor}`,
+          state: (value) => active && workspace.setSyncKey(value),
+          receive: (event) => {
             const value = JSON.parse(event.data) as RunSnapshot;
-            if (value.run_id !== runId || (event.lastEventId && Number(event.lastEventId) !== value.last_event_id)) return;
-            workspace.accept(value);
-            if (settled(workspace.snapshots.get(runId) ?? value)) {
-              source.close();
-              subscription.current = null;
-              workspace.setSyncKey('settled');
-            }
-          } catch {
-            source.close();
-            subscription.current = null;
-            workspace.setSyncKey('offline');
-          }
-        };
-        source.addEventListener('snapshot', receive as EventListener);
-        source.addEventListener('complete', receive as EventListener);
-        source.onerror = () => {
-          if (active && subscription.current === source) workspace.setSyncKey('offline');
-        };
+            if (value.run_id !== runId || (event.lastEventId && Number(event.lastEventId) !== value.last_event_id)) throw new Error('INVALID_EVENT');
+            const accepted = workspace.accept(value);
+            if (accepted) cursor = Math.max(cursor, value.last_event_id);
+            return accepted && settled(value);
+          },
+        });
       } catch (error) {
         if (!active || generation.current !== currentGeneration) return;
         const apiError = error instanceof ApiError ? error : null;
@@ -126,14 +115,15 @@ export function WorkspacePage({ kind, runId }: { kind: Kind; runId?: string }) {
         setPageError(apiError?.code ?? 'INTERNAL_ERROR');
         setLoading(false);
         workspace.setSyncKey(navigator.onLine ? 'requestError' : 'offline');
-        if (!apiError && navigator.onLine) timer.current = setTimeout(() => void loadDetail(), 1500);
       }
     };
 
-    if (kind === 'list') void loadList();
+    if (!navigator.onLine) setLoading(false);
+    else if (kind === 'list') void loadList();
     else void loadDetail();
     return () => {
       active = false;
+      requests.abort();
       if (subscription.current) subscription.current.close();
       subscription.current = null;
       if (timer.current) clearTimeout(timer.current);
@@ -319,7 +309,7 @@ function RunDetail({ run, command, publicationCommand }: { run: RunSnapshot; com
       </div>
       <div>
         <Panel title={t('information')}>
-          {[[t('identity'), run.run_id], [t('mode'), t(run.mode === 'fixture' ? 'fixture' : 'unverified')], [t('scenario'), run.input.scenario ? t(scenarioNames[run.input.scenario] ?? run.input.scenario) : '—'], [t('created'), date(run.created_at)], [t('updated'), date(run.updated_at)], [t('cursor'), number(run.last_event_id)]].map(([label, value]) => <div key={String(label)}><div className="label">{label}</div><div className="value" dir={label === t('identity') ? 'ltr' : 'auto'}>{value}</div></div>)}
+          {[[t('identity'), run.run_id], [t('mode'), t(run.mode === 'fixture' ? 'fixture' : 'unverified')], [t('scenario'), run.input.mode === 'fixture' ? t(scenarioNames[run.input.scenario] ?? run.input.scenario) : '—'], [t('created'), date(run.created_at)], [t('updated'), date(run.updated_at)], [t('cursor'), number(run.last_event_id)]].map(([label, value]) => <div key={String(label)}><div className="label">{label}</div><div className="value" dir={label === t('identity') ? 'ltr' : 'auto'}>{value}</div></div>)}
         </Panel>
         <Panel title={t(run.mode === 'fixture' ? 'reports' : 'media')}>
           {run.component && <><bdi dir="ltr">{run.component.revision}</bdi><bdi dir="ltr">{run.component.verification}</bdi></>}

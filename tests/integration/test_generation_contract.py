@@ -10,7 +10,11 @@ from generation_support import settings
 class GenerationTests(unittest.TestCase):
     def test_installed_cli_protocol_and_faults(self):
         with tempfile.TemporaryDirectory() as directory:
-            config=settings(directory);generator=Generator(config)
+            config=settings(directory)
+            secret = Path(directory) / 'provider.toml'
+            secret.write_text('[app]\nopenai_api_key="provider-secret-canary"\n')
+            config['config_ref'] = str(secret)
+            generator=Generator(config)
             os.environ['PUBLISH_CANARY']='secret-value'
             try:
                 path, metadata=generator.generate({'title':'small video'},Path(directory)/'work',lambda:False)
@@ -18,9 +22,12 @@ class GenerationTests(unittest.TestCase):
             self.assertGreater(path.stat().st_size,0);self.assertEqual(metadata['width'],64)
             self.assertFalse((path.parents[3]/'config.toml').exists())
             for title,code in [('bad-json','INVALID_RESULT'),('overflow','OUTPUT_LIMIT'),('exit-failure','UPSTREAM_FAILED'),('broken-media','UPSTREAM_FAILED')]:
-                with self.assertRaises(RunnerError) as error:
-                    generator.generate({'title':title},Path(directory)/title,lambda:False)
+                with self.assertLogs('loopcast.generation', level='INFO') as captured:
+                    with self.assertRaises(RunnerError) as error:
+                        generator.generate({'title':title},Path(directory)/title,lambda:False)
                 self.assertEqual(error.exception.code,code)
+                self.assertNotIn('provider-secret-canary', '\n'.join(captured.output))
+                self.assertIn('"result":"FAILED"', captured.output[-1])
             (Path(directory)/'component/lib'/f'python{__import__("sys").version_info.major}.{__import__("sys").version_info.minor}'/'site-packages/app/launcher.py').write_text('drift')
             with self.assertRaises(RunnerError):generator.verify()
 

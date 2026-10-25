@@ -11,6 +11,9 @@ import socket
 async def _serve(args, settings):
     import uvicorn
     from .api import create_app
+    from .diagnostics import configure_logging
+
+    configure_logging()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

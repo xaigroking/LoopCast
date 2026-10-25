@@ -329,6 +329,32 @@ export interface components {
              */
             title: string;
         };
+        /** FixtureInput */
+        FixtureInput: {
+            /** Delay Ms */
+            delay_ms: number;
+            /**
+             * Mode
+             * @constant
+             */
+            mode: "fixture";
+            /** Scenario */
+            scenario: string;
+            /** Title */
+            title: string;
+        };
+        /** GeneratedInput */
+        GeneratedInput: {
+            /** Component Id */
+            component_id: string;
+            /**
+             * Mode
+             * @constant
+             */
+            mode: "mpt";
+            /** Title */
+            title: string;
+        };
         /** MPTCreate */
         MPTCreate: {
             /**
@@ -448,22 +474,6 @@ export interface components {
             cancel: components["schemas"]["Rule"];
             retry: components["schemas"]["Rule"];
         };
-        /** RunInput */
-        RunInput: {
-            /** Component Id */
-            component_id?: string | null;
-            /** Delay Ms */
-            delay_ms?: number | null;
-            /**
-             * Mode
-             * @enum {string}
-             */
-            mode: "fixture" | "mpt";
-            /** Scenario */
-            scenario?: string | null;
-            /** Title */
-            title: string;
-        };
         /** RunPage */
         RunPage: {
             /** Items */
@@ -483,7 +493,8 @@ export interface components {
             content_id: string | null;
             /** Created At */
             created_at: string;
-            input: components["schemas"]["RunInput"];
+            /** Input */
+            input: components["schemas"]["FixtureInput"] | components["schemas"]["GeneratedInput"];
             /** Input Digest */
             input_digest: string;
             /** Last Event Id */

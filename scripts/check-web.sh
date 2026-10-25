@@ -39,8 +39,14 @@ mkdir -p "$data_dir"
 backend_pid=$!
 (cd "$work_dir" && HOSTNAME=127.0.0.1 PORT=18887 NODE_ENV=production node server.js) >"$work_dir/frontend.log" 2>&1 &
 frontend_pid=$!
-python "$root_dir/tests/browser/reverse_proxy.py" 127.0.0.1 "$public_port" 127.0.0.1 18888 127.0.0.1 18887 >"$work_dir/proxy.log" 2>&1 &
-proxy_pid=$!
+if [[ -n "${LOOPCAST_CADDY:-}" ]]; then
+  LOOPCAST_PUBLIC_ORIGIN="http://127.0.0.1:$public_port" LOOPCAST_API_UPSTREAM=127.0.0.1:18888 LOOPCAST_WEB_UPSTREAM=127.0.0.1:18887 \
+    "$LOOPCAST_CADDY" run --adapter caddyfile --config "$root_dir/deploy/Caddyfile.example" >"$work_dir/proxy.log" 2>&1 &
+  proxy_pid=$!
+else
+  python "$root_dir/tests/browser/reverse_proxy.py" 127.0.0.1 "$public_port" 127.0.0.1 18888 127.0.0.1 18887 >"$work_dir/proxy.log" 2>&1 &
+  proxy_pid=$!
+fi
 
 for _ in $(seq 1 100); do
   if curl -fsS "http://127.0.0.1:$public_port/healthz" >/dev/null 2>&1 && curl -fsS "http://127.0.0.1:$public_port/" >/dev/null 2>&1; then break; fi

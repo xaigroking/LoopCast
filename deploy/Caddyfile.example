@@ -1,12 +1,12 @@
 {$LOOPCAST_PUBLIC_ORIGIN} {
 	@api path /v1 /v1/* /healthz /openapi.json
 	handle @api {
-		reverse_proxy 127.0.0.1:8080 {
+		reverse_proxy {$LOOPCAST_API_UPSTREAM:127.0.0.1:8080} {
 			header_up X-Forwarded-Host {http.request.host}
 			header_up X-Forwarded-Proto {http.request.scheme}
 		}
 	}
 	handle {
-		reverse_proxy 127.0.0.1:3000
+		reverse_proxy {$LOOPCAST_WEB_UPSTREAM:127.0.0.1:3000}
 	}
 }

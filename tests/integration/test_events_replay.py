@@ -68,3 +68,23 @@ class EventTests(unittest.TestCase):
         values = service.runtime.store.list_runs()['items']
         self.assertEqual(len(values), 1)
         self.assertEqual(len(values[0]['attempts']), 1)
+
+    def test_idle_stream_emits_application_heartbeats_without_business_writes(self):
+        self.server.stop()
+        service = ASGIThread(self.temp.name).start()
+        self.addCleanup(service.stop)
+        service.runtime.worker.close()
+        run, _ = service.runtime.store.create({}, 'idle-heartbeat')
+        path = service.url + '/v1/runs/' + run['run_id'] + '/events'
+        started = time.monotonic()
+        with stream(path, run['last_event_id']) as response:
+            self.assertEqual(response.readline(), b': connected\n')
+            self.assertLess(time.monotonic() - started, 1)
+            while response.readline() != b'event: heartbeat\n':
+                self.assertLess(time.monotonic() - started, 8)
+            self.assertEqual(response.readline(), b'data: {}\n')
+        deadline = time.monotonic() + 2
+        while service.runtime.stream_count and time.monotonic() < deadline:
+            time.sleep(.02)
+        self.assertEqual(service.runtime.stream_count, 0)
+        self.assertEqual(service.runtime.store.snapshot(run['run_id']), run)

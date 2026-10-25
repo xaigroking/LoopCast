@@ -1,4 +1,5 @@
 import type { components, paths } from './api-schema';
+import { requestJSON, TransportError } from './http';
 
 export type RunSnapshot = components['schemas']['RunSnapshot'];
 export type RunPage = components['schemas']['RunPage'];
@@ -11,12 +12,14 @@ export class ApiError extends Error {
   status: number;
   code: string;
   snapshot?: RunSnapshot;
+  requestId?: string;
 
-  constructor(status: number, code: string, snapshot?: RunSnapshot) {
+  constructor(status: number, code: string, snapshot?: RunSnapshot, requestId?: string) {
     super(code);
     this.status = status;
     this.code = code;
     this.snapshot = snapshot;
+    this.requestId = requestId;
   }
 }
 
@@ -30,13 +33,17 @@ export function requestKey(source: Crypto = globalThis.crypto): string {
 }
 
 export async function apiRequest<T>(path: keyof paths | string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, { cache: 'no-store', ...options });
-  const data = await response.json().catch(() => null) as ErrorEnvelope | T | null;
+  const { response, data: raw } = await requestJSON(path, options);
+  const data = raw as ErrorEnvelope | T | null;
+  const write = !['GET', 'HEAD'].includes((options.method ?? 'GET').toUpperCase());
+  // A 5xx or unreadable success body cannot prove that a write did not commit.
+  // Keep the caller's pending identity for an explicit retry with the same key.
+  if ((write && response.status >= 500) || (response.ok && data === null)) throw new TransportError('NETWORK_ERROR');
   if (!response.ok) {
     const error = data && typeof data === 'object' && 'error' in data ? data.error : undefined;
-    throw new ApiError(response.status, error?.code ?? 'INTERNAL_ERROR', error?.snapshot as RunSnapshot | undefined);
+    throw new ApiError(response.status, error?.code ?? 'INTERNAL_ERROR', error?.snapshot as RunSnapshot | undefined,
+      error?.request_id ?? response.headers.get('X-Request-ID') ?? undefined);
   }
-  if (data === null) throw new ApiError(response.status, 'INTERNAL_ERROR');
   return data as T;
 }
 

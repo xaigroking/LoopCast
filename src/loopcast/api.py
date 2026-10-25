@@ -1,10 +1,8 @@
 """FastAPI adapter. Domain state and worker ownership live in runtime/storage."""
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 import ipaddress
 import json
-import logging
 import re
 import time
 from typing import Annotated, Literal
@@ -16,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, StrictBool, StrictFloat, StrictInt, 
 
 from .runtime import ApplicationRuntime
 from .storage import Problem, uid, TERMINAL
+from .diagnostics import new_context, log_event
 
 ID = r"[a-f0-9]{32}"
 _RUN = re.compile(r"^/v1/runs/([a-f0-9]{32})(?:/(cancel|retry|events))?$")
@@ -130,12 +129,17 @@ class Publication(StrictModel):
     receipts: list[Receipt]
 
 
-class RunInput(StrictModel):
-    mode: Literal["fixture", "mpt"]
+class FixtureInput(StrictModel):
+    mode: Literal["fixture"]
     title: str
-    scenario: str | None = None
-    delay_ms: int | None = None
-    component_id: str | None = None
+    scenario: str
+    delay_ms: int
+
+
+class GeneratedInput(StrictModel):
+    mode: Literal["mpt"]
+    title: str
+    component_id: str
 
 
 class ComponentCapabilities(StrictModel):
@@ -165,7 +169,7 @@ class Media(StrictModel):
 class RunSnapshot(StrictModel):
     run_id: str
     mode: Literal["fixture", "mpt"]
-    input: RunInput
+    input: FixtureInput | GeneratedInput
     input_digest: str
     state: str
     state_version: int
@@ -212,39 +216,16 @@ ERROR_RESPONSES = {
     status: {"model": ErrorEnvelope, "description": "Stable LoopCast error envelope"}
     for status in (400, 403, 404, 409, 415, 422, 429, 500)
 }
-_request_log = logging.getLogger("loopcast.request")
-_request_log.setLevel(logging.INFO)
-
-
-def _trace_context(value):
-    match = re.fullmatch(r"00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})", value or "")
-    if match and match.group(1) != "0" * 32 and match.group(2) != "0" * 16:
-        trace_id, flags = match.group(1), int(match.group(3), 16) & 1
-    else:
-        trace_id, flags = uid(), 0
-    span_id = uid()[:16]
-    return trace_id, span_id, f"00-{trace_id}-{span_id}-{flags:02x}"
-
-
 def _instrument_response(request, response, started):
-    trace_id = request.state.trace_id
     request_id = request.state.request_id
     response.headers["X-Request-ID"] = request_id
-    response.headers["traceparent"] = request.state.traceparent
+    response.headers["traceparent"] = request.state.trace["traceparent"]
     route = request.scope.get("route")
-    _request_log.info(json.dumps({
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "level": "INFO",
-        "component": "http",
-        "event": "request.completed",
-        "request_id": request_id,
-        "trace_id": trace_id,
-        "span_id": request.state.span_id,
-        "method": request.method,
-        "route": getattr(route, "path", "<unmatched>"),
-        "status": response.status_code,
-        "duration_ms": round((time.monotonic() - started) * 1000, 2),
-    }, separators=(",", ":")))
+    ids = {key: value for key, value in request.path_params.items() if key in {"run_id", "intent_id"} and re.fullmatch(ID, value)}
+    log_event("request", "request.completed", request.state.trace,
+              method=request.method if request.method in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} else "<other>",
+              route=getattr(route, "path", "<unmatched>"),
+              status=response.status_code, duration_ms=round((time.monotonic() - started) * 1000, 2), **ids)
     return response
 
 
@@ -290,7 +271,7 @@ def create_app(
     async def controls(request: Request, call_next):
         started = time.monotonic()
         request.state.request_id = uid()
-        request.state.trace_id, request.state.span_id, request.state.traceparent = _trace_context(request.headers.get("traceparent"))
+        request.state.trace = new_context(request.headers.get("traceparent"), request.state.request_id)
         def reject(problem):
             return _instrument_response(request, _error(problem, request.state.request_id), started)
         method = request.method.upper()
@@ -412,11 +393,12 @@ def create_app(
             normalized = {"mode": "fixture", "title": model.title, "scenario": model.scenario, "delay_ms": model.delay_ms}
         runtime = request.app.state.runtime
         try:
-            snapshot, created = await asyncio.to_thread(runtime.store.create, normalized, idempotency_key, request.state.trace_id)
+            snapshot, created = await asyncio.to_thread(runtime.store.create, normalized, idempotency_key, request.state.trace)
         except Problem:
             raise
         if created:
             runtime.worker.wake.set()
+        request.scope["path_params"]["run_id"] = snapshot["run_id"]
         return _snapshot_response(snapshot, 202 if created else 200)
 
     @app.get("/v1/runs/{run_id}", response_model=RunSnapshot, responses=ERROR_RESPONSES)
@@ -430,7 +412,7 @@ def create_app(
             raise Problem("NOT_FOUND", "This address does not exist.", 404)
         model = body
         runtime = request.app.state.runtime
-        snapshot, accepted = await asyncio.to_thread(runtime.store.command, run_id, action, idempotency_key, model.expected_version, request.state.trace_id)
+        snapshot, accepted = await asyncio.to_thread(runtime.store.command, run_id, action, idempotency_key, model.expected_version, request.state.trace)
         runtime.worker.wake.set()
         return _snapshot_response(snapshot, 202 if accepted else 200)
 
@@ -459,6 +441,7 @@ def create_app(
         async def frames():
             nonlocal cursor
             try:
+                yield ": connected\n\n"
                 heartbeat = asyncio.get_running_loop().time()
                 while not runtime.stopping.is_set():
                     events = await asyncio.to_thread(runtime.store.events, run_id, cursor)
@@ -472,8 +455,8 @@ def create_app(
                         yield "event: complete\ndata: " + current.model_dump_json() + "\n\n"
                         break
                     now = asyncio.get_running_loop().time()
-                    if now - heartbeat >= .1:
-                        yield ": heartbeat\n\n"
+                    if now - heartbeat >= 5:
+                        yield ": heartbeat\nevent: heartbeat\ndata: {}\n\n"
                         heartbeat = now
                     await asyncio.sleep(.05)
             except (asyncio.CancelledError, OSError, RuntimeError):
@@ -491,7 +474,7 @@ def create_app(
             raise Problem("NOT_FOUND", "This address does not exist.", 404)
         model = body
         values = {"platform": model.platform, "account": model.account}
-        result = await asyncio.to_thread(request.app.state.runtime.store.publication_create, run_id, values, idempotency_key, model.expected_version)
+        result = await asyncio.to_thread(request.app.state.runtime.store.publication_create, run_id, values, idempotency_key, model.expected_version, request.state.trace)
         return _snapshot_response(result)
 
     async def dispatch_publication(run_id, intent_id, request, body, idempotency_key):
@@ -499,7 +482,7 @@ def create_app(
             raise Problem("NOT_FOUND", "This address does not exist.", 404)
         runtime = request.app.state.runtime
         model = body
-        snapshot, job = await asyncio.to_thread(runtime.store.publication_dispatch, run_id, intent_id, idempotency_key, model.expected_version, model.scenario)
+        snapshot, job = await asyncio.to_thread(runtime.store.publication_dispatch, run_id, intent_id, idempotency_key, model.expected_version, model.scenario, request.state.trace)
         if job:
             runtime.publisher.submit(job, model.scenario)
         return _snapshot_response(snapshot, 202 if job else 200)
@@ -514,7 +497,7 @@ def create_app(
     async def publication_verify(run_id: str, intent_id: str, request: Request, body: PublicationVerify, idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None):
         if not re.fullmatch(ID, run_id) or not re.fullmatch(ID, intent_id):
             raise Problem("NOT_FOUND", "This address does not exist.", 404)
-        result = await asyncio.to_thread(request.app.state.runtime.store.publication_verify, run_id, intent_id, idempotency_key, body.expected_version)
+        result = await asyncio.to_thread(request.app.state.runtime.store.publication_verify, run_id, intent_id, idempotency_key, body.expected_version, request.state.trace)
         return _snapshot_response(result)
 
     @app.get("/v1/artifacts/{artifact_id}/content", responses={**ERROR_RESPONSES, 200: {"content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}})

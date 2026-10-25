@@ -33,7 +33,7 @@ class MigrationTests(unittest.TestCase):
                         after = [row[:8] for row in after]
                     self.assertEqual(after, before[table])
                 self.assertEqual(db.execute('PRAGMA foreign_keys').fetchone()[0], 1)
-                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0], 3)
+                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0], 4)
                 self.assertIsNone(db.execute("SELECT trace_id FROM runs WHERE id='run'").fetchone()[0])
             self.assertEqual(store.events('run', 0)[0]['id'], 1)
 
@@ -76,7 +76,7 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(snapshot['publications'][0]['state'], 'UNKNOWN')
             self.assertEqual(snapshot['publications'][0]['receipts'][0]['evidence'], 'uncertain canary')
             with store.transaction() as db:
-                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0], 3)
+                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0], 4)
                 for table, rows in before.items():
                     self.assertEqual([tuple(row) for row in db.execute('SELECT * FROM ' + table)], rows)
 
@@ -89,3 +89,25 @@ class MigrationTests(unittest.TestCase):
                          ('verification', 'supported'), ('capabilities', {'generate': True})]:
             with self.assertRaises(ValueError):
                 manifest(dict(value, **{key: bad}))
+
+    def test_context_upgrade_preserves_queued_v3_trace_and_rolls_back_on_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'state.sqlite3'
+            db = sqlite3.connect(path)
+            db.executescript(migrations.VERSION_ONE + migrations.VERSION_TWO + migrations.VERSION_THREE)
+            trace = '1234567890abcdef1234567890abcdef'
+            db.execute("INSERT INTO runs VALUES('run','fixture','{}','digest','QUEUED',1,'time','time',?)", (trace,))
+            db.execute("INSERT INTO attempts VALUES('attempt','run',1,'token','QUEUED',NULL,NULL,NULL,NULL)")
+            db.execute("INSERT INTO trace_links VALUES('link',?,'run','attempt','run.create','time')", (trace,))
+            db.commit(); db.close()
+            with patch.object(migrations, 'VERSION_FOUR', migrations.VERSION_FOUR + '; INVALID SQL'):
+                with self.assertRaises(sqlite3.OperationalError): Store(directory)
+            with sqlite3.connect(path) as db:
+                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0], 3)
+                self.assertNotIn('span_id', [row[1] for row in db.execute('PRAGMA table_info(trace_links)')])
+            store = Store(directory)
+            attempt = store.claim()
+            self.assertEqual(attempt['trace']['trace_id'], trace)
+            with store.transaction() as db:
+                self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(), [])
+                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0], 4)

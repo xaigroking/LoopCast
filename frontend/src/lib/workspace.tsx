@@ -20,6 +20,7 @@ type WorkspaceContextValue = {
   refreshSignal: number;
   refresh: () => void;
   snapshots: Map<string, RunSnapshot>;
+  getSnapshot: (id: string) => RunSnapshot | undefined;
   accept: (snapshot: RunSnapshot) => boolean;
   listing: string[];
   setListing: (ids: string[]) => void;
@@ -67,6 +68,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [noticeCode, setNoticeCode] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const preferencesRef = useRef(preferences);
+  const getSnapshot = useCallback((id: string) => snapshotsRef.current.get(id), []);
 
   const applyLanguage = useCallback(async (preferred: string) => {
     const result = await changeLanguage(preferred);
@@ -144,12 +146,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const value = useMemo<WorkspaceContextValue>(() => ({
     ready, preferences, preferencesAvailable, language, packError, generatorAvailable, online, syncKey,
     setSyncKey, refreshSignal, refresh: () => setRefreshSignal((current) => current + 1),
-    snapshots, accept, listing, setListing, pageCursor, setPageCursor, pending, putPending,
+    snapshots, getSnapshot, accept, listing, setListing, pageCursor, setPageCursor, pending, putPending,
     drafts, setDraft, noticeCode, setNoticeCode, createOpen, openCreate: () => setCreateOpen(true),
     closeCreate: () => setCreateOpen(false),
     resetCreate: () => { setCreateOpen(false); setNoticeCode(null); },
   }), [ready, preferences, preferencesAvailable, language, packError, generatorAvailable, online, syncKey,
-    refreshSignal, snapshots, accept, listing, pageCursor, pending, putPending, drafts, setDraft, noticeCode, createOpen]);
+    refreshSignal, snapshots, getSnapshot, accept, listing, pageCursor, pending, putPending, drafts, setDraft, noticeCode, createOpen]);
 
   if (!ready) {
     return <div className="startup" role="status">Loading workspace…</div>;

@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
-"""Guard the domain-to-HTTP dependency direction and Python import cycles."""
+"""Check permitted module edges and cycles, including deferred imports."""
 import ast
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
 package = root / "src/loopcast"
 modules = {path.stem: path for path in package.glob("*.py")}
-domain = {"contracts", "fixture", "generation", "ledger", "publisher", "runner", "storage", "worker"}
+domain = {"domain", "contracts", "fixture", "generation", "ledger", "publisher", "runner", "storage", "worker"}
 forbidden = {"fastapi", "starlette", "uvicorn", "next", "react"}
+# Store/ledger are the persistence adapter; pure run rules live in domain.py.
+allowed = {
+    "domain": set(), "contracts": set(), "fixture": set(), "runner": set(),
+    "migrations": set(), "diagnostics": set(), "publisher_cli": set(),
+    "storage": {"domain", "ledger", "migrations"}, "ledger": {"domain"},
+    "generation": {"contracts", "runner", "diagnostics"}, "worker": {"domain", "runner", "diagnostics"},
+    "publisher": {"runner", "diagnostics"},
+    "runtime": {"storage", "worker", "generation", "publisher"},
+    "api": {"runtime", "storage", "diagnostics"}, "openapi": {"api"},
+    "__main__": {"api", "diagnostics"}, "__init__": set(),
+}
 graph = {name: set() for name in modules}
 for name, path in modules.items():
     tree = ast.parse(path.read_text())
@@ -15,13 +26,19 @@ for name, path in modules.items():
         imported = {item.name.split(".", 1)[0] for item in node.names} if isinstance(node, ast.Import) else ({node.module.split(".", 1)[0]} if isinstance(node, ast.ImportFrom) and node.module else set())
         if name in domain and forbidden.intersection(imported):
             raise SystemExit(f"Domain module {name} imports an HTTP/UI framework: {sorted(forbidden.intersection(imported))}")
-    # Only module-load imports define Python initialization cycles. Function-local imports
-    # remain subject to the transport prohibition above and are resolved at call time.
-    for node in tree.body:
-        if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module in modules:
-            graph[name].add(node.module)
-        if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module is None:
-            graph[name].update(alias.name for alias in node.names if alias.name in modules)
+        if name in {"domain", "contracts"} and imported.intersection({"sqlite3", "requests", "httpx", "urllib", "subprocess", "os", "pathlib"}):
+            raise SystemExit(f"Pure domain module {name} imports I/O: {sorted(imported)}")
+        if isinstance(node, ast.ImportFrom):
+            if node.level == 1 and node.module:
+                graph[name].add(node.module.split('.', 1)[0])
+            elif node.level == 1:
+                graph[name].update(alias.name for alias in node.names)
+            elif node.module and node.module.startswith('loopcast.'):
+                graph[name].add(node.module.split('.')[1])
+        if isinstance(node, ast.Import):
+            graph[name].update(alias.name.split('.')[1] for alias in node.names if alias.name.startswith('loopcast.'))
+    if name not in allowed or graph[name] - allowed[name]:
+        raise SystemExit(f"Forbidden module edges from {name}: {sorted(graph[name] - allowed.get(name, set()))}")
 
 active, visited = [], set()
 def visit(name):
@@ -38,4 +55,4 @@ def visit(name):
 
 for module in sorted(graph):
     visit(module)
-print(f"Architecture guards passed: {len(domain)} domain modules avoid transport/UI frameworks; {len(graph)} Python modules are acyclic")
+print(f"Architecture guards passed: {len(domain)} domain/adapter modules avoid transport/UI frameworks; {len(graph)} Python modules obey permitted edges and are acyclic, including deferred imports")

@@ -4,6 +4,7 @@ from pathlib import Path
 import selectors
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 import urllib.error
@@ -14,9 +15,14 @@ class ServerProcess:
         self.generator_config = generator_config
         self.directory = directory
         self.process = None
+        self.diagnostics = []
 
     def start(self):
         self.process = subprocess.Popen([sys.executable, '-I', '-m', 'loopcast', 'serve', '--port', '0', '--data-dir', str(self.directory)] + (['--generator-config',str(self.generator_config)] if self.generator_config else []), cwd='/tmp', stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # Continuously drain diagnostics so concurrency tests cannot block on a
+        # full subprocess stderr pipe. Retain real emitted logs for assertions.
+        self.log_thread = threading.Thread(target=self._read_logs, args=(self.process.stderr,), daemon=True)
+        self.log_thread.start()
         selector = selectors.DefaultSelector()
         selector.register(self.process.stdout, selectors.EVENT_READ)
         ready = selector.select(10)
@@ -30,11 +36,16 @@ class ServerProcess:
         self.url = line.split(' ', 1)[1]
         return self
 
+    def _read_logs(self, stream):
+        for line in stream:
+            self.diagnostics.append(line.rstrip())
+
     def stop(self, kill=False):
         if self.process:
             if self.process.poll() is None:
                 self.process.kill() if kill else self.process.terminate()
                 self.process.wait(timeout=12)
+            self.log_thread.join(timeout=2)
             self.process.stdout.close()
             self.process.stderr.close()
             self.process = None

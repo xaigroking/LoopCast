@@ -8,7 +8,7 @@ python scripts/check-ui-assets.py
 python scripts/check-architecture.py
 python -m build --no-isolation
 python -m pip install --require-hashes -r requirements-runtime.lock
-python -m pip install --no-deps dist/*.whl
+python -m pip install --no-deps --force-reinstall dist/*.whl
 python -m pip check
 python -m loopcast.openapi > dist/openapi.json
 
@@ -19,7 +19,10 @@ npm_version=$(npm --version)
 cd "$root_dir/frontend"
 npm ci --no-audit --no-fund
 npm run types:api
+git -C "$root_dir" diff --exit-code -- frontend/src/lib/api-schema.ts
 npm run typecheck
+npm run check:architecture
+npm run test:network
 python "$root_dir/scripts/copy-npm-licenses.py"
 LOOPCAST_BUILD_ID="$(git -C "$root_dir" rev-parse HEAD)" NEXT_TELEMETRY_DISABLED=1 npm run build
 
