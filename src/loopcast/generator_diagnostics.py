@@ -43,7 +43,7 @@ def inspect_generator(settings=None, media_settings=None):
     report['checks'].append({'id':'interpreter','state':'PASS','code':'OK'})
     def cli():
         with tempfile.TemporaryDirectory() as directory:
-            raw=run(generator.command()+['--help'],directory,generator.environment(directory)|generator.network,30,limit=131072).decode()
+            raw=run(generator.command()+['--help'],directory,generator.execution_environment(directory)|generator.network,30,limit=131072).decode()
         if any(flag not in raw for flag in REQUIRED_FLAGS):raise ValueError()
     if not check('cli',cli,'COMPONENT_CLI_UNSUPPORTED'):return report
     def tools():

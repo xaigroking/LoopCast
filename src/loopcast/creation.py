@@ -63,7 +63,7 @@ class CreationExecutor:
             argv.extend('--' + name + '=' + str(value) for name, value in args.items())
             argv.append('--subtitle-enabled' if options['subtitles'] else '--no-subtitle-enabled')
             self.library.verify_tools()
-            env = generator.environment(work) | generator.network | {'IMAGEIO_FFMPEG_EXE': str(self.library.ffmpeg), 'FFMPEG_BINARY': str(self.library.ffmpeg), 'PATH': str(self.library.ffmpeg.parent) + ':' + str(self.library.ffprobe.parent) + ':/usr/bin:/bin'}
+            env = generator.execution_environment(work) | generator.network | {'IMAGEIO_FFMPEG_EXE': str(self.library.ffmpeg), 'FFMPEG_BINARY': str(self.library.ffmpeg), 'PATH': str(self.library.ffmpeg.parent) + ':' + str(self.library.ffprobe.parent) + ':/usr/bin:/bin'}
             raw = run(argv, work, env, generator.timeout, cancelled)
             try:
                 value = json.loads(raw)

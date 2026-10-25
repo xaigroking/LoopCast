@@ -88,8 +88,12 @@ class Generator:
             raise ValueError('Invalid execution deadline')
         self.verify()
 
-    def environment(self, work):
-        env = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'HOME': str(work), 'MPT_HOME': str(work), 'TMPDIR': str(work)}
+    @staticmethod
+    def environment(work):
+        return {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'HOME': str(work), 'MPT_HOME': str(work), 'TMPDIR': str(work)}
+
+    def execution_environment(self, work):
+        env = self.environment(work)
         if self.ffmpeg:
             if hashlib.sha256(self.ffmpeg.read_bytes()).hexdigest() != self.ffmpeg_hash: raise RunnerError('RENDERER_CHANGED')
             env.update({'IMAGEIO_FFMPEG_EXE': str(self.ffmpeg), 'FFMPEG_BINARY': str(self.ffmpeg), 'PATH': str(self.ffmpeg.parent) + ':' + str(self.probe.parent) + ':/usr/bin:/bin'})
@@ -128,7 +132,7 @@ class Generator:
             config.write_text(config_text(self.config_ref))
             task_id = str(uuid.uuid4())
             argv = self.command() + ['--video-subject=' + value['title'], '--task-id', task_id]
-            raw = run(argv, work, self.environment(work) | self.network, self.timeout, cancelled)
+            raw = run(argv, work, self.execution_environment(work) | self.network, self.timeout, cancelled)
             try:
                 result = json.loads(raw)
                 videos = result['result']['videos']
