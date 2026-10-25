@@ -7,6 +7,7 @@ git diff --quiet && git diff --cached --quiet || { echo "Build release from a cl
 python scripts/check-ui-assets.py
 python scripts/check-architecture.py
 python -m build --no-isolation
+python scripts/check-licenses.py
 python -m pip install --require-hashes -r requirements-runtime.lock
 python -m pip install --no-deps --force-reinstall dist/*.whl
 python -m pip check

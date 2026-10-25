@@ -2,7 +2,10 @@
   "name": "loopcast-web",
   "version": "0.1.0",
   "private": true,
-  "engines": { "node": "24.22.1", "npm": "11.19.1" },
+  "engines": {
+    "node": "24.22.1",
+    "npm": "11.19.1"
+  },
   "packageManager": "npm@11.19.1",
   "scripts": {
     "dev": "next dev",
@@ -27,5 +30,6 @@
     "@types/react-dom": "19.2.3",
     "openapi-typescript": "7.10.1",
     "typescript": "5.9.3"
-  }
+  },
+  "license": "Apache-2.0"
 }
