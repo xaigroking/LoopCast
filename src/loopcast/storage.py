@@ -69,38 +69,8 @@ class Store:
         self.database = self.directory / 'state.sqlite3'
         with closing(self.connect()) as db:
             db.execute('PRAGMA journal_mode=WAL')
-            db.executescript('''
-                CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
-                INSERT OR IGNORE INTO schema_version VALUES (1);
-                CREATE TABLE IF NOT EXISTS runs (
-                    id TEXT PRIMARY KEY, mode TEXT NOT NULL CHECK(mode='fixture'),
-                    input TEXT NOT NULL, input_digest TEXT NOT NULL,
-                    state TEXT NOT NULL, version INTEGER NOT NULL,
-                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS tasks (
-                    id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id),
-                    stage TEXT NOT NULL, state TEXT NOT NULL, version INTEGER NOT NULL,
-                    UNIQUE(run_id,stage));
-                CREATE TABLE IF NOT EXISTS attempts (
-                    id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id),
-                    number INTEGER NOT NULL, token TEXT NOT NULL UNIQUE,
-                    state TEXT NOT NULL, started_at TEXT, ended_at TEXT,
-                    error TEXT, evidence TEXT, UNIQUE(run_id,number));
-                CREATE TABLE IF NOT EXISTS events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES runs(id),
-                    version INTEGER NOT NULL, type TEXT NOT NULL, time TEXT NOT NULL, payload TEXT NOT NULL);
-                CREATE INDEX IF NOT EXISTS events_run ON events(run_id,id);
-                CREATE UNIQUE INDEX IF NOT EXISTS events_version ON events(run_id,version);
-                CREATE TABLE IF NOT EXISTS artifacts (
-                    id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id),
-                    attempt_id TEXT NOT NULL REFERENCES attempts(id), media_type TEXT NOT NULL,
-                    size INTEGER NOT NULL, sha256 TEXT NOT NULL, storage_ref TEXT NOT NULL UNIQUE);
-                CREATE TABLE IF NOT EXISTS idempotency (
-                    scope TEXT NOT NULL, key TEXT NOT NULL, digest TEXT NOT NULL,
-                    run_id TEXT REFERENCES runs(id), PRIMARY KEY(scope,key));
-            ''')
-            if db.execute('SELECT MAX(version) FROM schema_version').fetchone()[0] != 1:
-                raise RuntimeError('Unsupported state database version')
+            from .migrations import migrate
+            migrate(db)
 
     def connect(self):
         db = sqlite3.connect(self.database, timeout=30, isolation_level=None)
