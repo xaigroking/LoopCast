@@ -235,3 +235,54 @@ opens the installed MP4, simulates a lost publication response, queries its
 receipt, and verifies that reload and disabled resend preserve the same facts.
 CI requires package, tests and browser to succeed; missing or skipped jobs fail
 the merge gate. Public CI needs no provider or platform credentials.
+
+## Workspace languages and appearance
+
+Open `/settings` from either desktop or narrow-screen navigation. The workspace
+ships English, Simplified Chinese, Traditional Chinese, Japanese, Korean, French,
+German, Spanish, Brazilian Portuguese, Italian, Dutch, Polish, Russian, Turkish,
+Arabic, Hebrew, Hindi, Indonesian, Vietnamese and Thai. The selector is searchable
+and shows native names alongside names in the current display language.
+
+Offline i18next and its browser language detector select the first supported
+entry in the browser's ordered language list. An explicit selection takes
+priority; "Follow browser" restores automatic detection and responds to browser
+language changes. English regions map to English. Bare Chinese, CN, SG and Hans
+map to Simplified Chinese; TW, HK, MO and Hant map to the separate Traditional
+Chinese pack. Portuguese variants use the shipped Brazilian Portuguese pack.
+Unsupported languages fall back to English. No IP lookup or online translation
+service is used. Display language is separate from generated content language.
+
+Arabic and Hebrew switch the document direction. Layout uses logical properties;
+raw titles, identifiers, hashes and source evidence retain their original content
+and direction isolation. Intl/CLDR handle dates, numbers and task-count plurals.
+Unknown server errors show a safe localized message. Missing selected resources
+show an explicit warning and English fallback; release checks reject incomplete
+bundles and mismatched interpolation parameters before packaging.
+
+Appearance supports system, light and dark. System changes apply while automatic
+mode is selected; a manual selection takes priority. A small pre-stylesheet
+script restores the initial theme. Versioned local storage contains display
+preferences only. Blocked or corrupt storage does not prevent session use.
+Cross-tab preference changes use the most recently received complete preference
+record. Language/theme changes do not create tasks or attempts, reset request
+identities, or clear in-progress task/account/scenario drafts. Work records and
+permanent publication identities remain in SQLite.
+
+One ribbon SVG supplies the sidebar, header, settings and favicon. Color and
+monochrome variants at 16/24/32/128 pixels retain identical paths. The application
+has no PWA or installer icon surfaces. Third-party JavaScript and Noto fonts are
+bundled with their licenses and pinned SHA256 inventories in
+`web-vendor.lock.json` and `web-fonts.lock.json`; there are no remote font or CDN
+requests at runtime. Resource validation includes actual OpenType glyph coverage
+for the shipped text. UI preview cards use document icons for fixture reports,
+not fabricated video thumbnails.
+
+`python scripts/check-ui-assets.py` checks the shipped assets. The installed
+browser regression entry point now runs the existing fixture/media suites plus
+native insecure-HTTP request identities, all twenty locales, preference failures
+and synchronization, light/dark contrast, keyboard/RTL layouts, shared branding,
+and double-click/lost-response/two-tab write conflicts. The non-loopback test uses
+a constrained streaming proxy; production Host and Origin validation remains
+unchanged. Browsers without any cryptographically secure randomness show a
+recoverable error without sending an unkeyed write.

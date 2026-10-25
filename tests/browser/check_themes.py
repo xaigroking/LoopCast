@@ -44,7 +44,7 @@ async def main():
                 await page.emulate_media(color_scheme='light');await expect(page.locator('html')).to_have_attribute('data-theme','light')
                 for width in [1440,390]:
                     await page.set_viewport_size({'width':width,'height':1000})
-                    for lang in ['de','ar','he','hi','th','zh-Hans']:
+                    for lang in ['de','ar','he','hi','th','zh-Hans','zh-Hant','ja','ko']:
                         await page.locator('#language-select').select_option(lang)
                         await expect(page.locator('html')).to_have_attribute('lang',lang)
                         assert not await page.evaluate('document.documentElement.scrollWidth>innerWidth'),(width,lang)
