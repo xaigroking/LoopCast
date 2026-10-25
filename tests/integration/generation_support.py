@@ -19,6 +19,11 @@ def main():
  work=Path(os.environ['MPT_HOME'])
  assert not any('CANARY' in k for k in os.environ)
  config=(work/'config.toml').read_text();assert 'upload_post_enabled = false' in config and 'upload_post_auto_upload = false' in config
+ if a.video_subject == 'proxy-contract':
+  import urllib.request
+  from edge_tts import Communicate
+  assert Communicate('local contract','voice').proxy == os.environ['HTTPS_PROXY']
+  assert urllib.request.urlopen('http://provider.invalid/contract',timeout=3).read()==b'local proxy response'
  if a.video_subject == 'bad-json': print('invalid');return 0
  if a.video_subject == 'overflow': print('x'*2000000);return 0
  if a.video_subject == 'exit-failure': print(config,file=sys.stderr);return 2
@@ -51,6 +56,7 @@ def settings(directory):
     subprocess.run([str(tools/'ffmpeg'),'-v','error','-f','lavfi','-i','sine=frequency=440:duration=0.2',str(audio)],check=True)
     wheel = root / 'mpt-0.0.0-py3-none-any.whl'
     files = {'app/__init__.py':b'', 'app/launcher.py':LAUNCHER.encode(),'app/sample.mp4':sample.read_bytes(),'app/sample.wav':audio.read_bytes(),
+             'edge_tts/__init__.py':b'class Communicate:\n def __init__(self,text,voice,rate="+0%",proxy=None,boundary="WordBoundary"):self.proxy=proxy\n',
              'mpt-0.0.0.dist-info/METADATA':b'Metadata-Version: 2.1\nName: mpt\nVersion: 0.0.0\n',
              'mpt-0.0.0.dist-info/RECORD':b'', 'mpt-0.0.0.dist-info/WHEEL':b'Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n'}
     with zipfile.ZipFile(wheel,'w') as archive:

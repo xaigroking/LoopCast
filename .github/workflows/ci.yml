@@ -104,6 +104,18 @@ jobs:
       - run: scripts/install-media-tools.sh
       - run: scripts/build-release.sh
       - run: scripts/check-web.sh
+      - name: Upload verified application candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: loopcast-candidate-${{ github.sha }}
+          path: |
+            dist/loopcast-*.whl
+            dist/loopcast-web-standalone.tar.gz
+            dist/release-manifest.json
+            dist/openapi.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
 
   merge-gate:
     name: merge-gate

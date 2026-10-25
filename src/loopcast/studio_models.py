@@ -287,3 +287,19 @@ class ReleaseBatch(Model):
 
 class ReleaseList(Model):
     items: list[ReleaseBatch]
+
+
+class DiagnosticCheck(Model):
+    id: str
+    state: Literal['PASS','FAIL','WARN']
+    code: str
+
+
+class GeneratorDiagnostic(Model):
+    state: Literal['NOT_CONFIGURED','NOT_INSTALLED','INVALID','CALLABLE']
+    callable: bool
+    live_verification: Literal['UNVERIFIED']
+    checks: list[DiagnosticCheck]
+    paths: dict[str, Literal['UNVERIFIED']]
+    network: dict[str, str]
+    supported_stages: list[str]

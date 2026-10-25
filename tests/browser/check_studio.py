@@ -44,6 +44,8 @@ async def main():
         await expect(page.locator('#creation-script')).to_have_value('Second browser narration\n\nFirst browser narration')
         await page.locator('aside nav a[href="/settings"]').click()
         await page.locator('#language-select').select_option('en')
+        await page.get_by_role('button',name='Run configuration diagnostics',exact=True).click()
+        await expect(page.locator('#generator-diagnostics [role=status]')).to_contain_text('entry is callable')
         await page.goto(project_url)
         await page.get_by_role('button',name='Save draft',exact=True).click()
         await expect(page.locator('.heading p')).to_have_text('Draft · Saved')

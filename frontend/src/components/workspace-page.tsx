@@ -8,6 +8,7 @@ import { apiRequest, ApiError, requestKey, type RunAction, type RunCreate, type 
 import { locales } from '@/lib/i18n';
 import { currentPreferences, type Preferences } from '@/lib/preferences';
 import { useWorkspace } from '@/lib/workspace';
+import { GeneratorStatus } from './generator-status';
 import { subscribeEvents } from '@/lib/events';
 
 const terminal = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED']);
@@ -290,6 +291,7 @@ function RunDetail({ run, command, publicationCommand }: { run: RunSnapshot; com
   const scenarioNames: Record<string, string> = { success: 'success', fail_once: 'failOnce', fail: 'fail', slow: 'slow' };
   const headingActions = <div className="row-actions"><State value={run.state} />{(['cancel', 'retry'] as const).map((action) => <button key={action} type="button" className={action === 'cancel' ? 'danger' : ''} disabled={!run.allowed_actions[action].enabled || workspace.pending.get(`${run.run_id}:${action}`)?.busy} onClick={() => void command(run.run_id, action)}>{t(action)}</button>)}</div>;
   return <>
+    <GeneratorStatus />
     <Link className="back" href="/">{t('back')}</Link>
     <section className="heading detail-title"><div><div className="eyebrow">{t('workspace')}</div><h1 dir="auto">{run.input.title}</h1><p>{t('attemptVersion', { number: number(run.attempts.length), version: number(run.state_version) })}</p></div>{headingActions}</section>
     <div className="detail-grid">
@@ -394,6 +396,7 @@ function SettingsView() {
         {!workspace.preferencesAvailable && <p>{t('storageHint')}</p>}
       </Panel>
     </div>
+    <GeneratorStatus />
     <Link className="back" href="/">{t('back')}</Link>
   </>;
 }

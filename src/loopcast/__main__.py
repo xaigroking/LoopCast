@@ -42,7 +42,7 @@ async def _serve(args, settings):
 
 
 def main():
-    parser = argparse.ArgumentParser(prog='loopcast', description='LoopCast local fixture task console. Optional isolated video generation; real platform sending is unavailable.')
+    parser = argparse.ArgumentParser(prog='loopcast', description='LoopCast creation workspace and controlled publishing. Live sending defaults off.')
     parser.add_argument('--version', action='version', version=f"%(prog)s {version('loopcast')}")
     commands = parser.add_subparsers(dest='command')
     serve = commands.add_parser('serve', help='Start the local single-user fixture console')
@@ -54,7 +54,30 @@ def main():
     serve.add_argument('--social-config', type=Path, help='Isolated social adapter settings JSON; live sending defaults off')
     serve.add_argument('--public-origin', default=os.environ.get('LOOPCAST_PUBLIC_ORIGIN'), help='Exact public origin served by the configured reverse proxy')
     serve.add_argument('--trusted-proxy', action='append', default=[item for item in os.environ.get('LOOPCAST_TRUSTED_PROXIES', '').split(',') if item], help='Trusted reverse-proxy address or CIDR; may be repeated')
+    diagnose = commands.add_parser('diagnose', help='Inspect generation configuration without generating or making provider calls')
+    diagnose.add_argument('--generator-config', type=Path)
+    diagnose.add_argument('--media-config', type=Path)
+    setup = commands.add_parser('install-generator', help='Build the pinned upstream and install its frozen dependencies into a fresh directory')
+    for name in ['source','destination','python','uv','ffmpeg','ffprobe']: setup.add_argument('--'+name, type=Path, required=True)
+    setup.add_argument('--uv-sha256', required=True)
+    setup.add_argument('--network-config', type=Path)
+    setup.add_argument('--plan', action='store_true', help='Validate inputs and print steps without installing or downloading')
     args = parser.parse_args()
+    if args.command == 'diagnose':
+        from .generator_diagnostics import inspect_generator
+        try:
+            settings=json.loads(args.generator_config.read_text()) if args.generator_config else None
+            media=json.loads(args.media_config.read_text()) if args.media_config else None
+            report=inspect_generator(settings,media)
+        except (OSError,ValueError): report=inspect_generator({})
+        print(json.dumps(report));raise SystemExit(0 if report['callable'] else 1)
+    if args.command == 'install-generator':
+        from .mpt_install import plan, install
+        try:
+            value=plan(args.source,args.destination,args.python,args.uv,args.uv_sha256,args.ffmpeg,args.ffprobe)
+            result=value if args.plan else install(value,json.loads(args.network_config.read_text()) if args.network_config else None)
+            print(json.dumps(result,indent=2));return
+        except (OSError,ValueError,RuntimeError): parser.exit(1,'Generator installation failed. Check source revision/cleanliness, tool digests, platform and the private installation record. No provider was called.\n')
     if args.command != 'serve':
         parser.print_help()
         return

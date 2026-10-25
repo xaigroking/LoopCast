@@ -10,7 +10,7 @@ from .domain import Problem
 from .media import LIMIT
 from .studio_models import (ProjectCreate, Project, ProjectList, DraftUpdate, VersionCommand, GenerateRequest, Id,
     Asset, AssetList, StudioCapabilities, Account, AccountList, AccountUpdate, AuthorizationCreate, AuthorizationCancel, Authorization, Interaction,
-    PreflightRequest, Preflight, ReleaseCreate, ReleaseBatch, ReleaseList)
+    GeneratorDiagnostic, PreflightRequest, Preflight, ReleaseCreate, ReleaseBatch, ReleaseList)
 
 Key = Annotated[str | None, Header(alias='Idempotency-Key')]
 
@@ -46,6 +46,12 @@ def register_studio_routes(app, error_responses):
     @app.get('/v1/studio/capabilities', response_model=StudioCapabilities, responses=error_responses)
     async def studio_capabilities(request: Request):
         return request.app.state.runtime.studio.capabilities()
+
+    @app.get('/v1/studio/generator/diagnostics', response_model=GeneratorDiagnostic, responses=error_responses)
+    async def generator_diagnostics(request: Request):
+        from .generator_diagnostics import inspect_generator
+        runtime = request.app.state.runtime
+        return await asyncio.to_thread(inspect_generator, runtime.generator_settings, runtime.media_settings)
 
     @app.get('/v1/studio/assets', response_model=AssetList, responses=error_responses)
     async def list_assets(request: Request):

@@ -1,0 +1,11 @@
+# Private runtime copy: chmod 0600. Empty values are placeholders, not a working service.
+# Use only providers, media and voices authorized for this installation.
+[app]
+llm_provider = "openai"
+openai_api_key = ""
+openai_base_url = ""
+openai_model_name = ""
+pexels_api_keys = []
+pixabay_api_keys = []
+upload_post_enabled = false
+upload_post_auto_upload = false

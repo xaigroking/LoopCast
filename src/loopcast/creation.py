@@ -59,10 +59,12 @@ class CreationExecutor:
                 if options[field]:
                     if self.library.store.studio_asset(options[field])['kind'] != 'audio': raise RunnerError('INVALID_MATERIAL')
                     args[flag] = str(copy_asset(options[field], directory))
-            argv = [generator.python, '-I', '-c', 'from app.launcher import main; raise SystemExit(main())', 'cli']
+            argv = generator.command()
             argv.extend('--' + name + '=' + str(value) for name, value in args.items())
             argv.append('--subtitle-enabled' if options['subtitles'] else '--no-subtitle-enabled')
-            raw = run(argv, work, generator.environment(work) | generator.network, generator.timeout, cancelled)
+            self.library.verify_tools()
+            env = generator.environment(work) | generator.network | {'IMAGEIO_FFMPEG_EXE': str(self.library.ffmpeg), 'FFMPEG_BINARY': str(self.library.ffmpeg), 'PATH': str(self.library.ffmpeg.parent) + ':' + str(self.library.ffprobe.parent) + ':/usr/bin:/bin'}
+            raw = run(argv, work, env, generator.timeout, cancelled)
             try:
                 value = json.loads(raw)
                 if value['task_id'] != task_id or not isinstance(value['result'], dict): raise ValueError()

@@ -1,0 +1,10 @@
+{
+  "revision": "82bb4a7502704559575f4e3d002b9dcb31d4ed6a",
+  "files": {
+    "pyproject.toml": "252318482779f9076506e9807730af586e47636d451ff30590e956880b07405d",
+    "uv.lock": "197e77cad86ace9cbd296d3df53cb83d10c20563e30db92c08a79ccd04f0c6bb",
+    "cli.py": "62e0ad6aad9a42f2e1144c3356a7e0d468cc3ec9f00902f4ba8ce5a903d824e3",
+    "app/launcher.py": "2cdeaeba70c374a4dc4902d56c6690e2c58579b0b90e733cfbd8b45972a4dee6",
+    "LICENSE": "87dd19b6a0779e14a91c1b06423ef251df37e89666160c031130a26bae68c229"
+  }
+}

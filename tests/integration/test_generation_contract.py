@@ -13,6 +13,7 @@ class GenerationTests(unittest.TestCase):
             config=settings(directory)
             secret = Path(directory) / 'provider.toml'
             secret.write_text('[app]\nopenai_api_key="provider-secret-canary"\n')
+            secret.chmod(0o600)
             config['config_ref'] = str(secret)
             generator=Generator(config)
             os.environ['PUBLISH_CANARY']='secret-value'

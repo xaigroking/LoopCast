@@ -9,7 +9,7 @@ preserves identities, attempts, receipts and event cursors across restarts.
 The default fixture mode makes no model calls. Optional generation requires a
 separately provisioned MPT environment. Platform adapters require a separate pinned SAU environment and explicit server
 configuration. Live sending is disabled by default. Automated contract tests do
-not establish real provider or account readiness. See [STUDIO.md](STUDIO.md). The backend binds to loopback and has no user authentication. Keep
+not establish real provider or account readiness. See [STUDIO.md](STUDIO.md) and the executable [generator installation guide](GENERATOR.md). The backend binds to loopback and has no user authentication. Keep
 the reverse-proxy route behind the test environment's access controls; exact
 Host/Origin checks prevent cross-site writes but do not authenticate users.
 

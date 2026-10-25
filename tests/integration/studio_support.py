@@ -10,6 +10,7 @@ def configurations(directory):
     root = Path(directory); root.mkdir(parents=True, exist_ok=True)
     generator = settings(root)
     provider = root / 'provider.toml'; provider.write_text('[app]\nopenai_api_key="contract-provider-canary"\n')
+    provider.chmod(0o600)
     generator['config_ref'] = str(provider)
     tools = Path(os.environ['LOOPCAST_MEDIA_TOOLS'])
     media = {key: str(tools / key) for key in ('ffmpeg', 'ffprobe')}

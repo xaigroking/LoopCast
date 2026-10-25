@@ -431,6 +431,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/studio/generator/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Generator Diagnostics */
+        get: operations["generator_diagnostics_v1_studio_generator_diagnostics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/studio/projects": {
         parameters: {
             query?: never;
@@ -949,6 +966,18 @@ export interface components {
              */
             voice_rate: number;
         };
+        /** DiagnosticCheck */
+        DiagnosticCheck: {
+            /** Code */
+            code: string;
+            /** Id */
+            id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "PASS" | "FAIL" | "WARN";
+        };
         /** Draft */
         "Draft-Input": {
             /**
@@ -1096,6 +1125,33 @@ export interface components {
             stage: string;
             /** State */
             state: string;
+        };
+        /** GeneratorDiagnostic */
+        GeneratorDiagnostic: {
+            /** Callable */
+            callable: boolean;
+            /** Checks */
+            checks: components["schemas"]["DiagnosticCheck"][];
+            /**
+             * Live Verification
+             * @constant
+             */
+            live_verification: "UNVERIFIED";
+            /** Network */
+            network: {
+                [key: string]: string;
+            };
+            /** Paths */
+            paths: {
+                [key: string]: "UNVERIFIED";
+            };
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "NOT_CONFIGURED" | "NOT_INSTALLED" | "INVALID" | "CALLABLE";
+            /** Supported Stages */
+            supported_stages: string[];
         };
         /** Interaction */
         Interaction: {
@@ -4119,6 +4175,98 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StudioCapabilities"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    generator_diagnostics_v1_studio_generator_diagnostics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeneratorDiagnostic"];
                 };
             };
             /** @description Stable LoopCast error envelope */
