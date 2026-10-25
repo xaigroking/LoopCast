@@ -12,11 +12,14 @@ forbidden = {"fastapi", "starlette", "uvicorn", "next", "react"}
 allowed = {
     "domain": set(), "contracts": set(), "fixture": set(), "runner": set(),
     "migrations": set(), "diagnostics": set(), "publisher_cli": set(),
-    "storage": {"domain", "ledger", "migrations"}, "ledger": {"domain"},
+    "storage": {"domain", "ledger", "migrations", "studio_storage"}, "ledger": {"domain"},
+    "studio_models": set(), "studio_rules": {"domain"},
+    "studio_storage": {"domain", "studio_models", "studio_rules"},
+    "studio_api": {"studio_models"},
     "generation": {"contracts", "runner", "diagnostics"}, "worker": {"domain", "runner", "diagnostics"},
     "publisher": {"runner", "diagnostics"},
     "runtime": {"storage", "worker", "generation", "publisher"},
-    "api": {"runtime", "storage", "diagnostics"}, "openapi": {"api"},
+    "api": {"runtime", "storage", "diagnostics", "studio_api"}, "openapi": {"api"},
     "__main__": {"api", "diagnostics"}, "__init__": set(),
 }
 graph = {name: set() for name in modules}

@@ -11,9 +11,10 @@ from .domain import STAGES, TERMINAL, uid, now, canonical, digest, Problem, acti
 
 
 from .ledger import PublicationMethods
+from .studio_storage import StudioMethods
 
 
-class Store(PublicationMethods):
+class Store(PublicationMethods, StudioMethods):
     def __init__(self, directory, component=None):
         self.component = component
         self.directory = Path(directory).resolve()
@@ -133,28 +134,31 @@ class Store(PublicationMethods):
         return dict(row) if row else {}
 
     def create(self, value, key, trace_id=None):
+        with self.transaction(True) as db:
+            return self.create_within(db, value, key, trace_id)
+
+    def create_within(self, db, value, key, trace_id=None):
         value = validate_input(value)
         if value['mode'] == 'mpt':
             if self.component is None:
                 raise Problem('CAPABILITY_UNAVAILABLE', 'Configure an independently installed generator first.', 422)
             value['component_id'] = digest(self.component)
-        with self.transaction(True) as db:
-            prior = self._reserve(db, 'create', key, value)
-            if prior:
-                self._link_trace(db, trace_id, prior['run_id'], 'create.replay')
-                return prior, False
-            run_id, time = uid(), now()
-            db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)', (run_id, value['mode'], canonical(value), digest(value), 'QUEUED', 0, time, time, trace_id.get('trace_id') if isinstance(trace_id, dict) else trace_id))
-            if value['mode'] == 'mpt':
-                db.execute('INSERT OR IGNORE INTO components VALUES(?,?)', (value['component_id'], canonical(self.component)))
-                db.execute('INSERT INTO generation_context VALUES(?,?)', (run_id, value['component_id']))
-                db.execute('INSERT INTO contents VALUES(?,?)', (uid(), run_id))
-            for stage in STAGES:
-                db.execute('INSERT INTO tasks VALUES(?,?,?,?,?)', (uid(), run_id, stage, 'QUEUED', 1))
-            self._attempt(db, run_id)
-            self._link_trace(db, trace_id, run_id, 'run.create')
-            db.execute('UPDATE idempotency SET run_id=? WHERE scope=? AND key=?', (run_id, 'create', key))
-            return self._event(db, run_id, 'created'), True
+        prior = self._reserve(db, 'create', key, value)
+        if prior:
+            self._link_trace(db, trace_id, prior['run_id'], 'create.replay')
+            return prior, False
+        run_id, time = uid(), now()
+        db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)', (run_id, value['mode'], canonical(value), digest(value), 'QUEUED', 0, time, time, trace_id.get('trace_id') if isinstance(trace_id, dict) else trace_id))
+        if value['mode'] == 'mpt':
+            db.execute('INSERT OR IGNORE INTO components VALUES(?,?)', (value['component_id'], canonical(self.component)))
+            db.execute('INSERT INTO generation_context VALUES(?,?)', (run_id, value['component_id']))
+            db.execute('INSERT INTO contents VALUES(?,?)', (uid(), run_id))
+        for stage in STAGES:
+            db.execute('INSERT INTO tasks VALUES(?,?,?,?,?)', (uid(), run_id, stage, 'QUEUED', 1))
+        self._attempt(db, run_id)
+        self._link_trace(db, trace_id, run_id, 'run.create')
+        db.execute('UPDATE idempotency SET run_id=? WHERE scope=? AND key=?', (run_id, 'create', key))
+        return self._event(db, run_id, 'created'), True
 
     def command(self, run_id, action, key, expected_version, trace_id=None):
         if action not in ('cancel', 'retry') or type(expected_version) is not int:

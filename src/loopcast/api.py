@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, StrictBool, StrictFloat, StrictInt, 
 from .runtime import ApplicationRuntime
 from .storage import Problem, uid, TERMINAL
 from .diagnostics import new_context, log_event
+from .studio_api import register_studio_routes
 
 ID = r"[a-f0-9]{32}"
 _RUN = re.compile(r"^/v1/runs/([a-f0-9]{32})(?:/(cancel|retry|events))?$")
@@ -320,6 +321,7 @@ def create_app(
             return reject(Problem("INVALID_HOST", "Use the local listening address.", 403))
 
         if is_write and (request.url.path == "/v1" or request.url.path.startswith("/v1/")):
+            body_limit = 1048576 if request.url.path.startswith('/v1/studio/') else 16384
             expected_origin = public_origin if public_origin else f"{scheme}://{effective_host}"
             if request.headers.get("origin") != expected_origin or request.headers.get("sec-fetch-site") == "cross-site":
                 return reject(Problem("ORIGIN_REJECTED", "Writes require the exact public Origin.", 403))
@@ -331,13 +333,13 @@ def create_app(
                     size = int(raw_length)
                 except ValueError:
                     size = -1
-                if size < 0 or size > 16384:
+                if size < 0 or size > body_limit:
                     return reject(Problem("INVALID_INPUT", "Provide a JSON object of at most 16 KiB.", 400))
             chunks = []
             size = 0
             async for chunk in request.stream():
                 size += len(chunk)
-                if size > 16384:
+                if size > body_limit:
                     return reject(Problem("INVALID_INPUT", "Provide a JSON object of at most 16 KiB.", 400))
                 chunks.append(chunk)
             request._body = b"".join(chunks)
@@ -367,7 +369,7 @@ def create_app(
             raw = json.loads((await request.body()).decode("utf-8"))
         except (ValueError, UnicodeError):
             raw = None
-        if isinstance(raw, dict) and raw.get("mode", "fixture") not in ("fixture", "mpt"):
+        if request.url.path == '/v1/runs' and isinstance(raw, dict) and raw.get("mode", "fixture") not in ("fixture", "mpt"):
             return _error(Problem("CAPABILITY_UNAVAILABLE", "Only fixture mode is available.", 422), getattr(request.state, "request_id", uid()))
         run_id = request.path_params.get("run_id")
         return _error(Problem("INVALID_INPUT", "The request fields or values are invalid.", 400, run_id if isinstance(run_id, str) else None), getattr(request.state, "request_id", uid()))
@@ -519,6 +521,8 @@ def create_app(
             raise Problem("NOT_FOUND", "This address does not exist.", 404)
         info, content = await asyncio.to_thread(request.app.state.runtime.store.artifact, artifact_id)
         return Response(content, media_type=info["media_type"], headers={"Content-Length": str(len(content)), "Content-Disposition": "inline"})
+
+    register_studio_routes(app, ERROR_RESPONSES)
 
     @app.api_route("/v1", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], include_in_schema=False)
     @app.api_route("/v1/{unknown:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], include_in_schema=False)
