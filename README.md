@@ -1,13 +1,15 @@
 # LoopCast
 
-A single-user task console with a separately deployed Next.js/React frontend and
+A single-user creation and publication workspace with a separately deployed Next.js/React frontend and
 FastAPI backend. The Python domain modules retain durable run history, isolated
-optional video generation and the publication evidence simulator. SQLite
+optional staged video generation, connected platform accounts, controlled
+publication and the publication evidence simulator. SQLite
 preserves identities, attempts, receipts and event cursors across restarts.
 
 The default fixture mode makes no model calls. Optional generation requires a
-separately provisioned MPT environment. Real platform sending and login remain
-unavailable. The backend binds to loopback and has no user authentication. Keep
+separately provisioned MPT environment. Platform adapters require a separate pinned SAU environment and explicit server
+configuration. Live sending is disabled by default. Automated contract tests do
+not establish real provider or account readiness. See [STUDIO.md](STUDIO.md). The backend binds to loopback and has no user authentication. Keep
 the reverse-proxy route behind the test environment's access controls; exact
 Host/Origin checks prevent cross-site writes but do not authenticate users.
 
@@ -47,7 +49,7 @@ address. Use HTTPS and the environment's access controls for a remote test
 machine.
 
 The backend prints `READY` only after storage, recovery, worker and publisher
-startup completes. Its `/healthz` checks the database and worker. Check the
+startup completes. Its `/healthz` checks the database, generation worker and publication owner. Check the
 frontend through its own loopback URL and through Caddy. Only one backend
 process can own a data directory; do not use ASGI multiple workers or reload
 mode for that directory.
@@ -59,8 +61,8 @@ place. Shutdown drains HTTP requests for at most five seconds, then cancels
 remaining streams before stopping the executor and publisher. Queued work stays
 durable; interrupted active work records an interruption and is recovered at
 restart. For code rollback, stop both services and choose a binary that supports
-the current database schema. Schema v4 adds diagnostic links; pre-v4 binaries
-reject it. If no compatible prior binary exists, use a forward fix. Keep the
+the current database schema. Schema v5 adds creation, authorization and per-target release tables while
+retaining prior runs, events and simulated receipts. Pre-v5 binaries reject it. If no compatible prior binary exists, use a forward fix. Keep the
 current database and immutable media; do not restore an older snapshot over new
 writes.
 

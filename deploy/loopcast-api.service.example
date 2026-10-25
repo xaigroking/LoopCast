@@ -9,6 +9,8 @@ Group=loopcast
 EnvironmentFile=/etc/loopcast/loopcast.env
 Environment=PYTHONUNBUFFERED=1
 WorkingDirectory=/opt/loopcast/backend
+# Optional provisioned capabilities: append --generator-config /etc/loopcast/generator.json
+# --media-config /etc/loopcast/media.json --social-config /etc/loopcast/social.json to ExecStart.
 ExecStart=/opt/loopcast/backend/venv/bin/python -I -m loopcast serve --host 127.0.0.1 --port 8080 --data-dir /var/lib/loopcast/state --public-origin ${LOOPCAST_PUBLIC_ORIGIN} --trusted-proxy 127.0.0.1/32
 Restart=on-failure
 RestartSec=2

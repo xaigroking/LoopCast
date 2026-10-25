@@ -11,14 +11,18 @@ import urllib.error
 
 
 class ServerProcess:
-    def __init__(self, directory, generator_config=None):
+    def __init__(self, directory, generator_config=None, media_config=None, social_config=None):
         self.generator_config = generator_config
+        self.media_config, self.social_config = media_config, social_config
         self.directory = directory
         self.process = None
         self.diagnostics = []
 
     def start(self):
-        self.process = subprocess.Popen([sys.executable, '-I', '-m', 'loopcast', 'serve', '--port', '0', '--data-dir', str(self.directory)] + (['--generator-config',str(self.generator_config)] if self.generator_config else []), cwd='/tmp', stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        options = []
+        for flag, value in [('generator', self.generator_config), ('media', self.media_config), ('social', self.social_config)]:
+            if value: options.extend(['--' + flag + '-config', str(value)])
+        self.process = subprocess.Popen([sys.executable, '-I', '-m', 'loopcast', 'serve', '--port', '0', '--data-dir', str(self.directory)] + options, cwd='/tmp', stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         # Continuously drain diagnostics so concurrency tests cannot block on a
         # full subprocess stderr pipe. Retain real emitted logs for assertions.
         self.log_thread = threading.Thread(target=self._read_logs, args=(self.process.stderr,), daemon=True)

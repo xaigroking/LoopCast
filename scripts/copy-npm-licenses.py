@@ -14,8 +14,8 @@ entries = package_lock["packages"]
 if not modules.is_dir():
     raise SystemExit("Run npm ci before collecting frontend dependency notices")
 
-if public.exists():
-    shutil.rmtree(public)
+if (public / 'npm').exists():
+    shutil.rmtree(public / 'npm')
 (public / "npm").mkdir(parents=True)
 manifest = []
 for lock_path, lock_entry in sorted(entries.items()):

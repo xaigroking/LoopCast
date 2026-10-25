@@ -36,6 +36,7 @@ revision=$(git rev-parse HEAD)
 wheel=$(find dist -maxdepth 1 -name 'loopcast-*.whl' -print -quit)
 web_archive=dist/loopcast-web-standalone.tar.gz
 tar -czf "$web_archive" -C frontend/.next/standalone .
+python scripts/check-licenses.py --frontend-archive
 python - "$revision" "$wheel" "$web_archive" <<'PY'
 import hashlib, json, pathlib, sys
 revision, wheel, web = sys.argv[1:]
