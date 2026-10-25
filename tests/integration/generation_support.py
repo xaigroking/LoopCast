@@ -32,7 +32,7 @@ def settings(directory):
     root = Path(directory)
     tools = Path(os.environ['LOOPCAST_MEDIA_TOOLS'])
     sample = root / 'sample.mp4'
-    subprocess.run([str(tools/'ffmpeg'),'-v','error','-f','lavfi','-i','color=c=orange:s=64x64:d=0.2','-an','-c:v','mpeg4',str(sample)],check=True)
+    subprocess.run([str(tools/'ffmpeg'),'-v','error','-f','lavfi','-i','color=c=orange:s=64x64:d=0.2','-an','-c:v','libvpx-vp9',str(sample)],check=True)
     wheel = root / 'mpt-0.0.0-py3-none-any.whl'
     files = {'app/__init__.py':b'', 'app/launcher.py':LAUNCHER.encode(),'app/sample.mp4':sample.read_bytes(),
              'mpt-0.0.0.dist-info/METADATA':b'Metadata-Version: 2.1\nName: mpt\nVersion: 0.0.0\n',

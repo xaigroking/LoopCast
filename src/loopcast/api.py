@@ -3,6 +3,7 @@ import fcntl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 import json
+from pathlib import Path
 import re
 import threading
 import time
@@ -21,13 +22,19 @@ class Service(ThreadingHTTPServer):
     def __init__(self, host, port, directory, generator_settings=None):
         from .generation import Generator
         self.generator = Generator(generator_settings) if generator_settings is not None else None
-        self.store = Store(directory, self.generator.manifest if self.generator else None)
-        self.lock = (self.store.directory / 'service.lock').open('a')
+        directory = Path(directory).resolve()
+        directory.mkdir(parents=True, exist_ok=True)
+        self.lock = (directory / 'service.lock').open('a')
         try:
             fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             self.lock.close()
             raise RuntimeError('The data directory is already in use') from None
+        try:
+            self.store = Store(directory, self.generator.manifest if self.generator else None)
+        except BaseException:
+            self.lock.close()
+            raise
         self.stopping = threading.Event()
         self.stream_slots = threading.BoundedSemaphore(16)
         self.stream_lock = threading.Lock()
@@ -147,6 +154,25 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 raise Problem('INVALID_INPUT', 'Use limit 1–100 and a positive before cursor.', 400) from None
             return self.send_json(200, store.list_runs(before, limit))
+        match = re.fullmatch('/v1/runs/(' + ID + ')/publications(?:/(' + ID + ')/(dispatch|verify))?', path)
+        if write and match:
+            run_id, intent_id, action = match.groups()
+            body = self._body()
+            key = self.headers.get('Idempotency-Key')
+            if intent_id is None:
+                if set(body) != {'platform','account','expected_version'}:
+                    raise Problem('INVALID_INPUT','Provide platform, account and expected_version.',400,run_id)
+                version = body.pop('expected_version')
+                return self.send_json(200,store.publication_create(run_id,body,key,version))
+            if action == 'verify':
+                if set(body) != {'expected_version'}:
+                    raise Problem('INVALID_INPUT','Provide expected_version only; evidence comes from the adapter query.',400,run_id)
+                return self.send_json(200,store.publication_verify(run_id,intent_id,key,body['expected_version']))
+            if set(body) - {'expected_version','scenario'} or 'expected_version' not in body or body.get('scenario','success') not in {'success','submitted','lost_response','not_sent','slow'}:
+                raise Problem('INVALID_INPUT','Provide expected_version and a known simulator scenario.',400,run_id)
+            snapshot,job = store.publication_dispatch(run_id,intent_id,key,body['expected_version'],body.get('scenario','success'))
+            if job: self.server.publisher.submit(job,body.get('scenario','success'))
+            return self.send_json(202 if job else 200,snapshot)
         match = re.fullmatch('/v1/runs/(' + ID + ')(?:/(cancel|retry|events))?', path)
         if match:
             run_id, action = match.groups()
@@ -206,7 +232,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.flush()
                     after = event['id']
                 current = self.server.store.snapshot(run_id)
-                if after == current['last_event_id'] and current['state'] in TERMINAL:
+                if after == current['last_event_id'] and current['state'] in TERMINAL and not any(p['state'] in ('PREPARED','SENDING') for p in current['publications']):
                     # A terminal snapshot is also sent to subscriptions opened at its cursor.
                     self.wfile.write(('event: complete\ndata: ' + json.dumps(current) + '\n\n').encode())
                     self.wfile.flush()

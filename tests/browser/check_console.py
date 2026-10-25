@@ -124,7 +124,9 @@ async def main():
                 await page.goto(server.url)
                 card = page.locator(f'[data-run-id="{slow}"]')
                 await card.locator('summary').click()
-                await card.locator('.menu').get_by_role('button', name='Cancel', exact=True).click()
+                async with page.expect_response(lambda response: response.url.endswith('/' + slow + '/cancel')) as accepted_cancel:
+                    await card.locator('.menu').get_by_role('button', name='Cancel', exact=True).click()
+                assert (await accepted_cancel.value).status in (200, 202)
                 await page.goto(server.url + '/runs/' + slow)
                 await expect(page.locator(STATE)).to_have_text('CANCELLED', timeout=15000)
                 cancelled = server.request('/v1/runs/' + slow)[1]

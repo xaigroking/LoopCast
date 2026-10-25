@@ -67,13 +67,13 @@ class PublicationMethods:
         if not isinstance(key, str) or not 1 <= len(key) <= 128 or not key.isascii():
             raise problem('IDEMPOTENCY_REQUIRED', 'Supply an Idempotency-Key.', 400)
 
-    def publication_dispatch(self, run_id, intent_id, key, expected_version):
+    def publication_dispatch(self, run_id, intent_id, key, expected_version, scenario="success"):
         from .storage import digest
         with self.transaction(True) as db:
             current = self._snapshot(db, run_id)
             self._publication_key(key)
             scope = intent_id + ':dispatch'
-            checksum = digest({'expected_version': expected_version})
+            checksum = digest({'expected_version': expected_version, 'scenario': scenario})
             old = db.execute('SELECT * FROM publish_requests WHERE scope=? AND key=?', (scope, key)).fetchone()
             if old:
                 if old['digest'] != checksum: raise problem('IDEMPOTENCY_CONFLICT', 'Key already used.', run_id=run_id)

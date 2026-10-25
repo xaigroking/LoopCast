@@ -9,3 +9,5 @@ python -m pip --python "$work_dir/installed/bin/python" install --no-deps "$root
 python -m pip --python "$work_dir/installed/bin/python" check
 cd "$work_dir"
 "$work_dir/installed/bin/python" -I "$root_dir/tests/browser/check_console.py"
+
+"$work_dir/installed/bin/python" -I "$root_dir/tests/browser/check_generation.py"

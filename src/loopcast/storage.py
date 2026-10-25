@@ -104,6 +104,10 @@ class Store(PublicationMethods):
         if row is None:
             raise Problem('NOT_FOUND', 'Task does not exist.', 404, run_id)
         run = dict(row)
+        allowed = actions(run['state'])
+        if db.execute('SELECT 1 FROM publish_intents WHERE run_id=?', (run_id,)).fetchone():
+            allowed['retry'] = {'enabled': False, 'reason_code': 'USE_TARGET_PUBLICATION_ACTIONS'}
+        allowed['add_simulated_target'] = {'enabled': run['state'] == 'SUCCEEDED', 'reason_code': 'SIMULATOR_ONLY'}
         return {
             'run_id': run_id, 'mode': run['mode'], 'input': json.loads(run['input']),
             'input_digest': run['input_digest'], 'state': run['state'], 'state_version': run['version'],
@@ -112,7 +116,7 @@ class Store(PublicationMethods):
             'tasks': [dict(x) for x in db.execute('SELECT id,stage,state,version FROM tasks WHERE run_id=? ORDER BY rowid', (run_id,))],
             'attempts': [dict(x) for x in db.execute('SELECT id,number,state,started_at,ended_at,error,evidence FROM attempts WHERE run_id=? ORDER BY number', (run_id,))],
             'artifacts': [dict(x) for x in db.execute('SELECT id,attempt_id,media_type,size,sha256 FROM artifacts WHERE run_id=? ORDER BY rowid', (run_id,))],
-            'allowed_actions': actions(run['state']),
+            'allowed_actions': allowed,
             'publications': self._publications(db, run_id),
             'component': self._component(db, run_id),
             'content_id': (dict(db.execute('SELECT id FROM contents WHERE run_id=?', (run_id,)).fetchone() or {}).get('id')),
