@@ -1,179 +1,193 @@
-"""Browser acceptance against a separately installed application and real HTTP API."""
+"""Production standalone UI smoke and fixture workflow through the shared origin."""
 import asyncio
-import hashlib
 import json
-from pathlib import Path
-import sys
-import tempfile
+import os
+import time
+import urllib.error
+import urllib.request
 
 from playwright.async_api import async_playwright, expect
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'integration'))
-from support import ServerProcess
-
-STATE = '.heading > .row-actions > .state'
+BASE = os.environ["LOOPCAST_BASE_URL"]
 
 
-async def create(page, title, scenario='success', delay=300):
-    await page.goto(page.base_url)
-    await page.get_by_role('button', name='+ New fixture', exact=True).click()
-    await page.get_by_label('Task name').fill(title)
-    await page.get_by_label('Scenario').select_option(scenario)
-    await page.get_by_label('Execution delay').fill(str(delay))
-    await page.get_by_role('button', name='Create fixture →', exact=True).click()
-    await page.wait_for_url('**/runs/*')
-    return page.url.rsplit('/', 1)[1]
+def api(path, body=None, key=None):
+    headers = {"Origin": BASE}
+    data = None
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+        headers["Idempotency-Key"] = key or "browser-test-key"
+        data = json.dumps(body).encode()
+    req = urllib.request.Request(BASE + path, data=data, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            value = response.read()
+            return response.status, json.loads(value) if "json" in response.headers.get("Content-Type", "") else value
+    except urllib.error.HTTPError as error:
+        return error.code, json.load(error)
 
 
 async def main():
-    errors = []
-    with tempfile.TemporaryDirectory(prefix='loopcast-browser-') as directory:
-        server = ServerProcess(directory).start()
-        try:
-            async with async_playwright() as tool:
-                browser = await tool.chromium.launch(channel="chromium")
-                context = await browser.new_context(viewport={'width': 1440, 'height': 1000})
-                await context.add_init_script('''
-                    window.activeStreams = 0;
-                    const Native = window.EventSource;
-                    window.EventSource = class extends Native {
-                      constructor(...args) { super(...args); window.activeStreams++; this.counted = true; }
-                      close() { if(this.counted) { window.activeStreams--; this.counted = false; } super.close(); }
-                    };
-                ''')
-                page = await context.new_page()
-                page.base_url = server.url
-                page.on('pageerror', lambda error: errors.append(str(error)))
-                page.on('dialog', lambda dialog: dialog.accept())
-                await page.goto(server.url)
-                await expect(page.get_by_text('A fresh start.', exact=True)).to_be_visible()
-                await expect(page.get_by_text('FIXTURE MODE', exact=True)).to_be_visible()
-                title = '<img src=x onerror=alert(1)> browser fixture'
-                success = await create(page, title)
-                await expect(page.locator(STATE)).to_have_text('SUCCEEDED', timeout=15000)
-                await expect(page.get_by_role('heading', name=title)).to_be_visible()
-                assert await page.locator('main img').count() == 0
-                report_link = page.get_by_role('link', name='Open fixture report', exact=False)
-                await expect(report_link).to_be_visible()
-                async with page.expect_popup() as event:
-                    await report_link.click()
-                popup = await event.value
-                await expect(popup.locator('body')).to_contain_text('LoopCast fixture report')
-                await popup.close()
-                data = server.request('/v1/runs/' + success)[1]
-                report = server.request('/v1/artifacts/' + data['artifacts'][0]['id'] + '/content')[1]
-                assert hashlib.sha256(report).hexdigest() == data['artifacts'][0]['sha256']
-                await expect(page.get_by_role('button', name='Retry', exact=True)).to_be_disabled()
-                assert await page.evaluate('window.activeStreams') == 0
+    page_errors = []
+    external = []
+    async with async_playwright() as tool:
+        browser = await tool.chromium.launch(channel="chromium")
+        context = await browser.new_context(viewport={"width": 1440, "height": 1000}, locale="en-US")
+        page = await context.new_page()
+        page.on("pageerror", lambda error: page_errors.append(str(error)))
+        page.on("request", lambda request: external.append(request.url) if not request.url.startswith(BASE) else None)
+        response = await page.goto(BASE + "/")
+        assert response and response.status == 200
+        headers = response.headers
+        assert "nonce-" in headers.get("content-security-policy", "")
+        assert headers.get("x-content-type-options") == "nosniff"
+        await expect(page.get_by_role("heading", name="Your task console")).to_be_visible()
+        await expect(page.get_by_text("A fresh start.", exact=True)).to_be_visible()
+        for path in ["/settings", "/runs/" + "0" * 32]:
+            result = await page.request.get(BASE + path)
+            assert result.status == 200
+        await page.locator('aside nav a[href="/settings"]').click()
+        await expect(page.get_by_role("heading", name="Settings")).to_be_visible()
+        language = page.locator("#language-select")
+        options = await language.locator("option").all_text_contents()
+        assert len(options) == 21, options
+        registry_response = await page.request.get(BASE + "/locales/registry.json")
+        assert registry_response.status == 200
+        locale_registry = await registry_response.json()
+        for locale in locale_registry:
+            await language.select_option(locale["code"])
+            await expect(page.locator("html")).to_have_attribute("lang", locale["code"])
+            await expect(page.locator("html")).to_have_attribute("dir", locale["dir"])
+        await language.select_option("ar")
+        await expect(page.locator("html")).to_have_attribute("dir", "rtl")
+        await language.select_option("en")
+        await page.locator("#theme-select").select_option("dark")
+        await expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+        await page.get_by_role("link", name="Your task console").click()
+        await page.get_by_role("button", name="+ New fixture").click()
+        await page.get_by_label("Task name").fill("preserved browser draft")
+        await page.get_by_label("Scenario").select_option("fail_once")
+        await page.locator("#dialog-settings").click()
+        await page.locator("#language-select").select_option("zh-Hant")
+        await page.go_back()
+        await expect(page.locator("main .heading .primary")).to_be_visible()
+        await page.locator("main .heading .primary").click()
+        await expect(page.locator('input[name="title"]')).to_have_value("preserved browser draft")
+        await expect(page.locator('select[name="scenario"]')).to_have_value("fail_once")
+        await page.locator("#dismiss").click()
+        await page.locator('aside nav a[href="/settings"]').click()
+        await page.locator("#language-select").select_option("en")
+        await page.get_by_role("link", name="Your task console").click()
 
-                # The server accepts a create, but the first network response is lost.
-                await page.goto(server.url)
-                seen = []
-                async def lose_first_response(route):
-                    if route.request.method != 'POST':
-                        return await route.continue_()
-                    seen.append(route.request.headers.get('idempotency-key'))
-                    response = await route.fetch()
-                    if len(seen) == 1:
-                        await route.abort('failed')
-                    else:
-                        await route.fulfill(response=response)
-                await page.route('**/v1/runs', lose_first_response)
-                await page.get_by_role('button', name='+ New fixture', exact=True).click()
-                await page.get_by_label('Task name').fill('Lost response fixture')
-                await page.get_by_role('button', name='Create fixture →', exact=True).click()
-                await expect(page.locator('#form-error')).to_contain_text('retry safely')
-                await page.get_by_role('button', name='Create fixture →', exact=True).click()
-                await page.wait_for_url('**/runs/*')
-                await expect(page.locator(STATE)).to_have_text('SUCCEEDED', timeout=15000)
-                await page.unroute('**/v1/runs', lose_first_response)
-                assert len(seen) == 2 and seen[0] == seen[1]
-                matching = [r for r in server.request('/v1/runs?limit=100')[1]['items'] if r['input']['title'] == 'Lost response fixture']
-                assert len(matching) == 1
+        seen_keys = []
+        async def lose_first_create(route):
+            if route.request.method != "POST":
+                return await route.continue_()
+            seen_keys.append(route.request.headers.get("idempotency-key"))
+            response = await route.fetch()
+            if len(seen_keys) == 1:
+                await route.abort("failed")
+            else:
+                await route.fulfill(response=response)
+        await page.route("**/v1/runs", lose_first_create)
+        await page.get_by_role("button", name="+ New fixture").click()
+        await page.get_by_label("Task name").fill("production browser fixture")
+        await page.get_by_label("Scenario").select_option("success")
+        await page.get_by_label("Execution delay (ms)").fill("40")
+        await page.get_by_role("button", name="Create fixture →").click()
+        await expect(page.locator("#form-error")).to_contain_text("retry safely")
+        await page.get_by_role("button", name="Create fixture →").click()
+        await page.wait_for_url("**/runs/*")
+        await page.unroute("**/v1/runs", lose_first_create)
+        assert len(seen_keys) == 2 and seen_keys[0] == seen_keys[1]
+        await expect(page.locator('[data-state="SUCCEEDED"]').first).to_be_visible(timeout=15000)
+        await expect(page.get_by_role("link", name="↗ Open fixture report", exact=False)).to_be_visible()
+        await expect(page.get_by_text("Publication simulator")).to_be_visible()
+        run_id = page.url.rstrip("/").split("/")[-1]
+        run_status, run = api("/v1/runs/" + run_id)
+        assert run_status == 200 and run["state"] == "SUCCEEDED"
+        await page.get_by_role("button", name="Add simulated target").click()
+        await expect(page.locator("[data-intent-id]")).to_have_count(1)
+        await page.get_by_label("Simulator outcome").select_option("lost_response")
+        await page.get_by_role("button", name="Dispatch simulation").click()
+        await expect(page.locator('[data-state="UNKNOWN"]')).to_be_visible(timeout=10000)
+        await page.get_by_role("button", name="Check simulator receipt").click()
+        await expect(page.locator('[data-state="PUBLISHED"]')).to_be_visible(timeout=10000)
+        assert len([item for item in api("/v1/runs?limit=100")[1]["items"] if item["input"]["title"] == "production browser fixture"]) == 1
+        assert api("/v1/runs")[0] == 200
+        assert api("/v1", body={})[0] == 404
+        assert api("/v1/unknown")[0] == 404
 
-                # Narrow-screen retry uses the same backend command policy.
-                await page.set_viewport_size({'width': 390, 'height': 844})
-                failed = await create(page, 'Retry from narrow screen', 'fail_once', 150)
-                await expect(page.locator(STATE)).to_have_text('FAILED', timeout=15000)
-                old_failed = server.request('/v1/runs/' + failed)[1]
-                await page.get_by_role('button', name='Retry', exact=True).click()
-                await expect(page.locator(STATE)).to_have_text('SUCCEEDED', timeout=15000)
-                current = server.request('/v1/runs/' + failed)[1]
-                assert len(current['attempts']) == 2
-                assert current['attempts'][0] == old_failed['attempts'][0]
-                assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-                await page.screenshot(path='/tmp/loopcast-console-mobile.png', full_page=True)
+        await page.goto(BASE + "/")
+        await page.get_by_role("button", name="+ New fixture").click()
+        await page.get_by_label("Task name").fill("retry from production UI")
+        await page.get_by_label("Scenario").select_option("fail_once")
+        await page.get_by_label("Execution delay (ms)").fill("30")
+        await page.get_by_role("button", name="Create fixture →").click()
+        await page.wait_for_url("**/runs/*")
+        await expect(page.locator('[data-state="FAILED"]').first).to_be_visible(timeout=15000)
+        await page.get_by_role("button", name="Retry", exact=True).click()
+        await expect(page.locator('[data-state="SUCCEEDED"]').first).to_be_visible(timeout=15000)
 
-                # Deliver a stale HTTP snapshot after the terminal version is already known.
-                async def stale(route):
-                    await route.fulfill(status=200, content_type='application/json', body=json.dumps(old_failed))
-                await page.route('**/v1/runs/' + failed, stale)
-                await page.get_by_role('button', name='Refresh', exact=True).click()
-                await expect(page.locator(STATE)).to_have_text('SUCCEEDED')
-                await expect(page.get_by_text('Attempt 2 · State version', exact=False)).to_be_visible()
-                await page.unroute('**/v1/runs/' + failed, stale)
+        await page.goto(BASE + "/")
+        await page.get_by_role("button", name="+ New fixture").click()
+        await page.get_by_label("Task name").fill("cancel from production UI")
+        await page.get_by_label("Scenario").select_option("slow")
+        await page.get_by_label("Execution delay (ms)").fill("1200")
+        page.on("dialog", lambda dialog: dialog.accept())
+        await page.get_by_role("button", name="Create fixture →").click()
+        await page.wait_for_url("**/runs/*")
+        await expect(page.locator('[data-state="RUNNING"]').first).to_be_visible(timeout=10000)
+        await page.get_by_role("button", name="Cancel", exact=True).click()
+        await expect(page.locator('[data-state="CANCELLED"]').first).to_be_visible(timeout=10000)
 
-                # Old/duplicate SSE payloads cannot overwrite a newer version.
-                slow = await create(page, 'Reconnect and cancel', 'slow', 2500)
-                initial = server.request('/v1/runs/' + slow)[1]
-                await expect(page.locator(STATE)).to_have_text('RUNNING', timeout=15000)
-                await context.set_offline(True)
-                await expect(page.locator('#sync')).to_contain_text('Offline')
-                await context.set_offline(False)
-                await expect(page.get_by_role('heading', name='Reconnect and cancel')).to_be_visible()
-                await page.goto(server.url)
-                card = page.locator(f'[data-run-id="{slow}"]')
-                await card.locator('summary').click()
-                async with page.expect_response(lambda response: response.url.endswith('/' + slow + '/cancel')) as accepted_cancel:
-                    await card.locator('.menu').get_by_role('button', name='Cancel', exact=True).click()
-                assert (await accepted_cancel.value).status in (200, 202)
-                await page.goto(server.url + '/runs/' + slow)
-                await expect(page.locator(STATE)).to_have_text('CANCELLED', timeout=15000)
-                cancelled = server.request('/v1/runs/' + slow)[1]
-                assert len(cancelled['attempts']) == 1
-                assert not cancelled['allowed_actions']['retry']['enabled']
-                # Inject genuine historical snapshots, never invented success facts.
-                async def old_events(route):
-                    payload = f"id: {cancelled['last_event_id']}\nevent: snapshot\ndata: {json.dumps(cancelled)}\n\n"
-                    payload += f"id: {initial['last_event_id']}\nevent: snapshot\ndata: {json.dumps(initial)}\n\n" * 2
-                    payload += f"id: {cancelled['last_event_id']}\nevent: complete\ndata: {json.dumps(cancelled)}\n\n"
-                    await route.fulfill(status=200, content_type='text/event-stream', body=payload)
-                await page.route('**/v1/runs/' + slow, lambda route: route.fulfill(status=200, content_type='application/json', body=json.dumps(initial)))
-                await page.route('**/v1/runs/' + slow + '/events?*', old_events)
-                await page.reload()
-                await expect(page.locator(STATE)).to_have_text('CANCELLED', timeout=15000)
-                await page.unroute_all()
-                assert await page.evaluate('window.activeStreams') == 0
+        status, conflict_seed = api("/v1/runs", {"title": "two-tab conflict", "scenario": "fail_once", "delay_ms": 50}, "two-tab-conflict")
+        assert status == 202
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            _, conflict_seed = api("/v1/runs/" + conflict_seed["run_id"])
+            if conflict_seed["state"] == "FAILED":
+                break
+            await asyncio.sleep(.05)
+        assert conflict_seed["state"] == "FAILED"
+        first, second = await context.new_page(), await context.new_page()
+        await first.goto(BASE + "/runs/" + conflict_seed["run_id"])
+        await second.goto(BASE + "/runs/" + conflict_seed["run_id"])
+        await first.route("**/events?*", lambda route: route.abort())
+        await second.route("**/events?*", lambda route: route.abort())
+        await first.get_by_role("button", name="Retry", exact=True).click()
+        await expect(first.locator('[data-state="SUCCEEDED"]').first).to_be_visible(timeout=10000)
+        await second.get_by_role("button", name="Retry", exact=True).click()
+        await expect(second.locator('[data-state="SUCCEEDED"]').first).to_be_visible(timeout=10000)
+        await expect(second.get_by_role("alert")).to_be_visible()
+        await first.close()
+        await second.close()
 
-                before = server.request('/v1/runs?limit=100')[1]['items']
-                for n in range(30):
-                    await page.goto(server.url + '/runs/' + (success if n % 2 else failed))
-                    await expect(page.locator(STATE)).to_have_text('SUCCEEDED')
-                    await page.reload()
-                    await expect(page.locator(STATE)).to_have_text('SUCCEEDED')
-                    assert await page.evaluate('window.activeStreams') == 0
-                after = server.request('/v1/runs?limit=100')[1]['items']
-                assert [(r['run_id'], len(r['attempts'])) for r in before] == [(r['run_id'], len(r['attempts'])) for r in after]
-                await page.goto(server.url)
-                await page.get_by_role('link', name=title, exact=True).click()
-                await expect(page.locator(STATE)).to_have_text('SUCCEEDED')
-                await page.go_back()
-                await expect(page.get_by_role('heading', name='Your task console')).to_be_visible()
-                await page.go_forward()
-                await expect(page.locator(STATE)).to_have_text('SUCCEEDED')
-                await page.goto(server.url + '/runs/' + '0' * 32)
-                await expect(page.get_by_role('heading', name='Task or address not found')).to_be_visible()
-                assert server.request('/v1/assets/missing')[0] == 404
-                await page.set_viewport_size({'width': 1440, 'height': 1000})
-                await page.goto(server.url)
-                await expect(page.get_by_role('heading', name='Your task console')).to_be_visible()
-                await page.screenshot(path='/tmp/loopcast-console-desktop.png', full_page=True)
-                assert not errors, errors
-                await browser.close()
-            print('Browser acceptance passed: installed assets, desktop/mobile, create, retry, menu cancel, report, offline recovery, stale HTTP/SSE, 30 refresh/switch cycles, history, missing object, subscription cleanup.')
-        finally:
-            server.stop()
+        page.set_default_timeout(15000)
+        await page.set_viewport_size({"width": 390, "height": 844})
+        await page.goto(BASE + "/")
+        await page.locator("main .heading .primary").click()
+        mode = page.locator('select[name="mode"]')
+        await expect(mode.locator('option[value="mpt"]')).to_be_enabled()
+        await mode.select_option("mpt")
+        await page.locator('input[name="title"]').fill("production MPT browser media")
+        await page.get_by_role("button", name="Generate video →").click()
+        await page.wait_for_url("**/runs/*")
+        video = page.locator("video")
+        await expect(video).to_be_visible(timeout=20000)
+        await video.evaluate("element => element.play()")
+        await expect(video).to_have_js_property("videoWidth", 64, timeout=10000)
+        await page.wait_for_function('document.querySelector("video").currentTime > 0')
+        _, generated = api("/v1/runs/" + page.url.rstrip("/").split("/")[-1])
+        assert generated["mode"] == "mpt" and generated["media"]
+        await expect(page.get_by_role("link", name="↗ Open video", exact=False)).to_be_visible()
+        assert not page_errors, page_errors
+        assert not external, external
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        await page.screenshot(path="/tmp/loopcast-next-mobile.png", full_page=True)
+        await browser.close()
+    print("Standalone same-origin browser checks passed: CSP, routes, all locales, RTL/theme/drafts, fixture/report/retry/cancel, lost-response identity, two-tab conflict, simulator UNKNOWN/receipt, MPT video at 390px and API routing")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())

@@ -1,32 +1,61 @@
 # LoopCast
 
-A local, single-user task console with durable history, isolated optional video
-generation, and a publication evidence simulator. Create fixture runs, follow
-execution stages, cancel or retry, and open verified reports and media. SQLite
+A single-user task console with a separately deployed Next.js/React frontend and
+FastAPI backend. The Python domain modules retain durable run history, isolated
+optional video generation and the publication evidence simulator. SQLite
 preserves identities, attempts, receipts and event cursors across restarts.
 
 The default fixture mode makes no model calls. Optional generation requires a
 separately provisioned MPT environment. Real platform sending and login remain
-unavailable. This prototype binds to loopback and has no user authentication;
-it is intended for one local user on Linux with Python 3.12 or newer.
+unavailable. The backend binds to loopback and has no user authentication. Keep
+the reverse-proxy route behind the test environment's access controls; exact
+Host/Origin checks prevent cross-site writes but do not authenticate users.
 
-## Build and start
+## Build and deploy
 
 ```sh
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install --require-hashes -r requirements-ci.lock
-python -m build --no-isolation
-python -m venv /tmp/loopcast-install
-python -m pip --python /tmp/loopcast-install/bin/python install --no-deps dist/*.whl
-/tmp/loopcast-install/bin/python -I -m loopcast serve \
-  --host 127.0.0.1 --port 8080 --data-dir /tmp/loopcast-data
+python3.12 -m pip install --require-hashes -r requirements-ci.lock
+python3.12 -m pip install --require-hashes -r requirements-runtime.lock
+python3.12 -m build --no-isolation
+cd frontend
+npm ci
+npm run types:api
+npm run typecheck
+python ../scripts/copy-npm-licenses.py
+npm run build
+mkdir -p .next/standalone/public .next/standalone/.next/static
+cp -a public/. .next/standalone/public/
+cp -a .next/static/. .next/standalone/.next/static/
 ```
 
-Open `http://127.0.0.1:8080`. `--port 0` selects an available port; stdout prints
-`READY` and the listening URL after the store and executor initialize. Stop with
-Ctrl+C or SIGTERM. Only one service can own a data directory at a time.
-Runtime code uses the Python standard library; Web assets ship inside the wheel.
+For a candidate that records the common Git revision and checksums, run
+`scripts/build-release.sh`. It emits the backend wheel and the packed Next.js
+standalone server under `dist/`, along with `release-manifest.json`. The manifest
+records artifact SHA256 values and the source revision; dependency locks alone
+do not claim byte-for-byte reproducible builds.
+
+Install the Python wheel and exact runtime lock in the backend environment.
+Extract the frontend archive as a separate Node service. The example systemd
+units and Caddy route are in `deploy/`. Set `LOOPCAST_PUBLIC_ORIGIN` to the
+exact browser-visible scheme, host and port. Caddy routes `/v1`, `/v1/*`,
+`/healthz` and `/openapi.json` to FastAPI; pages and static assets go to
+Next.js. Both application services bind only to loopback. Caddy forwards the
+public host and scheme, which FastAPI trusts only from the configured proxy
+address. Use HTTPS and the environment's access controls for a remote test
+machine.
+
+The backend prints `READY` only after storage, recovery, worker and publisher
+startup completes. Its `/healthz` checks the database and worker. Check the
+frontend through its own loopback URL and through Caddy. Only one backend
+process can own a data directory; do not use ASGI multiple workers or reload
+mode for that directory.
+
+The `python -m loopcast serve` CLI remains as a backend-only launch command; it
+no longer serves pages or static assets. Stop the old service before starting
+the new backend on the same data directory. SQLite and domain tables remain in
+place. For rollback, stop and drain the new backend, reinstall the previous
+code and keep the current database; do not restore an older snapshot over new
+writes.
 
 ## Task behavior
 
@@ -63,6 +92,10 @@ Every write requires JSON, an exact `Origin` matching the local listening URL,
 and an `Idempotency-Key`. Reuse a key only with the same normalized input.
 Replays return the current snapshot; conflicts return 409 with a refreshable
 snapshot when available. Errors contain a stable code, message and request ID.
+Requests accept and return W3C `traceparent`; invalid or all-zero caller context
+is replaced with a fresh trace. Request logs use structured route templates and
+correlate asynchronous run attempts through a durable trace link. Trace IDs do
+not authorize actions or replace idempotency keys.
 
 ```sh
 curl http://127.0.0.1:8080/v1/runs \
@@ -81,13 +114,16 @@ terminal state. The Web client rejects older versions/cursors, closes streams
 when navigating, and labels disconnected views as stale. Lists poll; terminal
 details settle until refresh, focus, or a local command starts a new attempt.
 
-Report bytes are served at `/v1/artifacts/{id}/content`. API errors do not fall
-through to the Web router. No endpoint accepts arbitrary filesystem paths.
+Report bytes are served at `/v1/artifacts/{id}/content`. The backend publishes
+typed OpenAPI models and structured errors; unknown API paths return JSON 404
+responses. The API service does not serve frontend pages or static assets. No
+endpoint accepts arbitrary filesystem paths.
 
 ## Verification
 
 ```sh
 python -m pip install --require-hashes -r requirements-ci.lock
+python -m pip install --require-hashes -r requirements-runtime.lock
 scripts/check-wheel.sh
 scripts/check-tests.sh
 python -m pip install --require-hashes -r requirements-web.lock
@@ -95,13 +131,15 @@ python -m playwright install --with-deps chromium
 scripts/check-web.sh
 ```
 
-The checks install the wheel into independent environments and start services
-outside the checkout. Unit and integration coverage includes concurrent request
-identity, transactions, version conflicts, cancellation, executor faults,
-restart recovery and event replay. Chromium drives the installed UI at desktop
-and narrow widths, including report access, retry, offline recovery, stale
-responses and repeated navigation. Browser tooling is locked for Linux x86_64
-and CPython 3.12. There are no frontend runtime dependencies or remote fonts.
+The checks install the wheel and start both the production ASGI API and standalone
+Next.js artifact outside the checkout. Unit and integration coverage includes
+concurrent request identity, transactions, version conflicts, cancellation,
+executor faults, restart recovery, lifecycle locking and event replay. Chromium
+drives the combined same-origin UI at desktop and narrow widths, including
+report access, retry, offline recovery, stale responses and repeated navigation.
+Browser tooling is locked for Linux x86_64 and CPython 3.12. Node/npm, frontend
+runtime packages and Python runtime dependencies are pinned. Fonts and language
+bundles are included in the frontend archive, with no runtime CDN requests.
 
 ## Optional isolated video generation
 
@@ -229,10 +267,11 @@ scripts/check-tests.sh
 scripts/check-web.sh
 ```
 
-The existing installed-package browser suite is preserved. An additional Chromium
-suite creates videos through the actual HTTP service at 1440 and 390 CSS pixels,
-opens the installed MP4, simulates a lost publication response, queries its
-receipt, and verifies that reload and disabled resend preserve the same facts.
+The installed backend integration suite covers fixture and generation contracts,
+SQLite recovery, executor faults, SSE replay/disconnects and simulated publication
+evidence. Chromium launches the installed wheel and production Next standalone
+server behind a same-origin streaming proxy. It checks deep links, fixture
+creation/report access, API routing, locale packs, RTL/theme and narrow layouts.
 CI requires package, tests and browser to succeed; missing or skipped jobs fail
 the merge gate. Public CI needs no provider or platform credentials.
 
@@ -271,18 +310,16 @@ permanent publication identities remain in SQLite.
 
 One ribbon SVG supplies the sidebar, header, settings and favicon. Color and
 monochrome variants at 16/24/32/128 pixels retain identical paths. The application
-has no PWA or installer icon surfaces. Third-party JavaScript and Noto fonts are
-bundled with their licenses and pinned SHA256 inventories in
-`web-vendor.lock.json` and `web-fonts.lock.json`; there are no remote font or CDN
+has no PWA or installer icon surfaces. npm dependencies are pinned by
+`frontend/package-lock.json`; generated standalone assets include each locked
+package's declared license and available notice files. Noto fonts have pinned
+SHA256 inventories in `web-fonts.lock.json`. There are no remote font or CDN
 requests at runtime. Resource validation includes actual OpenType glyph coverage
 for the shipped text. UI preview cards use document icons for fixture reports,
 not fabricated video thumbnails.
 
-`python scripts/check-ui-assets.py` checks the shipped assets. The installed
-browser regression entry point now runs the existing fixture/media suites plus
-native insecure-HTTP request identities, all twenty locales, preference failures
-and synchronization, light/dark contrast, keyboard/RTL layouts, shared branding,
-and double-click/lost-response/two-tab write conflicts. The non-loopback test uses
-a constrained streaming proxy; production Host and Origin validation remains
-unchanged. Browsers without any cryptographically secure randomness show a
-recoverable error without sending an unkeyed write.
+`python scripts/check-ui-assets.py` checks all 20 locale contracts, dependency
+versions, font hashes, OFL notices and glyph coverage. `scripts/check-web.sh`
+starts both production artifacts and routes browser traffic through a local
+streaming same-origin proxy. Browsers without secure randomness show a recoverable
+error without sending an unkeyed write.

@@ -87,9 +87,9 @@ class APITests(unittest.TestCase):
         done = self.server.wait(run['run_id'], {'SUCCEEDED'})
         path = '/v1/artifacts/' + done['artifacts'][0]['id'] + '/content'
         content = self.server.request(path)
-        from loopcast.api import Service
+        from loopcast.runtime import ApplicationRuntime
         with self.assertRaises(RuntimeError):
-            Service('127.0.0.1', 0, self.temp.name)
+            ApplicationRuntime(self.temp.name)
         self.server.stop(kill=True)
         self.server.start()
         self.assertEqual(self.server.request(path), content)

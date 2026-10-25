@@ -1,0 +1,516 @@
+[
+  {
+    "license": "MIT",
+    "name": "@babel/code-frame",
+    "notices": [
+      "licenses/npm/@babel_code-frame@7.29.7/LICENSE"
+    ],
+    "version": "7.29.7"
+  },
+  {
+    "license": "MIT",
+    "name": "@babel/helper-validator-identifier",
+    "notices": [
+      "licenses/npm/@babel_helper-validator-identifier@7.29.7/LICENSE"
+    ],
+    "version": "7.29.7"
+  },
+  {
+    "license": "MIT",
+    "name": "@babel/runtime",
+    "notices": [
+      "licenses/npm/@babel_runtime@7.29.10/LICENSE"
+    ],
+    "version": "7.29.10"
+  },
+  {
+    "license": "MIT",
+    "name": "@img/colour",
+    "notices": [
+      "licenses/npm/@img_colour@1.1.0/LICENSE.md"
+    ],
+    "version": "1.1.0"
+  },
+  {
+    "license": "LGPL-3.0-or-later",
+    "name": "@img/sharp-libvips-linux-x64",
+    "notices": [],
+    "version": "1.3.4"
+  },
+  {
+    "license": "Apache-2.0",
+    "name": "@img/sharp-linux-x64",
+    "notices": [
+      "licenses/npm/@img_sharp-linux-x64@0.35.5/LICENSE"
+    ],
+    "version": "0.35.5"
+  },
+  {
+    "license": "MIT",
+    "name": "@next/env",
+    "notices": [],
+    "version": "16.4.3"
+  },
+  {
+    "license": "MIT",
+    "name": "@next/swc-linux-x64-gnu",
+    "notices": [],
+    "version": "16.4.3"
+  },
+  {
+    "license": "MIT",
+    "name": "@redocly/ajv",
+    "notices": [
+      "licenses/npm/@redocly_ajv@8.11.2/LICENSE"
+    ],
+    "version": "8.11.2"
+  },
+  {
+    "license": "MIT",
+    "name": "@redocly/config",
+    "notices": [
+      "licenses/npm/@redocly_config@0.22.0/LICENSE"
+    ],
+    "version": "0.22.0"
+  },
+  {
+    "license": "MIT",
+    "name": "@redocly/openapi-core",
+    "notices": [],
+    "version": "1.34.22"
+  },
+  {
+    "license": "Apache-2.0",
+    "name": "@swc/helpers",
+    "notices": [
+      "licenses/npm/@swc_helpers@0.5.23/LICENSE"
+    ],
+    "version": "0.5.23"
+  },
+  {
+    "license": "MIT",
+    "name": "@types/node",
+    "notices": [
+      "licenses/npm/@types_node@24.10.1/LICENSE"
+    ],
+    "version": "24.10.1"
+  },
+  {
+    "license": "MIT",
+    "name": "@types/react",
+    "notices": [
+      "licenses/npm/@types_react@19.3.0/LICENSE"
+    ],
+    "version": "19.3.0"
+  },
+  {
+    "license": "MIT",
+    "name": "@types/react-dom",
+    "notices": [
+      "licenses/npm/@types_react-dom@19.2.3/LICENSE"
+    ],
+    "version": "19.2.3"
+  },
+  {
+    "license": "MIT",
+    "name": "agent-base",
+    "notices": [
+      "licenses/npm/agent-base@7.1.4/LICENSE"
+    ],
+    "version": "7.1.4"
+  },
+  {
+    "license": "MIT",
+    "name": "ansi-colors",
+    "notices": [
+      "licenses/npm/ansi-colors@4.1.3/LICENSE"
+    ],
+    "version": "4.1.3"
+  },
+  {
+    "license": "Python-2.0",
+    "name": "argparse",
+    "notices": [
+      "licenses/npm/argparse@2.0.1/LICENSE"
+    ],
+    "version": "2.0.1"
+  },
+  {
+    "license": "MIT",
+    "name": "balanced-match",
+    "notices": [
+      "licenses/npm/balanced-match@1.0.2/LICENSE.md"
+    ],
+    "version": "1.0.2"
+  },
+  {
+    "license": "Apache-2.0",
+    "name": "baseline-browser-mapping",
+    "notices": [
+      "licenses/npm/baseline-browser-mapping@2.11.32/LICENSE.txt"
+    ],
+    "version": "2.11.32"
+  },
+  {
+    "license": "MIT",
+    "name": "brace-expansion",
+    "notices": [
+      "licenses/npm/brace-expansion@2.1.7/LICENSE"
+    ],
+    "version": "2.1.7"
+  },
+  {
+    "license": "CC-BY-4.0",
+    "name": "caniuse-lite",
+    "notices": [
+      "licenses/npm/caniuse-lite@1.0.30001819/LICENSE"
+    ],
+    "version": "1.0.30001819"
+  },
+  {
+    "license": "MIT",
+    "name": "change-case",
+    "notices": [],
+    "version": "5.4.4"
+  },
+  {
+    "license": "MIT",
+    "name": "client-only",
+    "notices": [],
+    "version": "0.0.1"
+  },
+  {
+    "license": "MIT",
+    "name": "colorette",
+    "notices": [
+      "licenses/npm/colorette@1.4.0/LICENSE.md"
+    ],
+    "version": "1.4.0"
+  },
+  {
+    "license": "MIT",
+    "name": "csstype",
+    "notices": [
+      "licenses/npm/csstype@3.2.3/LICENSE"
+    ],
+    "version": "3.2.3"
+  },
+  {
+    "license": "MIT",
+    "name": "debug",
+    "notices": [
+      "licenses/npm/debug@4.4.3/LICENSE"
+    ],
+    "version": "4.4.3"
+  },
+  {
+    "license": "Apache-2.0",
+    "name": "detect-libc",
+    "notices": [
+      "licenses/npm/detect-libc@2.1.2/LICENSE"
+    ],
+    "version": "2.1.2"
+  },
+  {
+    "license": "MIT",
+    "name": "fast-deep-equal",
+    "notices": [
+      "licenses/npm/fast-deep-equal@3.1.3/LICENSE"
+    ],
+    "version": "3.1.3"
+  },
+  {
+    "license": "MIT",
+    "name": "html-parse-stringify",
+    "notices": [
+      "licenses/npm/html-parse-stringify@3.1.0/LICENSE"
+    ],
+    "version": "3.1.0"
+  },
+  {
+    "license": "MIT",
+    "name": "https-proxy-agent",
+    "notices": [
+      "licenses/npm/https-proxy-agent@7.0.6/LICENSE"
+    ],
+    "version": "7.0.6"
+  },
+  {
+    "license": "MIT",
+    "name": "i18next",
+    "notices": [
+      "licenses/npm/i18next@26.5.10/LICENSE"
+    ],
+    "version": "26.5.10"
+  },
+  {
+    "license": "MIT",
+    "name": "i18next-browser-languagedetector",
+    "notices": [
+      "licenses/npm/i18next-browser-languagedetector@8.2.2/LICENSE"
+    ],
+    "version": "8.2.2"
+  },
+  {
+    "license": "MIT",
+    "name": "index-to-position",
+    "notices": [
+      "licenses/npm/index-to-position@1.2.0/license"
+    ],
+    "version": "1.2.0"
+  },
+  {
+    "license": "MIT",
+    "name": "js-levenshtein",
+    "notices": [
+      "licenses/npm/js-levenshtein@1.1.6/LICENSE"
+    ],
+    "version": "1.1.6"
+  },
+  {
+    "license": "MIT",
+    "name": "js-tokens",
+    "notices": [
+      "licenses/npm/js-tokens@4.0.0/LICENSE"
+    ],
+    "version": "4.0.0"
+  },
+  {
+    "license": "MIT",
+    "name": "js-yaml",
+    "notices": [
+      "licenses/npm/js-yaml@4.3.2/LICENSE"
+    ],
+    "version": "4.3.2"
+  },
+  {
+    "license": "MIT",
+    "name": "json-schema-traverse",
+    "notices": [
+      "licenses/npm/json-schema-traverse@1.0.0/LICENSE"
+    ],
+    "version": "1.0.0"
+  },
+  {
+    "license": "ISC",
+    "name": "minimatch",
+    "notices": [
+      "licenses/npm/minimatch@5.1.9/LICENSE"
+    ],
+    "version": "5.1.9"
+  },
+  {
+    "license": "MIT",
+    "name": "ms",
+    "notices": [
+      "licenses/npm/ms@2.1.3/license.md"
+    ],
+    "version": "2.1.3"
+  },
+  {
+    "license": "MIT",
+    "name": "nanoid",
+    "notices": [
+      "licenses/npm/nanoid@3.3.20/LICENSE"
+    ],
+    "version": "3.3.20"
+  },
+  {
+    "license": "MIT",
+    "name": "next",
+    "notices": [
+      "licenses/npm/next@16.4.3/license.md"
+    ],
+    "version": "16.4.3"
+  },
+  {
+    "license": "MIT",
+    "name": "openapi-typescript",
+    "notices": [
+      "licenses/npm/openapi-typescript@7.10.1/LICENSE"
+    ],
+    "version": "7.10.1"
+  },
+  {
+    "license": "MIT",
+    "name": "parse-json",
+    "notices": [
+      "licenses/npm/parse-json@8.3.0/license"
+    ],
+    "version": "8.3.0"
+  },
+  {
+    "license": "ISC",
+    "name": "picocolors",
+    "notices": [
+      "licenses/npm/picocolors@1.1.1/LICENSE"
+    ],
+    "version": "1.1.1"
+  },
+  {
+    "license": "MIT",
+    "name": "pluralize",
+    "notices": [
+      "licenses/npm/pluralize@8.0.0/LICENSE"
+    ],
+    "version": "8.0.0"
+  },
+  {
+    "license": "MIT",
+    "name": "postcss",
+    "notices": [
+      "licenses/npm/postcss@8.5.23/LICENSE"
+    ],
+    "version": "8.5.23"
+  },
+  {
+    "license": "MIT",
+    "name": "react",
+    "notices": [
+      "licenses/npm/react@19.3.1/LICENSE"
+    ],
+    "version": "19.3.1"
+  },
+  {
+    "license": "MIT",
+    "name": "react-dom",
+    "notices": [
+      "licenses/npm/react-dom@19.3.1/LICENSE"
+    ],
+    "version": "19.3.1"
+  },
+  {
+    "license": "MIT",
+    "name": "react-i18next",
+    "notices": [
+      "licenses/npm/react-i18next@16.5.0/LICENSE"
+    ],
+    "version": "16.5.0"
+  },
+  {
+    "license": "MIT",
+    "name": "require-from-string",
+    "notices": [
+      "licenses/npm/require-from-string@2.0.2/license"
+    ],
+    "version": "2.0.2"
+  },
+  {
+    "license": "MIT",
+    "name": "scheduler",
+    "notices": [
+      "licenses/npm/scheduler@0.28.0/LICENSE"
+    ],
+    "version": "0.28.0"
+  },
+  {
+    "license": "ISC",
+    "name": "semver",
+    "notices": [
+      "licenses/npm/semver@7.8.5/LICENSE"
+    ],
+    "version": "7.8.5"
+  },
+  {
+    "license": "Apache-2.0",
+    "name": "sharp",
+    "notices": [
+      "licenses/npm/sharp@0.35.5/LICENSE"
+    ],
+    "version": "0.35.5"
+  },
+  {
+    "license": "BSD-3-Clause",
+    "name": "source-map-js",
+    "notices": [
+      "licenses/npm/source-map-js@1.2.2/LICENSE"
+    ],
+    "version": "1.2.2"
+  },
+  {
+    "license": "MIT",
+    "name": "styled-jsx",
+    "notices": [
+      "licenses/npm/styled-jsx@5.1.6/license.md"
+    ],
+    "version": "5.1.6"
+  },
+  {
+    "license": "MIT",
+    "name": "supports-color",
+    "notices": [
+      "licenses/npm/supports-color@10.2.2/license"
+    ],
+    "version": "10.2.2"
+  },
+  {
+    "license": "0BSD",
+    "name": "tslib",
+    "notices": [
+      "licenses/npm/tslib@2.8.1/LICENSE.txt"
+    ],
+    "version": "2.8.1"
+  },
+  {
+    "license": "(MIT OR CC0-1.0)",
+    "name": "type-fest",
+    "notices": [],
+    "version": "4.41.0"
+  },
+  {
+    "license": "Apache-2.0",
+    "name": "typescript",
+    "notices": [
+      "licenses/npm/typescript@5.9.3/LICENSE.txt"
+    ],
+    "version": "5.9.3"
+  },
+  {
+    "license": "MIT",
+    "name": "undici-types",
+    "notices": [
+      "licenses/npm/undici-types@7.16.0/LICENSE"
+    ],
+    "version": "7.16.0"
+  },
+  {
+    "license": "MIT",
+    "name": "uri-js-replace",
+    "notices": [
+      "licenses/npm/uri-js-replace@1.0.2/LICENSE"
+    ],
+    "version": "1.0.2"
+  },
+  {
+    "license": "MIT",
+    "name": "use-sync-external-store",
+    "notices": [
+      "licenses/npm/use-sync-external-store@1.7.0/LICENSE"
+    ],
+    "version": "1.7.0"
+  },
+  {
+    "license": "MIT",
+    "name": "void-elements",
+    "notices": [
+      "licenses/npm/void-elements@3.1.0/LICENSE"
+    ],
+    "version": "3.1.0"
+  },
+  {
+    "license": "Apache-2.0",
+    "name": "yaml-ast-parser",
+    "notices": [
+      "licenses/npm/yaml-ast-parser@0.0.43/license.txt"
+    ],
+    "version": "0.0.43"
+  },
+  {
+    "license": "ISC",
+    "name": "yargs-parser",
+    "notices": [
+      "licenses/npm/yargs-parser@21.1.1/LICENSE.txt"
+    ],
+    "version": "21.1.1"
+  }
+]

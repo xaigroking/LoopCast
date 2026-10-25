@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 import sqlite3
 import uuid
 
@@ -162,7 +163,15 @@ class Store(PublicationMethods):
         n = db.execute('SELECT COALESCE(MAX(number),0)+1 FROM attempts WHERE run_id=?', (run_id,)).fetchone()[0]
         db.execute('INSERT INTO attempts(id,run_id,number,token,state) VALUES(?,?,?,?,?)', (uid(), run_id, n, uid(), 'QUEUED'))
 
-    def create(self, value, key):
+    def _link_trace(self, db, trace_id, run_id, operation):
+        if trace_id is None:
+            return
+        if not isinstance(trace_id, str) or not re.fullmatch(r"[a-f0-9]{32}", trace_id) or trace_id == "0" * 32:
+            raise Problem('INVALID_INPUT', 'Trace context is invalid.', 400, run_id)
+        attempt = db.execute("SELECT id FROM attempts WHERE run_id=? ORDER BY number DESC LIMIT 1", (run_id,)).fetchone()
+        db.execute('INSERT INTO trace_links VALUES(?,?,?,?,?,?)', (uid(), trace_id, run_id, attempt[0] if attempt else None, operation, now()))
+
+    def create(self, value, key, trace_id=None):
         value = validate_input(value)
         if value['mode'] == 'mpt':
             if self.component is None:
@@ -171,9 +180,10 @@ class Store(PublicationMethods):
         with self.transaction(True) as db:
             prior = self._reserve(db, 'create', key, value)
             if prior:
+                self._link_trace(db, trace_id, prior['run_id'], 'create.replay')
                 return prior, False
             run_id, time = uid(), now()
-            db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?)', (run_id, value['mode'], canonical(value), digest(value), 'QUEUED', 0, time, time))
+            db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)', (run_id, value['mode'], canonical(value), digest(value), 'QUEUED', 0, time, time, trace_id))
             if value['mode'] == 'mpt':
                 db.execute('INSERT OR IGNORE INTO components VALUES(?,?)', (value['component_id'], canonical(self.component)))
                 db.execute('INSERT INTO generation_context VALUES(?,?)', (run_id, value['component_id']))
@@ -181,10 +191,11 @@ class Store(PublicationMethods):
             for stage in STAGES:
                 db.execute('INSERT INTO tasks VALUES(?,?,?,?,?)', (uid(), run_id, stage, 'QUEUED', 1))
             self._attempt(db, run_id)
+            self._link_trace(db, trace_id, run_id, 'run.create')
             db.execute('UPDATE idempotency SET run_id=? WHERE scope=? AND key=?', (run_id, 'create', key))
             return self._event(db, run_id, 'created'), True
 
-    def command(self, run_id, action, key, expected_version):
+    def command(self, run_id, action, key, expected_version, trace_id=None):
         if action not in ('cancel', 'retry') or type(expected_version) is not int:
             raise Problem('INVALID_INPUT', 'Provide an action and integer expected_version.', 400, run_id)
         with self.transaction(True) as db:
@@ -192,6 +203,7 @@ class Store(PublicationMethods):
             scope = run_id + ':' + action
             prior = self._reserve(db, scope, key, {'expected_version': expected_version})
             if prior:
+                self._link_trace(db, trace_id, run_id, action + '.replay')
                 return prior, False
             if expected_version != current['state_version']:
                 raise Problem('VERSION_CONFLICT', 'State changed. Refresh and try again.', run_id=run_id)
@@ -209,11 +221,12 @@ class Store(PublicationMethods):
                 state = 'CANCEL_REQUESTED'
             db.execute('UPDATE runs SET state=? WHERE id=?', (state, run_id))
             db.execute('UPDATE idempotency SET run_id=? WHERE scope=? AND key=?', (run_id, scope, key))
+            self._link_trace(db, trace_id, run_id, 'run.' + action)
             return self._event(db, run_id, action), True
 
     def claim(self):
         with self.transaction(True) as db:
-            row = db.execute("SELECT * FROM attempts WHERE state='QUEUED' ORDER BY rowid LIMIT 1").fetchone()
+            row = db.execute("SELECT a.*,(SELECT trace_id FROM trace_links WHERE attempt_id=a.id ORDER BY created_at DESC LIMIT 1) AS trace_id FROM attempts a WHERE state='QUEUED' ORDER BY rowid LIMIT 1").fetchone()
             if row is None:
                 return None
             attempt = dict(row)

@@ -59,6 +59,15 @@ DELETE FROM schema_version;
 INSERT INTO schema_version VALUES(2);
 """
 
+VERSION_THREE = r"""
+ALTER TABLE runs ADD COLUMN trace_id TEXT;
+CREATE TABLE trace_links (id TEXT PRIMARY KEY, trace_id TEXT NOT NULL, run_id TEXT NOT NULL REFERENCES runs(id),
+ attempt_id TEXT REFERENCES attempts(id), operation TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE INDEX trace_links_run ON trace_links(run_id,created_at);
+DELETE FROM schema_version;
+INSERT INTO schema_version VALUES(3);
+"""
+
 def statements(db, script):
     for statement in script.split(';'):
         if statement.strip():
@@ -73,7 +82,7 @@ def migrate(db):
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE name='schema_version'").fetchone()
         if exists:
             versions = [r[0] for r in db.execute('SELECT version FROM schema_version')]
-            if versions not in ([1], [2]):
+            if versions not in ([1], [2], [3]):
                 raise RuntimeError('Unsupported state database version')
             version = versions[0]
         else:
@@ -83,6 +92,9 @@ def migrate(db):
             version = 1
         if version == 1:
             statements(db, VERSION_TWO)
+            version = 2
+        if version == 2:
+            statements(db, VERSION_THREE)
         if db.execute('PRAGMA foreign_key_check').fetchone():
             raise RuntimeError('Invalid state database references')
         db.commit()

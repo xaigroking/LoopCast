@@ -82,6 +82,11 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24.22.1'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - name: Record source and execution context
         env:
           EVENT: ${{ github.event_name }}
@@ -96,8 +101,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$TEST_SHA"
       - run: python -m pip install --require-hashes -r requirements-ci.lock -r requirements-web.lock
       - run: python -m playwright install --with-deps chromium
-      - run: python -m build --no-isolation
       - run: scripts/install-media-tools.sh
+      - run: scripts/build-release.sh
       - run: scripts/check-web.sh
 
   merge-gate:

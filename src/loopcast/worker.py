@@ -1,14 +1,33 @@
 """One bounded executor; SQLite is the durable queue, never an HTTP request."""
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 
 from .storage import STAGES, uid, digest
+
+_logger = logging.getLogger("loopcast.worker")
+_logger.setLevel(logging.INFO)
+
+
+def _log_attempt(event, attempt, **extra):
+    _logger.info(json.dumps({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "level": "INFO",
+        "component": "worker",
+        "event": event,
+        "trace_id": attempt.get("trace_id"),
+        "run_id": attempt.get("run_id"),
+        "attempt_id": attempt.get("id"),
+        "attempt_number": attempt.get("number"),
+        **extra,
+    }, separators=(",", ":")))
 
 
 class Worker:
@@ -40,11 +59,18 @@ class Worker:
                 self.wake.wait(.1)
                 self.wake.clear()
                 continue
+            started = time.monotonic()
+            _log_attempt("attempt.started", attempt)
             try:
                 self._execute(attempt)
             except Exception:
                 # Preserve a safe failure fact; do not return success or host details.
                 self.store.finish(attempt['run_id'], attempt['token'], 'FAILED', 'EXECUTOR_ERROR')
+            try:
+                state = self.store.snapshot(attempt['run_id'])['state']
+            except Exception:
+                state = 'UNAVAILABLE'
+            _log_attempt("attempt.completed", attempt, result=state, duration_ms=round((time.monotonic() - started) * 1000, 2))
 
     def _execute(self, attempt):
         if attempt['input']['mode'] == 'mpt':

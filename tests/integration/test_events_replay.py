@@ -1,11 +1,10 @@
 import json
 import tempfile
-import threading
 import time
 import unittest
 import urllib.request
-from loopcast.api import Service
 from support import ServerProcess
+from asgi_support import ASGIThread
 
 
 def stream(url, after, last=None):
@@ -49,26 +48,23 @@ class EventTests(unittest.TestCase):
 
     def test_disconnects_release_streams_without_writes(self):
         self.server.stop()
-        service = Service('127.0.0.1', 0, self.temp.name)
-        thread = threading.Thread(target=service.serve_forever, daemon=True)
-        thread.start()
-        self.addCleanup(service.server_close)
-        self.addCleanup(service.shutdown)
-        self.server.url = 'http://127.0.0.1:' + str(service.server_address[1])
+        service = ASGIThread(self.temp.name).start()
+        self.addCleanup(service.stop)
+        self.server.url = service.url
         _, run = self.server.request('/v1/runs', {'scenario': 'slow', 'delay_ms': 2000}, 'slow')
         url = self.server.url + '/v1/runs/' + run['run_id'] + '/events'
         for _ in range(30):
-            current = service.store.snapshot(run['run_id'])
+            current = service.runtime.store.snapshot(run['run_id'])
             with stream(url, current['last_event_id']) as response:
                 response.readline()
             deadline = time.monotonic() + 2
-            while service.stream_count and time.monotonic() < deadline:
+            while service.runtime.stream_count and time.monotonic() < deadline:
                 time.sleep(.02)
-            self.assertEqual(service.stream_count, 0)
+            self.assertEqual(service.runtime.stream_count, 0)
         end = time.monotonic() + 3
-        while service.stream_count and time.monotonic() < end:
+        while service.runtime.stream_count and time.monotonic() < end:
             time.sleep(.05)
-        self.assertEqual(service.stream_count, 0)
-        values = service.store.list_runs()['items']
+        self.assertEqual(service.runtime.stream_count, 0)
+        values = service.runtime.store.list_runs()['items']
         self.assertEqual(len(values), 1)
         self.assertEqual(len(values[0]['attempts']), 1)
