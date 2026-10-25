@@ -1,0 +1,27 @@
+[Unit]
+Description=LoopCast Next.js production frontend
+After=network.target loopcast-api.service
+Requires=loopcast-api.service
+
+[Service]
+Type=simple
+User=loopcast
+Group=loopcast
+EnvironmentFile=/etc/loopcast/loopcast.env
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=3000
+Environment=NODE_ENV=production
+WorkingDirectory=/opt/loopcast/frontend
+ExecStart=/usr/bin/node /opt/loopcast/frontend/server.js
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/loopcast
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

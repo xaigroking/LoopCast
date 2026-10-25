@@ -8,7 +8,13 @@ import sys
 import threading
 import time
 
-from .storage import STAGES, uid, digest
+from .domain import STAGES, uid, digest
+from .diagnostics import child_context, log_event
+
+
+def _log_attempt(event, attempt, **extra):
+    log_event("worker", event, attempt.get("trace"), run_id=attempt.get("run_id"),
+              attempt_id=attempt.get("id"), attempt_number=attempt.get("number"), **extra)
 
 
 class Worker:
@@ -40,11 +46,19 @@ class Worker:
                 self.wake.wait(.1)
                 self.wake.clear()
                 continue
+            started = time.monotonic()
+            attempt['trace'] = child_context(attempt.get('trace'))
+            _log_attempt("attempt.started", attempt)
             try:
                 self._execute(attempt)
             except Exception:
                 # Preserve a safe failure fact; do not return success or host details.
                 self.store.finish(attempt['run_id'], attempt['token'], 'FAILED', 'EXECUTOR_ERROR')
+            try:
+                state = self.store.snapshot(attempt['run_id'])['state']
+            except Exception:
+                state = 'UNAVAILABLE'
+            _log_attempt("attempt.completed", attempt, result=state, duration_ms=round((time.monotonic() - started) * 1000, 2))
 
     def _execute(self, attempt):
         if attempt['input']['mode'] == 'mpt':
@@ -124,7 +138,8 @@ class Worker:
             self.store.stage(run_id, token, 'prepare', 'RUNNING')
             self.store.stage(run_id, token, 'prepare', 'SUCCEEDED')
             self.store.stage(run_id, token, 'execute', 'RUNNING')
-            source, media = self.generator.generate(attempt['input'], work, cancelled)
+            source, media = self.generator.generate(attempt['input'], work, cancelled,
+                                                    {**attempt['trace'], 'run_id': run_id, 'attempt_id': attempt['id']})
             self.store.stage(run_id, token, 'execute', 'SUCCEEDED')
             self.store.stage(run_id, token, 'report', 'RUNNING')
             identity = uid()

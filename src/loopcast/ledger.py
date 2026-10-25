@@ -2,17 +2,7 @@
 import json
 import re
 import time
-from uuid import uuid4
-from datetime import datetime, timezone
-
-
-def uid(): return uuid4().hex
-
-def now(): return datetime.now(timezone.utc).isoformat()
-
-def problem(code, message, status=409, run_id=None):
-    from .storage import Problem
-    return Problem(code, message, status, run_id)
+from .domain import uid, now, Problem, digest
 
 
 def policy(state):
@@ -32,23 +22,23 @@ class PublicationMethods:
             result.append(value)
         return result
 
-    def publication_create(self, run_id, value, key, expected_version):
-        from .storage import digest
+    def publication_create(self, run_id, value, key, expected_version, trace=None):
         if set(value) != {'platform', 'account'} or value['platform'] != 'simulator' or not isinstance(value['account'], str) or not re.fullmatch('[a-zA-Z0-9_-]{1,64}', value['account']):
-            raise problem('CAPABILITY_UNAVAILABLE', 'Only named simulator accounts are available.', 422, run_id)
+            raise Problem('CAPABILITY_UNAVAILABLE', 'Only named simulator accounts are available.', 422, run_id)
         with self.transaction(True) as db:
             current = self._snapshot(db, run_id)
             scope = run_id + ':publication'
             old = db.execute('SELECT * FROM publish_requests WHERE scope=? AND key=?', (scope, key)).fetchone()
             checksum = digest({'value': value, 'expected_version': expected_version})
             if old:
-                if old['digest'] != checksum: raise problem('IDEMPOTENCY_CONFLICT', 'Key already used.', run_id=run_id)
+                if old['digest'] != checksum: raise Problem('IDEMPOTENCY_CONFLICT', 'Key already used.', run_id=run_id)
+                self._link_trace(db, trace, run_id, 'publication.create.replay', old['intent_id'])
                 return current
             self._publication_key(key)
             if type(expected_version) is not int or current['state_version'] != expected_version:
-                raise problem('VERSION_CONFLICT', 'Refresh the task.', run_id=run_id)
+                raise Problem('VERSION_CONFLICT', 'Refresh the task.', run_id=run_id)
             if current['state'] != 'SUCCEEDED' or not current['artifacts']:
-                raise problem('ARTIFACT_UNAVAILABLE', 'Complete generation before creating publication intent.', run_id=run_id)
+                raise Problem('ARTIFACT_UNAVAILABLE', 'Complete generation before creating publication intent.', run_id=run_id)
             content = db.execute('SELECT id FROM contents WHERE run_id=?', (run_id,)).fetchone()
             if content is None:
                 content_id = uid()
@@ -60,15 +50,15 @@ class PublicationMethods:
             identity = db.execute('SELECT id FROM publish_intents WHERE platform=? AND account=? AND content_id=?',
                                   (value['platform'], value['account'], content_id)).fetchone()[0]
             db.execute('INSERT INTO publish_requests VALUES(?,?,?,?)', (scope, key, checksum, identity))
+            self._link_trace(db, trace, run_id, 'publication.create', identity)
             return self._event(db, run_id, 'publication_intent')
 
     @staticmethod
     def _publication_key(key):
         if not isinstance(key, str) or not 1 <= len(key) <= 128 or not key.isascii():
-            raise problem('IDEMPOTENCY_REQUIRED', 'Supply an Idempotency-Key.', 400)
+            raise Problem('IDEMPOTENCY_REQUIRED', 'Supply an Idempotency-Key.', 400)
 
-    def publication_dispatch(self, run_id, intent_id, key, expected_version, scenario="success"):
-        from .storage import digest
+    def publication_dispatch(self, run_id, intent_id, key, expected_version, scenario="success", trace=None):
         with self.transaction(True) as db:
             current = self._snapshot(db, run_id)
             self._publication_key(key)
@@ -76,23 +66,26 @@ class PublicationMethods:
             checksum = digest({'expected_version': expected_version, 'scenario': scenario})
             old = db.execute('SELECT * FROM publish_requests WHERE scope=? AND key=?', (scope, key)).fetchone()
             if old:
-                if old['digest'] != checksum: raise problem('IDEMPOTENCY_CONFLICT', 'Key already used.', run_id=run_id)
+                if old['digest'] != checksum: raise Problem('IDEMPOTENCY_CONFLICT', 'Key already used.', run_id=run_id)
+                self._link_trace(db, trace, run_id, 'publication.dispatch.replay', intent_id)
                 return current, None
             row = db.execute('SELECT * FROM publish_intents WHERE id=? AND run_id=?', (intent_id, run_id)).fetchone()
-            if row is None: raise problem('NOT_FOUND', 'Publication does not exist.', 404, run_id)
+            if row is None: raise Problem('NOT_FOUND', 'Publication does not exist.', 404, run_id)
             if type(expected_version) is not int or expected_version != current['state_version']:
-                raise problem('VERSION_CONFLICT', 'Refresh the task.', run_id=run_id)
+                raise Problem('VERSION_CONFLICT', 'Refresh the task.', run_id=run_id)
             if not policy(row['state'])['dispatch']['enabled']:
-                raise problem('PUBLICATION_NOT_RETRYABLE', 'Resolve publication evidence before another dispatch.', run_id=run_id)
+                raise Problem('PUBLICATION_NOT_RETRYABLE', 'Resolve publication evidence before another dispatch.', run_id=run_id)
             if db.execute('SELECT 1 FROM account_locks WHERE platform=? AND account=?', (row['platform'], row['account'])).fetchone():
-                raise problem('ACCOUNT_BUSY', 'The account has an unresolved publisher.', run_id=run_id)
+                raise Problem('ACCOUNT_BUSY', 'The account has an unresolved publisher.', run_id=run_id)
             token, attempt_id = uid(), uid()
             db.execute('INSERT INTO account_locks VALUES(?,?,?)', (row['platform'], row['account'], token))
             db.execute('INSERT INTO publish_attempts VALUES(?,?,?,?,?,?,?)', (attempt_id, intent_id, token, 'PREPARED', time.time()+30, now(), None))
             db.execute("UPDATE publish_intents SET state='PREPARED',version=version+1 WHERE id=?", (intent_id,))
             db.execute('INSERT INTO publish_requests VALUES(?,?,?,?)', (scope,key,checksum,intent_id))
+            self._link_trace(db, trace, run_id, 'publication.dispatch', intent_id, attempt_id)
             snapshot = self._event(db, run_id, 'publication_prepared')
-            return snapshot, {'intent_id':intent_id,'run_id':run_id,'token':token,'attempt_id':attempt_id}
+            return snapshot, {'intent_id':intent_id,'run_id':run_id,'token':token,'attempt_id':attempt_id,
+                              'trace': self._execution_trace(db, publication_attempt_id=attempt_id)}
 
     def publication_abandon_prepared(self, job):
         # No process was started by this worker. A stale lease does not prevent
@@ -145,21 +138,21 @@ class PublicationMethods:
                 if state == 'NOT_SENT': db.execute('DELETE FROM account_locks WHERE token=?', (row['token'],))
                 self._event(db,row['run_id'],'publication_interrupted')
 
-    def publication_verify(self,run_id,intent_id,key,expected_version):
-        from .storage import digest
+    def publication_verify(self,run_id,intent_id,key,expected_version,trace=None):
         with self.transaction(True) as db:
             current = self._snapshot(db,run_id)
             self._publication_key(key)
             scope,checksum = intent_id+':verify',digest({'expected_version':expected_version})
             old = db.execute('SELECT * FROM publish_requests WHERE scope=? AND key=?',(scope,key)).fetchone()
             if old:
-                if old['digest'] != checksum: raise problem('IDEMPOTENCY_CONFLICT','Key already used.',run_id=run_id)
+                if old['digest'] != checksum: raise Problem('IDEMPOTENCY_CONFLICT','Key already used.',run_id=run_id)
+                self._link_trace(db, trace, run_id, 'publication.verify.replay', intent_id)
                 return current
             row = db.execute('SELECT * FROM publish_intents WHERE id=? AND run_id=?',(intent_id,run_id)).fetchone()
-            if row is None: raise problem('NOT_FOUND','Publication does not exist.',404,run_id)
+            if row is None: raise Problem('NOT_FOUND','Publication does not exist.',404,run_id)
             if type(expected_version) is not int or current['state_version'] != expected_version:
-                raise problem('VERSION_CONFLICT','Refresh the task.',run_id=run_id)
-            if row['state'] != 'UNKNOWN': raise problem('ACTION_UNAVAILABLE','No ambiguous result.',run_id=run_id)
+                raise Problem('VERSION_CONFLICT','Refresh the task.',run_id=run_id)
+            if row['state'] != 'UNKNOWN': raise Problem('ACTION_UNAVAILABLE','No ambiguous result.',run_id=run_id)
             attempt = db.execute('SELECT * FROM publish_attempts WHERE intent_id=? ORDER BY rowid DESC LIMIT 1',(intent_id,)).fetchone()
             # Query the simulator's durable receipt. A missing record proves nothing.
             outcome,work_id,evidence = 'UNKNOWN',None,'No definitive simulator receipt; dispatch remains blocked'
@@ -178,4 +171,5 @@ class PublicationMethods:
                 db.execute("UPDATE publish_intents SET state='PUBLISHED',version=version+1 WHERE id=?",(intent_id,))
                 db.execute('DELETE FROM account_locks WHERE token=?',(attempt['token'],))
             db.execute('INSERT INTO publish_requests VALUES(?,?,?,?)',(scope,key,checksum,intent_id))
+            self._link_trace(db, trace, run_id, 'publication.verify', intent_id, attempt['id'])
             return self._event(db,run_id,'publication_verified')

@@ -3,8 +3,10 @@ import json
 import queue
 import sys
 import threading
+import time
 
 from .runner import run, RunnerError
+from .diagnostics import child_context, log_event
 
 
 class Publisher:
@@ -33,6 +35,10 @@ class Publisher:
         while not self.stopping.is_set():
             try: job, scenario = self.jobs.get(timeout=.1)
             except queue.Empty: continue
+            context = child_context(job.get('trace'))
+            fields = {'run_id': job['run_id'], 'intent_id': job['intent_id'], 'publication_attempt_id': job['attempt_id']}
+            started = time.monotonic()
+            log_event('publisher', 'publication.started', context, **fields)
             try:
                 if scenario == 'not_sent':
                     self.store.publication_result(job, 'NOT_SENT', evidence='Simulator rejected before the send boundary')
@@ -51,4 +57,13 @@ class Publisher:
                     self.store.publication_result(job, 'UNKNOWN',evidence='Simulator result interrupted or ambiguous; no real platform sending')
             except Exception:
                 self.store.publication_result(job,'UNKNOWN',evidence='Simulator execution could not be completed')
-            finally: self.jobs.task_done()
+            finally:
+                # Never log account names, capability tokens, output or exception text.
+                state = 'UNAVAILABLE'
+                try:
+                    state = next(p['state'] for p in self.store.snapshot(job['run_id'])['publications'] if p['id'] == job['intent_id'])
+                except Exception:
+                    pass
+                log_event('publisher', 'publication.completed', context, result=state,
+                          duration_ms=round((time.monotonic() - started) * 1000, 2), **fields)
+                self.jobs.task_done()

@@ -1,274 +1,534 @@
-"""Local single-user HTTP control plane with explicit same-origin writes."""
-import fcntl
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from importlib.resources import files
+"""FastAPI adapter. Domain state and worker ownership live in runtime/storage."""
+import asyncio
+from contextlib import asynccontextmanager
+import ipaddress
 import json
-from pathlib import Path
 import re
-import threading
 import time
-from urllib.parse import urlsplit, parse_qs
+from typing import Annotated, Literal
 
-from .storage import Store, Problem, uid, TERMINAL
-from .worker import Worker
+from fastapi import FastAPI, Header, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictFloat, StrictInt, StrictStr
 
-ID = r'[a-f0-9]{32}'
-LANGUAGES = frozenset(item['code'] for item in json.loads(files('loopcast').joinpath('web', 'locales', 'registry.json').read_text()))
+from .runtime import ApplicationRuntime
+from .storage import Problem, uid, TERMINAL
+from .diagnostics import new_context, log_event
+
+ID = r"[a-f0-9]{32}"
+_RUN = re.compile(r"^/v1/runs/([a-f0-9]{32})(?:/(cancel|retry|events))?$")
+_PUBLICATION = re.compile(r"^/v1/runs/([a-f0-9]{32})/publications(?:/([a-f0-9]{32})/(dispatch|verify))?$")
+_ARTIFACT = re.compile(r"^/v1/artifacts/([a-f0-9]{32})/content$")
 
 
-class Service(ThreadingHTTPServer):
-    daemon_threads = True
-    request_queue_size = 128
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
 
-    def __init__(self, host, port, directory, generator_settings=None):
-        from .generation import Generator
-        self.generator = Generator(generator_settings) if generator_settings is not None else None
-        directory = Path(directory).resolve()
-        directory.mkdir(parents=True, exist_ok=True)
-        self.lock = (directory / 'service.lock').open('a')
+
+class FixtureCreate(StrictModel):
+    mode: Literal["fixture"] = "fixture"
+    title: StrictStr = "Untitled fixture"
+    scenario: Literal["success", "fail_once", "fail", "slow"] = "success"
+    delay_ms: StrictInt = 150
+
+
+class MPTCreate(StrictModel):
+    mode: Literal["mpt"]
+    title: StrictStr
+
+
+class ExpectedVersion(StrictModel):
+    expected_version: StrictInt
+
+
+class PublicationCreate(StrictModel):
+    platform: StrictStr | StrictInt | StrictFloat | StrictBool | None
+    account: StrictStr | StrictInt | StrictFloat | StrictBool | None
+    expected_version: StrictInt
+
+
+class PublicationDispatch(StrictModel):
+    expected_version: StrictInt
+    scenario: Literal["success", "submitted", "lost_response", "not_sent", "slow"] = "success"
+
+
+class PublicationVerify(StrictModel):
+    expected_version: StrictInt
+
+
+class Rule(StrictModel):
+    enabled: bool
+    reason_code: str
+
+
+class RunActions(StrictModel):
+    cancel: Rule
+    retry: Rule
+    add_simulated_target: Rule
+
+
+class Stage(StrictModel):
+    id: str
+    stage: str
+    state: str
+    version: int
+
+
+class Attempt(StrictModel):
+    id: str
+    number: int
+    state: str
+    started_at: str | None
+    ended_at: str | None
+    error: str | None
+    evidence: str | None
+
+
+class Artifact(StrictModel):
+    id: str
+    attempt_id: str
+    media_type: str
+    size: int
+    sha256: str
+
+
+class PublicationAttempt(StrictModel):
+    id: str
+    state: str
+    started_at: str
+    ended_at: str | None
+
+
+class Receipt(StrictModel):
+    id: str
+    created_at: str
+    source: str
+    outcome: str
+    work_id: str | None
+    evidence: str
+
+
+class PublicationActions(StrictModel):
+    dispatch: Rule
+    verify: Rule
+
+
+class Publication(StrictModel):
+    id: str
+    run_id: str
+    content_id: str
+    platform: str
+    account: str
+    state: str
+    version: int
+    created_at: str
+    mode: Literal["simulated"]
+    allowed_actions: PublicationActions
+    attempts: list[PublicationAttempt]
+    receipts: list[Receipt]
+
+
+class FixtureInput(StrictModel):
+    mode: Literal["fixture"]
+    title: str
+    scenario: str
+    delay_ms: int
+
+
+class GeneratedInput(StrictModel):
+    mode: Literal["mpt"]
+    title: str
+    component_id: str
+
+
+class ComponentCapabilities(StrictModel):
+    generate: bool
+    publish: bool
+    query: bool
+    schedule: bool
+    ai_disclosure: bool
+
+
+class ComponentManifest(StrictModel):
+    source: str
+    revision: str
+    artifact_sha256: str
+    contract_major: int
+    capabilities: ComponentCapabilities
+    verification: Literal["unverified", "contract_tested"]
+
+
+class Media(StrictModel):
+    artifact_id: str
+    content_id: str
+    parent_artifact_id: str | None
+    metadata: str
+
+
+class RunSnapshot(StrictModel):
+    run_id: str
+    mode: Literal["fixture", "mpt"]
+    input: FixtureInput | GeneratedInput
+    input_digest: str
+    state: str
+    state_version: int
+    created_at: str
+    updated_at: str
+    last_event_id: int
+    tasks: list[Stage]
+    attempts: list[Attempt]
+    artifacts: list[Artifact]
+    allowed_actions: RunActions
+    publications: list[Publication]
+    component: ComponentManifest | None
+    content_id: str | None
+    media: list[Media]
+
+
+class RunPage(StrictModel):
+    items: list[RunSnapshot]
+    next_cursor: int | None
+
+
+class ErrorDetails(StrictModel):
+    code: str
+    message: str
+    request_id: str
+    run_id: str | None
+    snapshot: RunSnapshot | None = None
+
+
+class ErrorEnvelope(StrictModel):
+    error: ErrorDetails
+
+
+class Capabilities(StrictModel):
+    mode: Literal["fixture"]
+    video_generation: bool
+    publishing: Literal[False]
+    single_user: Literal[True]
+    generation_verification: str
+    real_platform_sending: Literal[False]
+
+
+ERROR_RESPONSES = {
+    status: {"model": ErrorEnvelope, "description": "Stable LoopCast error envelope"}
+    for status in (400, 403, 404, 409, 415, 422, 429, 500)
+}
+def _instrument_response(request, response, started):
+    request_id = request.state.request_id
+    response.headers["X-Request-ID"] = request_id
+    response.headers["traceparent"] = request.state.trace["traceparent"]
+    route = request.scope.get("route")
+    ids = {key: value for key, value in request.path_params.items() if key in {"run_id", "intent_id"} and re.fullmatch(ID, value)}
+    log_event("request", "request.completed", request.state.trace,
+              method=request.method if request.method in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} else "<other>",
+              route=getattr(route, "path", "<unmatched>"),
+              status=response.status_code, duration_ms=round((time.monotonic() - started) * 1000, 2), **ids)
+    return response
+
+
+def _error(error: Problem, request_id: str):
+    payload = {"code": error.code, "message": str(error), "request_id": request_id, "run_id": error.run_id}
+    return JSONResponse(ErrorEnvelope(error=payload).model_dump(exclude_none=True), status_code=error.status)
+
+
+def _snapshot_response(value, status=200):
+    snapshot = RunSnapshot.model_validate(value)
+    return JSONResponse(snapshot.model_dump(), status_code=status)
+
+
+def _event_snapshot(payload):
+    value = json.loads(payload)
+    # Early fixture history predates generation/publication. Upcast only those
+    # additive fields when reading an event; never rewrite the recorded payload
+    # or copy today's publication facts into a historical snapshot.
+    if isinstance(value, dict) and value.get('mode') == 'fixture':
+        for key, default in {'publications': [], 'component': None, 'content_id': None, 'media': []}.items():
+            value.setdefault(key, default)
+        if isinstance(value.get('allowed_actions'), dict):
+            value['allowed_actions'].setdefault('add_simulated_target', {'enabled': False, 'reason_code': 'SIMULATOR_ONLY'})
+    return RunSnapshot.model_validate(value)
+
+
+def create_app(
+    data_dir="~/.local/share/loopcast",
+    generator_settings=None,
+    *,
+    public_origin: str | None = None,
+    trusted_proxies: tuple[str, ...] = (),
+):
+    """Create an app factory; resources are acquired only inside ASGI lifespan."""
+    proxy_networks = tuple(ipaddress.ip_network(item, strict=False) for item in trusted_proxies)
+    if proxy_networks and not public_origin:
+        raise ValueError("Trusted proxies require an explicitly configured public origin")
+    if public_origin:
+        from urllib.parse import urlsplit
+        origin = urlsplit(public_origin)
+        if origin.scheme not in {"http", "https"} or not origin.netloc or origin.path not in {"", "/"} or origin.query or origin.fragment or origin.username or origin.password:
+            raise ValueError("Public origin must be an exact HTTP or HTTPS origin")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        runtime = ApplicationRuntime(data_dir, generator_settings)
+        app.state.runtime = runtime
         try:
-            fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            self.lock.close()
-            raise RuntimeError('The data directory is already in use') from None
-        try:
-            self.store = Store(directory, self.generator.manifest if self.generator else None)
-        except BaseException:
-            self.lock.close()
-            raise
-        self.stopping = threading.Event()
-        self.stream_slots = threading.BoundedSemaphore(16)
-        self.stream_lock = threading.Lock()
-        self.stream_count = 0
-        self.worker = Worker(self.store, generator=self.generator)
-        self.publisher = None
-        try:
-            super().__init__((host, port), Handler)
-            self.worker.start()
-            from .publisher import Publisher
-            self.publisher = Publisher(self.store)
-        except BaseException:
-            self.lock.close()
-            raise
-
-    def server_close(self):
-        self.stopping.set()
-        try:
-            self.worker.close()
-            if self.publisher: self.publisher.close()
+            yield
         finally:
-            super().server_close()
-            self.lock.close()
+            runtime.close()
 
+    app = FastAPI(title="LoopCast API", version="1.0.0", lifespan=lifespan, docs_url=None, redoc_url=None)
 
-class Handler(BaseHTTPRequestHandler):
-    server_version = 'LoopCast'
-
-    def log_message(self, *_args):
-        pass
-
-    def _headers(self, status, media_type, length=None):
-        self.send_response(status)
-        self.send_header('Content-Type', media_type)
-        self.send_header('Cache-Control', 'no-store')
-        self.send_header('X-Content-Type-Options', 'nosniff')
-        self.send_header('Referrer-Policy', 'no-referrer')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
-        if length is not None:
-            self.send_header('Content-Length', str(length))
-        self.end_headers()
-
-    def send_json(self, status, data):
-        content = json.dumps(data, ensure_ascii=False).encode()
-        self._headers(status, 'application/json; charset=utf-8', len(content))
-        self.wfile.write(content)
-
-    def do_GET(self):
-        self._handle(False)
-
-    def do_POST(self):
-        self._handle(True)
-
-    def _handle(self, write):
-        self.request_id = uid()
+    @app.middleware("http")
+    async def controls(request: Request, call_next):
+        started = time.monotonic()
+        request.state.request_id = uid()
+        request.state.trace = new_context(request.headers.get("traceparent"), request.state.request_id)
+        def reject(problem):
+            return _instrument_response(request, _error(problem, request.state.request_id), started)
+        method = request.method.upper()
+        is_write = method not in {"GET", "HEAD", "OPTIONS"}
+        client_host = request.client.host if request.client else ""
         try:
-            self._host_check(write)
-            self.route(write)
-        except Problem as error:
-            payload = {'code': error.code, 'message': str(error), 'request_id': self.request_id, 'run_id': error.run_id}
-            if error.run_id and error.status == 409:
+            client_ip = ipaddress.ip_address(client_host.split("%", 1)[0])
+        except ValueError:
+            client_ip = None
+        trusted = client_ip is not None and any(client_ip in network for network in proxy_networks)
+
+        host = request.headers.get("host", "")
+        scheme = request.url.scheme
+        effective_host = host
+        if trusted:
+            forwarded_host = request.headers.get("x-forwarded-host", "")
+            forwarded_proto = request.headers.get("x-forwarded-proto", "")
+            # A single value from a configured proxy only; chains are rejected.
+            if "," in forwarded_host or "," in forwarded_proto:
+                return reject(Problem("INVALID_HOST", "Use the configured public origin.", 403))
+            effective_host = forwarded_host
+            scheme = forwarded_proto
+
+        if public_origin:
+            from urllib.parse import urlsplit
+            expected = urlsplit(public_origin)
+            host_ok = effective_host == expected.netloc and scheme == expected.scheme
+        else:
+            server = request.scope.get("server") or ("", 0)
+            allowed_hosts = {f"{server[0]}:{server[1]}", f"localhost:{server[1]}"}
+            host_ok = host in allowed_hosts and client_ip is not None and client_ip.is_loopback
+        if not host_ok:
+            return reject(Problem("INVALID_HOST", "Use the local listening address.", 403))
+
+        if is_write and (request.url.path == "/v1" or request.url.path.startswith("/v1/")):
+            expected_origin = public_origin if public_origin else f"{scheme}://{effective_host}"
+            if request.headers.get("origin") != expected_origin or request.headers.get("sec-fetch-site") == "cross-site":
+                return reject(Problem("ORIGIN_REJECTED", "Writes require the exact public Origin.", 403))
+            if request.headers.get("content-type", "").split(";", 1)[0].strip() != "application/json":
+                return reject(Problem("INVALID_INPUT", "Use application/json.", 415))
+            raw_length = request.headers.get("content-length")
+            if raw_length is not None:
                 try:
-                    payload['snapshot'] = self.server.store.snapshot(error.run_id)
-                except Problem:
+                    size = int(raw_length)
+                except ValueError:
+                    size = -1
+                if size < 0 or size > 16384:
+                    return reject(Problem("INVALID_INPUT", "Provide a JSON object of at most 16 KiB.", 400))
+            chunks = []
+            size = 0
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > 16384:
+                    return reject(Problem("INVALID_INPUT", "Provide a JSON object of at most 16 KiB.", 400))
+                chunks.append(chunk)
+            request._body = b"".join(chunks)
+
+        try:
+            response = await call_next(request)
+        except Problem as exc:
+            payload = {"code": exc.code, "message": str(exc), "request_id": request.state.request_id, "run_id": exc.run_id}
+            if exc.run_id and exc.status == 409:
+                try:
+                    payload["snapshot"] = await asyncio.to_thread(request.app.state.runtime.store.snapshot, exc.run_id)
+                except (Problem, AttributeError):
                     pass
-            self.send_json(error.status, {'error': payload})
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+            response = JSONResponse(ErrorEnvelope(error=payload).model_dump(exclude_none=True), status_code=exc.status)
         except Exception:
-            self.send_json(500, {'error': {'code': 'INTERNAL_ERROR', 'message': 'The request could not be completed.', 'request_id': self.request_id, 'run_id': None}})
+            response = JSONResponse({"error": {"code": "INTERNAL_ERROR", "message": "The request could not be completed.", "request_id": request.state.request_id, "run_id": None}}, status_code=500)
+        response = _instrument_response(request, response, started)
+        response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        return response
 
-    def _host_check(self, write):
-        port = self.server.server_address[1]
-        host = self.headers.get('Host', '')
-        if host not in {f'127.0.0.1:{port}', f'localhost:{port}'}:
-            raise Problem('INVALID_HOST', 'Use the local listening address.', 403)
-        if write:
-            if self.headers.get('Origin') != 'http://' + host or self.headers.get('Sec-Fetch-Site') == 'cross-site':
-                raise Problem('ORIGIN_REJECTED', 'Writes require the exact local Origin.', 403)
-            if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
-                raise Problem('INVALID_INPUT', 'Use application/json.', 415)
-
-    def _body(self):
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error(request: Request, _exc: RequestValidationError):
         try:
-            length = int(self.headers.get('Content-Length', '-1'))
-            if not 0 <= length <= 16384:
-                raise ValueError()
-            data = json.loads(self.rfile.read(length))
-            if not isinstance(data, dict):
-                raise ValueError()
-            return data
+            raw = json.loads((await request.body()).decode("utf-8"))
         except (ValueError, UnicodeError):
-            raise Problem('INVALID_INPUT', 'Provide a JSON object of at most 16 KiB.', 400) from None
+            raw = None
+        if isinstance(raw, dict) and raw.get("mode", "fixture") not in ("fixture", "mpt"):
+            return _error(Problem("CAPABILITY_UNAVAILABLE", "Only fixture mode is available.", 422), getattr(request.state, "request_id", uid()))
+        run_id = request.path_params.get("run_id")
+        return _error(Problem("INVALID_INPUT", "The request fields or values are invalid.", 400, run_id if isinstance(run_id, str) else None), getattr(request.state, "request_id", uid()))
 
-    def route(self, write):
-        url = urlsplit(self.path)
-        path = url.path
-        store = self.server.store
-        if not write and path == '/healthz':
-            with store.transaction() as db:
-                db.execute('SELECT 1 FROM schema_version').fetchone()
-            ready = not self.server.stopping.is_set() and self.server.worker.thread.is_alive()
-            return self.send_json(200 if ready else 503, {'ready': ready})
-        if not write and path == '/v1/capabilities':
-            return self.send_json(200, {'mode': 'fixture', 'video_generation': self.server.generator is not None, 'publishing': False, 'single_user': True, 'generation_verification': 'contract_tested_live_unverified' if self.server.generator else 'unavailable', 'real_platform_sending': False})
-        if path == '/v1/runs':
-            if write:
-                snapshot, created = store.create(self._body(), self.headers.get('Idempotency-Key'))
-                self.server.worker.wake.set()
-                return self.send_json(202 if created else 200, snapshot)
-            query = parse_qs(url.query)
-            try:
-                limit = int(query.get('limit', ['30'])[0])
-                before = int(query['before'][0]) if 'before' in query else None
-                if not 1 <= limit <= 100 or (before is not None and before < 1):
-                    raise ValueError()
-            except ValueError:
-                raise Problem('INVALID_INPUT', 'Use limit 1–100 and a positive before cursor.', 400) from None
-            return self.send_json(200, store.list_runs(before, limit))
-        match = re.fullmatch('/v1/runs/(' + ID + ')/publications(?:/(' + ID + ')/(dispatch|verify))?', path)
-        if write and match:
-            run_id, intent_id, action = match.groups()
-            body = self._body()
-            key = self.headers.get('Idempotency-Key')
-            if intent_id is None:
-                if set(body) != {'platform','account','expected_version'}:
-                    raise Problem('INVALID_INPUT','Provide platform, account and expected_version.',400,run_id)
-                version = body.pop('expected_version')
-                return self.send_json(200,store.publication_create(run_id,body,key,version))
-            if action == 'verify':
-                if set(body) != {'expected_version'}:
-                    raise Problem('INVALID_INPUT','Provide expected_version only; evidence comes from the adapter query.',400,run_id)
-                return self.send_json(200,store.publication_verify(run_id,intent_id,key,body['expected_version']))
-            if set(body) - {'expected_version','scenario'} or 'expected_version' not in body or body.get('scenario','success') not in {'success','submitted','lost_response','not_sent','slow'}:
-                raise Problem('INVALID_INPUT','Provide expected_version and a known simulator scenario.',400,run_id)
-            snapshot,job = store.publication_dispatch(run_id,intent_id,key,body['expected_version'],body.get('scenario','success'))
-            if job: self.server.publisher.submit(job,body.get('scenario','success'))
-            return self.send_json(202 if job else 200,snapshot)
-        match = re.fullmatch('/v1/runs/(' + ID + ')(?:/(cancel|retry|events))?', path)
-        if match:
-            run_id, action = match.groups()
-            if write and action in ('cancel', 'retry'):
-                body = self._body()
-                if set(body) != {'expected_version'}:
-                    raise Problem('INVALID_INPUT', 'Provide expected_version only.', 400, run_id)
-                snapshot, accepted = store.command(run_id, action, self.headers.get('Idempotency-Key'), body['expected_version'])
-                self.server.worker.wake.set()
-                return self.send_json(202 if accepted else 200, snapshot)
-            if not write and action is None:
-                return self.send_json(200, store.snapshot(run_id))
-            if not write and action == 'events':
-                return self.events(run_id, url.query)
-        match = re.fullmatch('/v1/artifacts/(' + ID + ')/content', path)
-        if not write and match:
-            info, content = store.artifact(match[1])
-            self._headers(200, info['media_type'], len(content))
-            return self.wfile.write(content)
-        language_asset = re.fullmatch(r'/locales/([A-Za-z0-9-]+)\.json', path)
-        if not write and language_asset and language_asset[1] in (LANGUAGES | {'registry'}):
-            return self.asset(path[1:], 'application/json; charset=utf-8')
-        if not write and path == '/settings':
-            return self.asset('index.html', 'text/html; charset=utf-8')
-        if not write and (path == '/' or re.fullmatch('/runs/' + ID, path)):
-            return self.asset('index.html', 'text/html; charset=utf-8')
-        font_asset = re.fullmatch(r'/fonts/(NotoCJK\.otf|NotoArabic\.ttf|NotoHebrew\.ttf|NotoDevanagari\.ttf|NotoThai\.ttf|NotoSans\.ttf)', path)
-        if not write and font_asset:
-            return self.asset(path[1:], 'font/otf' if path.endswith('.otf') else 'font/ttf')
-        if not write and path == '/brand.svg':
-            params = parse_qs(url.query)
-            size = params.get('size',['128'])[0]
-            variant = params.get('variant',['light'])[0]
-            if set(params) - {'size','variant'} or size not in {'16','24','32','128'} or variant not in {'light','dark','mono'}:
-                raise Problem('INVALID_INPUT','Unknown brand derivative.',400)
-            content = files('loopcast').joinpath('web','brand.svg').read_text()
-            content = content.replace('width="128" height="128"',f'width="{size}" height="{size}"')
-            if variant == 'dark':
-                content = content.replace('#a73407','#ff9c61').replace('#ffad42','#ffd18a').replace('#e65b0a','#ff9347')
-            elif variant == 'mono':
-                content = content.replace('stroke="url(#ribbon)"','stroke="#595959"')
-            data = content.encode()
-            self._headers(200,'image/svg+xml',len(data))
-            return self.wfile.write(data)
-        if not write and path in ('/app.js', '/requests.js', '/brand.js', '/preferences.js', '/localization.js', '/i18next.js', '/language-detector.js', '/style.css'):
-            return self.asset(path[1:], 'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8')
-        if not write and path != '/v1' and not path.startswith('/v1/') and '.' not in path:
-            return self.asset('index.html', 'text/html; charset=utf-8')
-        raise Problem('NOT_FOUND', 'This address does not exist.', 404)
+    @app.get("/healthz", response_model=dict[str, bool], responses={503: {"model": dict[str, bool]}})
+    async def health(request: Request):
+        runtime: ApplicationRuntime = request.app.state.runtime
+        await asyncio.to_thread(_check_store, runtime)
+        ready = runtime.ready()
+        return JSONResponse({"ready": ready}, status_code=200 if ready else 503)
 
-    def asset(self, name, media_type):
+    @app.get("/v1/capabilities", response_model=Capabilities, responses=ERROR_RESPONSES)
+    async def capabilities(request: Request):
+        runtime = request.app.state.runtime
+        return Capabilities(mode="fixture", video_generation=runtime.generator is not None, publishing=False, single_user=True, generation_verification="contract_tested_live_unverified" if runtime.generator else "unavailable", real_platform_sending=False)
+
+    @app.get("/v1/runs", response_model=RunPage, responses=ERROR_RESPONSES)
+    async def list_runs(request: Request, limit: str = "30", before: str | None = None):
         try:
-            content = files('loopcast').joinpath('web', name).read_bytes()
-        except FileNotFoundError:
-            raise Problem('NOT_FOUND', 'Web resources are not installed.', 404) from None
-        self._headers(200, media_type, len(content))
-        self.wfile.write(content)
+            page_size = int(limit)
+            cursor = int(before) if before is not None else None
+            if not 1 <= page_size <= 100 or (cursor is not None and cursor < 1):
+                raise ValueError
+        except ValueError:
+            raise Problem("INVALID_INPUT", "Use limit 1–100 and a positive before cursor.", 400) from None
+        page = await asyncio.to_thread(request.app.state.runtime.store.list_runs, cursor, page_size)
+        return RunPage.model_validate(page)
 
-    def events(self, run_id, query):
-        params = parse_qs(query, keep_blank_values=True)
-        raw = self.headers.get('Last-Event-ID', params.get('after', [''])[0])
+    @app.post("/v1/runs", response_model=RunSnapshot, responses={**ERROR_RESPONSES, 202: {"model": RunSnapshot}})
+    async def create_run(request: Request, body: FixtureCreate | MPTCreate, idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None):
+        if isinstance(body, MPTCreate):
+            model = body
+            normalized = {"mode": model.mode, "title": model.title}
+        else:
+            model = body
+            normalized = {"mode": "fixture", "title": model.title, "scenario": model.scenario, "delay_ms": model.delay_ms}
+        runtime = request.app.state.runtime
         try:
-            after = int(raw)
+            snapshot, created = await asyncio.to_thread(runtime.store.create, normalized, idempotency_key, request.state.trace)
+        except Problem:
+            raise
+        if created:
+            runtime.worker.wake.set()
+        request.scope["path_params"]["run_id"] = snapshot["run_id"]
+        return _snapshot_response(snapshot, 202 if created else 200)
+
+    @app.get("/v1/runs/{run_id}", response_model=RunSnapshot, responses=ERROR_RESPONSES)
+    async def get_run(run_id: str, request: Request):
+        if not re.fullmatch(ID, run_id):
+            raise Problem("NOT_FOUND", "This address does not exist.", 404)
+        return RunSnapshot.model_validate(await asyncio.to_thread(request.app.state.runtime.store.snapshot, run_id))
+
+    async def apply_command(run_id, action, request, body, idempotency_key):
+        if not re.fullmatch(ID, run_id) or action not in {"cancel", "retry"}:
+            raise Problem("NOT_FOUND", "This address does not exist.", 404)
+        model = body
+        runtime = request.app.state.runtime
+        snapshot, accepted = await asyncio.to_thread(runtime.store.command, run_id, action, idempotency_key, model.expected_version, request.state.trace)
+        runtime.worker.wake.set()
+        return _snapshot_response(snapshot, 202 if accepted else 200)
+
+    @app.post("/v1/runs/{run_id}/cancel", response_model=RunSnapshot, responses={**ERROR_RESPONSES, 202: {"model": RunSnapshot}})
+    async def cancel_run(run_id: str, request: Request, body: ExpectedVersion, idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None):
+        return await apply_command(run_id, "cancel", request, body, idempotency_key)
+
+    @app.post("/v1/runs/{run_id}/retry", response_model=RunSnapshot, responses={**ERROR_RESPONSES, 202: {"model": RunSnapshot}})
+    async def retry_run(run_id: str, request: Request, body: ExpectedVersion, idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None):
+        return await apply_command(run_id, "retry", request, body, idempotency_key)
+
+    @app.get("/v1/runs/{run_id}/events", responses={**ERROR_RESPONSES, 200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}})
+    async def run_events(run_id: str, request: Request, after: str | None = None, last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None):
+        runtime = request.app.state.runtime
+        raw = last_event_id if last_event_id is not None else (after if after is not None else "")
+        try:
+            cursor = int(raw)
         except (ValueError, TypeError):
-            raise Problem('RESYNC_REQUIRED', 'Fetch a snapshot and supply its event cursor.', 409, run_id) from None
-        self.server.store.events(run_id, after)
-        if not self.server.stream_slots.acquire(blocking=False):
-            raise Problem('STREAM_LIMIT', 'Too many open event streams. Close an older view.', 429, run_id)
-        with self.server.stream_lock:
-            self.server.stream_count += 1
-        try:
-            self.connection.settimeout(2)
-            self._headers(200, 'text/event-stream; charset=utf-8')
-            heartbeat = 0
-            while not self.server.stopping.is_set():
-                events = self.server.store.events(run_id, after)
-                for event in events:
-                    frame = f"id: {event['id']}\nevent: snapshot\ndata: {event['payload']}\n\n"
-                    self.wfile.write(frame.encode())
-                    self.wfile.flush()
-                    after = event['id']
-                current = self.server.store.snapshot(run_id)
-                if after == current['last_event_id'] and current['state'] in TERMINAL and not any(p['state'] in ('PREPARED','SENDING') for p in current['publications']):
-                    # A terminal snapshot is also sent to subscriptions opened at its cursor.
-                    self.wfile.write(('event: complete\ndata: ' + json.dumps(current) + '\n\n').encode())
-                    self.wfile.flush()
-                    break
-                if time.monotonic() - heartbeat >= .1:
-                    self.wfile.write(b': heartbeat\n\n')
-                    self.wfile.flush()
-                    heartbeat = time.monotonic()
-                self.server.stopping.wait(.05)
-        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
-            pass
-        finally:
-            with self.server.stream_lock:
-                self.server.stream_count -= 1
-            self.server.stream_slots.release()
+            raise Problem("RESYNC_REQUIRED", "Fetch a snapshot and supply its event cursor.", 409, run_id) from None
+        await asyncio.to_thread(runtime.store.events, run_id, cursor)
+        if not runtime.stream_slots.acquire(blocking=False):
+            raise Problem("STREAM_LIMIT", "Too many open event streams. Close an older view.", 429, run_id)
+        with runtime.stream_lock:
+            runtime.stream_count += 1
+
+        async def frames():
+            nonlocal cursor
+            try:
+                yield ": connected\n\n"
+                heartbeat = asyncio.get_running_loop().time()
+                while not runtime.stopping.is_set():
+                    events = await asyncio.to_thread(runtime.store.events, run_id, cursor)
+                    for event in events:
+                        value = _event_snapshot(event["payload"])
+                        yield f"id: {event['id']}\nevent: snapshot\ndata: {value.model_dump_json()}\n\n"
+                        cursor = event["id"]
+                    current = await asyncio.to_thread(runtime.store.snapshot, run_id)
+                    if cursor == current["last_event_id"] and current["state"] in TERMINAL and not any(p["state"] in ("PREPARED", "SENDING") for p in current["publications"]):
+                        current = RunSnapshot.model_validate(current)
+                        yield "event: complete\ndata: " + current.model_dump_json() + "\n\n"
+                        break
+                    now = asyncio.get_running_loop().time()
+                    if now - heartbeat >= 5:
+                        yield ": heartbeat\nevent: heartbeat\ndata: {}\n\n"
+                        heartbeat = now
+                    await asyncio.sleep(.05)
+            except (asyncio.CancelledError, OSError, RuntimeError):
+                return
+            finally:
+                with runtime.stream_lock:
+                    runtime.stream_count -= 1
+                runtime.stream_slots.release()
+
+        return StreamingResponse(frames(), media_type="text/event-stream; charset=utf-8", headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+    @app.post("/v1/runs/{run_id}/publications", response_model=RunSnapshot, responses=ERROR_RESPONSES)
+    async def create_publication(run_id: str, request: Request, body: PublicationCreate, idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None):
+        if not re.fullmatch(ID, run_id):
+            raise Problem("NOT_FOUND", "This address does not exist.", 404)
+        model = body
+        values = {"platform": model.platform, "account": model.account}
+        result = await asyncio.to_thread(request.app.state.runtime.store.publication_create, run_id, values, idempotency_key, model.expected_version, request.state.trace)
+        return _snapshot_response(result)
+
+    async def dispatch_publication(run_id, intent_id, request, body, idempotency_key):
+        if not re.fullmatch(ID, run_id) or not re.fullmatch(ID, intent_id):
+            raise Problem("NOT_FOUND", "This address does not exist.", 404)
+        runtime = request.app.state.runtime
+        model = body
+        snapshot, job = await asyncio.to_thread(runtime.store.publication_dispatch, run_id, intent_id, idempotency_key, model.expected_version, model.scenario, request.state.trace)
+        if job:
+            runtime.publisher.submit(job, model.scenario)
+        return _snapshot_response(snapshot, 202 if job else 200)
+
+    @app.post("/v1/runs/{run_id}/publications/{intent_id}/dispatch", response_model=RunSnapshot, responses={**ERROR_RESPONSES, 202: {"model": RunSnapshot}})
+    async def publication_dispatch(run_id: str, intent_id: str, request: Request, body: PublicationDispatch, idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None):
+        if not re.fullmatch(ID, run_id) or not re.fullmatch(ID, intent_id):
+            raise Problem("NOT_FOUND", "This address does not exist.", 404)
+        return await dispatch_publication(run_id, intent_id, request, body, idempotency_key)
+
+    @app.post("/v1/runs/{run_id}/publications/{intent_id}/verify", response_model=RunSnapshot, responses=ERROR_RESPONSES)
+    async def publication_verify(run_id: str, intent_id: str, request: Request, body: PublicationVerify, idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None):
+        if not re.fullmatch(ID, run_id) or not re.fullmatch(ID, intent_id):
+            raise Problem("NOT_FOUND", "This address does not exist.", 404)
+        result = await asyncio.to_thread(request.app.state.runtime.store.publication_verify, run_id, intent_id, idempotency_key, body.expected_version, request.state.trace)
+        return _snapshot_response(result)
+
+    @app.get("/v1/artifacts/{artifact_id}/content", responses={**ERROR_RESPONSES, 200: {"content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}})
+    async def artifact(artifact_id: str, request: Request):
+        if not re.fullmatch(ID, artifact_id):
+            raise Problem("NOT_FOUND", "This address does not exist.", 404)
+        info, content = await asyncio.to_thread(request.app.state.runtime.store.artifact, artifact_id)
+        return Response(content, media_type=info["media_type"], headers={"Content-Length": str(len(content)), "Content-Disposition": "inline"})
+
+    @app.api_route("/v1", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], include_in_schema=False)
+    @app.api_route("/v1/{unknown:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], include_in_schema=False)
+    @app.api_route("/{unknown:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], include_in_schema=False)
+    async def not_found(unknown: str = ""):
+        raise Problem("NOT_FOUND", "This address does not exist.", 404)
+
+    return app
+
+
+def _check_store(runtime):
+    with runtime.store.transaction() as db:
+        db.execute("SELECT 1 FROM schema_version").fetchone()

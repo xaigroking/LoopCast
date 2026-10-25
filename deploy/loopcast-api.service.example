@@ -1,0 +1,24 @@
+[Unit]
+Description=LoopCast FastAPI application and single durable worker
+After=network.target
+
+[Service]
+Type=simple
+User=loopcast
+Group=loopcast
+EnvironmentFile=/etc/loopcast/loopcast.env
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/opt/loopcast/backend
+ExecStart=/opt/loopcast/backend/venv/bin/python -I -m loopcast serve --host 127.0.0.1 --port 8080 --data-dir /var/lib/loopcast/state --public-origin ${LOOPCAST_PUBLIC_ORIGIN} --trusted-proxy 127.0.0.1/32
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/loopcast
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

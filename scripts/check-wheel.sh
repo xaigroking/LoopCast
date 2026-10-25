@@ -2,10 +2,12 @@
 set -euo pipefail
 
 python scripts/check-ui-assets.py
+python scripts/check-architecture.py
 python -m build --no-isolation
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
 python -m venv --without-pip "$work_dir/installed"
+python -m pip --python "$work_dir/installed/bin/python" install --require-hashes -r requirements-runtime.lock
 python -m pip --python "$work_dir/installed/bin/python" install --no-deps dist/*.whl
 python -m pip --python "$work_dir/installed/bin/python" check
 sha256sum dist/*.whl
@@ -30,8 +32,10 @@ if invalid.returncode != 2 or "unrecognized arguments" not in invalid.stderr:
 print("Installed package location, version and argument validation passed")
 import json
 import selectors
+import signal
 import tempfile
 import urllib.request
+import urllib.error
 
 with tempfile.TemporaryDirectory() as directory:
     process = subprocess.Popen([sys.executable, '-I', '-m', 'loopcast', 'serve', '--port', '0', '--data-dir', directory], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -44,17 +48,28 @@ with tempfile.TemporaryDirectory() as directory:
         if not ready.startswith('READY '):
             raise SystemExit('Invalid service readiness signal')
         base = ready.split(' ', 1)[1]
-        for path in ['/healthz', '/v1/capabilities', '/', '/app.js', '/style.css']:
+        for path in ['/healthz', '/v1/capabilities', '/openapi.json']:
             with urllib.request.urlopen(base + path, timeout=5) as response:
                 if response.status != 200 or not response.read():
                     raise SystemExit('Installed service resource is unavailable')
-        print('Installed service readiness, API and packaged Web resources passed')
+        for path in ['/v1', '/v1/unknown']:
+            try:
+                urllib.request.urlopen(base + path, timeout=5)
+            except urllib.error.HTTPError as error:
+                payload=json.load(error)
+                if error.code != 404 or payload.get('error',{}).get('code') != 'NOT_FOUND':
+                    raise SystemExit('Unknown API path did not return a structured 404')
+            else:
+                raise SystemExit('Unknown API path unexpectedly succeeded')
+        print('Installed ASGI readiness, OpenAPI, and structured API 404 checks passed')
     finally:
         process.terminate()
         process.wait(timeout=12)
         process.stdout.close()
         process.stderr.close()
-        if process.returncode != 0:
+        if process.returncode not in (0, -signal.SIGTERM):
             raise SystemExit('Service did not stop cleanly')
+        if process.returncode == -signal.SIGTERM:
+            print('Uvicorn completed lifespan shutdown before restoring its SIGTERM exit status')
 
 PY

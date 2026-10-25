@@ -24,6 +24,21 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(len(snapshot['attempts']), 1)
         self.assertEqual(Store(self.temp.name).snapshot(snapshot['run_id']), snapshot)
 
+    def test_trace_context_is_durable_and_attached_to_claimed_attempt(self):
+        trace_id = '1234567890abcdef1234567890abcdef'
+        run, _ = self.store.create({'title': 'traced'}, 'trace-create', trace_id)
+        attempt = self.store.claim()
+        self.assertEqual(attempt['run_id'], run['run_id'])
+        self.assertEqual(attempt['trace_id'], trace_id)
+        from loopcast.diagnostics import child_context
+        resumed = child_context(attempt['trace'])
+        self.assertEqual(resumed['trace_id'], trace_id)
+        self.assertIsNone(resumed['parent_span_id'])
+        with self.store.transaction() as db:
+            self.assertEqual(db.execute('SELECT trace_id FROM runs WHERE id=?', (run['run_id'],)).fetchone()[0], trace_id)
+            link = db.execute('SELECT trace_id,attempt_id,operation FROM trace_links WHERE run_id=?', (run['run_id'],)).fetchone()
+            self.assertEqual(tuple(link), (trace_id, attempt['id'], 'run.create'))
+
     def test_atomic_rollback_and_foreign_keys(self):
         run, _ = self.store.create({}, 'first')
         with self.assertRaises(RuntimeError):

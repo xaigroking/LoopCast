@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Validate shipped locale contracts and the exact offline third-party assets."""
+"""Validate the independent frontend's offline locale and font assets."""
 import hashlib
 import json
 from pathlib import Path
 import re
 
 root=Path(__file__).resolve().parents[1]
-web=root/'src/loopcast/web'
+web=root/'frontend/public'
 registry=json.loads((web/'locales/registry.json').read_text())
 assert len(registry)==20 and len({r['code'] for r in registry})==20
 base=json.loads((web/'locales/en.json').read_text())
@@ -25,16 +25,23 @@ for language in registry:
         if language['code']!='en':
             equal=sum(value==base[namespace].get(key) for key,value in data[namespace].items())
             assert equal < len(data[namespace])*.8,(language,namespace,'untranslated bundle')
-# UI resource IDs are stable; user content and raw evidence never go through t().
-for source in [web/'app.js',web/'index.html']:
+# UI resource IDs are stable; user content and raw evidence stay out of translation calls.
+sources=list((root/'frontend/src').rglob('*.tsx'))+list((root/'frontend/src').rglob('*.ts'))
+for source in sources:
     text=source.read_text()
-    literals=re.findall(r"\bt\('([\w]+)'[),]",text)+re.findall(r'data-i18n="([\w]+)"',text)
-    for key in literals:assert key in base['ui'] or key+'_other' in base['ui'],(source.name,key)
-for package in json.loads((root/'web-vendor.lock.json').read_text())['packages']:
-    name='i18next' if package['name']=='i18next' else 'language-detector'
-    assert hashlib.sha256((web/(name+'.js')).read_bytes()).hexdigest()==package['sha256']
-    assert hashlib.sha256((web/(name+'.LICENSE.txt')).read_bytes()).hexdigest()==package['license_sha256']
-print(f"UI assets passed: {len(registry)} independent language bundles, namespaces, stable keys, interpolation, vendor hashes/licenses")
+    literals=re.findall(r"\bt\('([\w]+)'[),]",text)
+    for key in literals:
+        if key.startswith('state:'):
+            assert key.split(':',1)[1] in base['state'],(source.name,key)
+        elif key.startswith('errors:'):
+            assert key.split(':',1)[1] in base['errors'],(source.name,key)
+        else:
+            assert key in base['ui'] or key+'_other' in base['ui'],(source.name,key)
+package=json.loads((root/'frontend/package.json').read_text())
+lock=json.loads((root/'frontend/package-lock.json').read_text())
+for name,version in package['dependencies'].items():
+    assert lock['packages'][f'node_modules/{name}']['version']==version,(name,version)
+print(f"UI assets passed: {len(registry)} independent language bundles, namespaces, stable keys, interpolation and npm lock versions")
 
 for font in json.loads((root/'web-fonts.lock.json').read_text()):
     assert hashlib.sha256((web/'fonts'/font['file']).read_bytes()).hexdigest()==font['sha256']

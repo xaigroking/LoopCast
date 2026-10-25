@@ -8,6 +8,7 @@ import uuid
 
 from .contracts import manifest
 from .runner import run, RunnerError
+from .diagnostics import child_context, log_event
 
 # Check installed files against the exact wheel before loading third-party code.
 VERIFY = r'''
@@ -83,7 +84,18 @@ class Generator:
         if Path(json.loads(raw)['prefix']).resolve() == Path(sys.prefix).resolve():
             raise ValueError('Use an independent component environment')
 
-    def generate(self, value, work, cancelled):
+    def generate(self, value, work, cancelled, context=None):
+        context = {**(context or {}), **child_context(context)}
+        log_event('generation', 'adapter.started', context)
+        result = 'FAILED'
+        try:
+            output = self._generate(value, work, cancelled)
+            result = 'SUCCEEDED'
+            return output
+        finally:
+            log_event('generation', 'adapter.completed', context, result=result)
+
+    def _generate(self, value, work, cancelled):
         self.verify()
         work = Path(work).resolve()
         work.mkdir(mode=0o700, parents=True, exist_ok=False)
