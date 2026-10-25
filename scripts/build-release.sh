@@ -10,6 +10,7 @@ python -m build --no-isolation
 python -m pip install --require-hashes -r requirements-runtime.lock
 python -m pip install --no-deps dist/*.whl
 python -m pip check
+python -m loopcast.openapi > dist/openapi.json
 
 node_version=$(node --version)
 npm_version=$(npm --version)
