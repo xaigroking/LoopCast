@@ -189,7 +189,8 @@ async def main():
         await expect(first.locator('[data-state="SUCCEEDED"]').first).to_be_visible(timeout=10000)
         await second.get_by_role("button", name="Retry", exact=True).click()
         await expect(second.locator('[data-state="SUCCEEDED"]').first).to_be_visible(timeout=10000)
-        await expect(second.get_by_role("alert")).to_be_visible()
+        await expect(second.locator('#notice[role="alert"]')).to_be_visible()
+        await expect(second.locator('#notice')).to_contain_text('The state changed.')
         await first.close()
         await second.close()
 
