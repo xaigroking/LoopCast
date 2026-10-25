@@ -18,6 +18,7 @@ class ReleaseMethods:
         return next((r['state'] for r in rows if r['id'] != exclude and r['state'] in PROTECTED), None)
 
     def _preflight(self, db, value, capabilities, evidence_mode):
+        if not value['title'].strip(): raise Problem('INVALID_INPUT', 'A title is required.', 400)
         asset = self._asset(db, value['asset_id'])
         if value.get('cover_id') and self._asset(db, value['cover_id'])['kind'] != 'image':
             raise Problem('INVALID_INPUT', 'A cover must be an image.', 400)

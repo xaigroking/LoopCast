@@ -67,6 +67,13 @@ def configure_browser(settings):
         kwargs['headless'] = True
         kwargs['executable_path'] = settings['browser_path']
         kwargs.pop('channel', None)
+        if settings.get('proxy_url'):
+            from urllib.parse import unquote
+            proxy = urlsplit(settings['proxy_url'])
+            host = '[' + proxy.hostname + ']' if ':' in proxy.hostname else proxy.hostname
+            kwargs['proxy'] = {'server': proxy.scheme + '://' + host + (':' + str(proxy.port) if proxy.port else '')}
+            if proxy.username is not None: kwargs['proxy']['username'] = unquote(proxy.username)
+            if proxy.password is not None: kwargs['proxy']['password'] = unquote(proxy.password)
         return await launch(self, *args, **kwargs)
     async def controlled_context(self, *args, **kwargs):
         kwargs['viewport'] = {'width': 1280, 'height': 800}

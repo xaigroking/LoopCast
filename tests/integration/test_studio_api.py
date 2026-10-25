@@ -1,6 +1,8 @@
 import hashlib
 import http.cookiejar
 import json
+import os
+import subprocess
 from pathlib import Path
 import tempfile
 import time
@@ -87,6 +89,7 @@ class StudioAPITests(unittest.TestCase):
             for identity in current['asset_ids']:
                 result = self.owner.request('/v1/studio/assets/'+identity)[1]
                 self.assertEqual(result['generation_id'],generation['id']); self.assertTrue(result['attempt_id'])
+                if result['kind'] == 'video': self.assertEqual(result['family_id'],asset['family_id'])
                 code, content = self.owner.request('/v1/studio/assets/'+identity+'/content'); self.assertEqual(code,200)
                 self.assertEqual(hashlib.sha256(content).hexdigest(),result['sha256'])
         headers={'Range':'bytes=0-9'}
@@ -171,3 +174,28 @@ class StudioAPITests(unittest.TestCase):
             self.assertEqual(self.owner.request('/v1/runs',body)[0],400)
         self.assertEqual(self.owner.request('/v1/studio/authorizations',{'platform':'youtube','method':'qr'})[0],422)
         self.assertEqual(self.owner.request('/v1/studio/assets/import?kind=video',raw=b'not a video',headers={'Content-Type':'application/octet-stream','X-Source':'own'})[0],400)
+
+    def test_transcode_and_declared_edit_keep_media_lineage(self):
+        original = self.import_video()
+        tools = Path(os.environ['LOOPCAST_MEDIA_TOOLS'])
+        transcode = self.root/'transcode.mp4'
+        subprocess.run([str(tools/'ffmpeg'),'-v','error','-i',str(self.root/'components/sample.mp4'),'-vf','scale=128:128','-an','-c:v','libvpx-vp9','-metadata','title=transcoded',str(transcode)],check=True)
+        converted = self.import_video(content=transcode.read_bytes())
+        self.assertNotEqual(original['sha256'],converted['sha256'])
+        self.assertEqual(original['family_id'],converted['family_id'])
+        distinct = self.root/'distinct.mp4'
+        subprocess.run([str(tools/'ffmpeg'),'-v','error','-f','lavfi','-i','color=c=blue:s=64x64:d=0.2','-an','-c:v','libvpx-vp9',str(distinct)],check=True)
+        independent = self.import_video(content=distinct.read_bytes())
+        self.assertNotEqual(original['family_id'],independent['family_id'])
+        derived = self.import_video(content=distinct.read_bytes(),parent=original['id'])
+        session=self.owner.authorize('douyin')
+        value={'asset_id':original['id'],'title':'Lineage','targets':[{'account_id':session['account_id']}]}
+        check=self.owner.request('/v1/studio/releases/preflight',value)[1]
+        self.assertTrue(check['allowed'],check)
+        batch=self.owner.request('/v1/studio/releases',value|{'confirmed':True,'preflight_digest':check['digest']})[1]
+        target=batch['targets'][0];base='/v1/studio/releases/'+batch['id']
+        self.owner.request(base+'/targets/'+target['id']+'/dispatch',{'expected_version':target['version']})
+        self.owner.wait(base,lambda b:b['targets'][0]['state']=='PUBLISHED')
+        for asset in (converted,independent,derived):
+            check=self.owner.request('/v1/studio/releases/preflight',value|{'asset_id':asset['id']})[1]
+            self.assertIn('PERMANENT_DUPLICATE',check['targets'][0]['reasons'])

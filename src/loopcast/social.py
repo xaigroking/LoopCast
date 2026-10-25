@@ -165,7 +165,7 @@ class SocialAdapter:
         if self.backend == 'contract':
             return self._contract(operation, platform, work, payload, cancelled)
         settings = {'source_root': str(self.source_root), 'browser_path': self.settings['browser_path'],
-                    'identity_probe': self.probes.get(platform), 'biliup': self.settings.get('biliup')}
+                    'identity_probe': self.probes.get(platform), 'biliup': self.settings.get('biliup'), 'proxy_url': self.network.get('HTTPS_PROXY')}
         request = {'operation': operation, 'platform': platform, 'payload': payload, 'settings': settings}
         path = work / 'request.json'
         with path.open('w') as stream:

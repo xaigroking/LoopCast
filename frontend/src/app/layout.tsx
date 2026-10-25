@@ -5,6 +5,9 @@ import { WorkspaceProvider } from '@/lib/workspace';
 import { WorkspaceShell } from '@/components/shell';
 import { StudioProvider } from '@/lib/studio';
 
+// Each response needs the request CSP nonce, including direct entry to new routes.
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: 'LoopCast',
   description: 'Local video creation, connected accounts and controlled publication.',
