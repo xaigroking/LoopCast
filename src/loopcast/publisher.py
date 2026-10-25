@@ -37,7 +37,9 @@ class Publisher:
                 if scenario == 'not_sent':
                     self.store.publication_result(job, 'NOT_SENT', evidence='Simulator rejected before the send boundary')
                     continue
-                if not self.store.publication_sending(job): continue
+                if not self.store.publication_sending(job):
+                    self.store.publication_abandon_prepared(job)
+                    continue
                 try:
                     raw = run([sys.executable, '-I', '-m', 'loopcast.publisher_cli', str(self.directory), job['attempt_id'], scenario],
                               self.directory, {'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'}, timeout=2,

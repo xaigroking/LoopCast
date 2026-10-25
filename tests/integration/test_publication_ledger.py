@@ -92,3 +92,13 @@ class LedgerTests(unittest.TestCase):
         (receipts/(job['attempt_id']+'.json')).write_text(json.dumps({'attempt_id':job['attempt_id'],'work_id':'sim-'+'c'*32}))
         final=self.store.publication_verify(run['run_id'],job['intent_id'],'query',run['state_version'])
         self.assertEqual([p['state'] for p in final['publications']],['PUBLISHED','PUBLISHED'])
+
+    def test_expired_prepared_queue_item_can_record_definite_no_send(self):
+        run=self.intent(self.complete('queued'));run,job=self.dispatch(run)
+        with self.store.transaction(True) as db:db.execute('UPDATE publish_attempts SET lease_until=0 WHERE token=?',(job['token'],))
+        self.assertFalse(self.store.publication_sending(job))
+        self.assertTrue(self.store.publication_abandon_prepared(job))
+        self.assertFalse(self.store.publication_sending(job))
+        current=self.store.snapshot(run['run_id'])
+        self.assertEqual(current['publications'][0]['state'],'NOT_SENT')
+        self.assertIsNotNone(self.dispatch(current,'replacement')[1])

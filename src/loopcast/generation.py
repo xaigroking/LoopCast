@@ -93,7 +93,7 @@ class Generator:
             config.write_text(config_text(self.config_ref))
             task_id = str(uuid.uuid4())
             argv = [self.python, '-I', '-c', 'from app.launcher import main; raise SystemExit(main())',
-                    'cli', '--video-subject', value['title'], '--task-id', task_id]
+                    'cli', '--video-subject=' + value['title'], '--task-id', task_id]
             raw = run(argv, work, self.environment(work), self.timeout, cancelled)
             try:
                 result = json.loads(raw)

@@ -8,7 +8,7 @@ import sys
 import threading
 import time
 
-from .storage import STAGES, uid
+from .storage import STAGES, uid, digest
 
 
 class Worker:
@@ -113,7 +113,7 @@ class Worker:
         from .runner import RunnerError
         import shutil
         run_id, token = attempt['run_id'], attempt['token']
-        if self.generator is None or attempt['input']['component_id'] != __import__('loopcast.storage', fromlist=['digest']).digest(self.generator.manifest):
+        if self.generator is None or attempt['input']['component_id'] != digest(self.generator.manifest):
             self.store.finish(run_id, token, 'FAILED', 'COMPONENT_UNAVAILABLE')
             return
         work = self.store.directory / 'work' / attempt['id']

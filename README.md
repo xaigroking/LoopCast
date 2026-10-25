@@ -1,12 +1,14 @@
 # LoopCast
 
-A local, single-user fixture task console. Create a run, follow real execution
-stages, cancel work, retry a failed attempt, and open its generated text report.
-SQLite preserves history, request identities and event cursors across restarts.
+A local, single-user task console with durable history, isolated optional video
+generation, and a publication evidence simulator. Create fixture runs, follow
+execution stages, cancel or retry, and open verified reports and media. SQLite
+preserves identities, attempts, receipts and event cursors across restarts.
 
-**Fixture only:** no video generation, model calls, platform login or publishing.
-This prototype binds to loopback and has no user authentication. It is intended
-for one local user on Linux with Python 3.12 or newer.
+The default fixture mode makes no model calls. Optional generation requires a
+separately provisioned MPT environment. Real platform sending and login remain
+unavailable. This prototype binds to loopback and has no user authentication;
+it is intended for one local user on Linux with Python 3.12 or newer.
 
 ## Build and start
 
@@ -28,7 +30,7 @@ Runtime code uses the Python standard library; Web assets ship inside the wheel.
 
 ## Task behavior
 
-A run freezes its input and keeps one set of logical stages: prepare, execute,
+A fixture run freezes its input and keeps one set of logical stages: prepare, execute,
 and report. Attempts append to the same run. A single worker executes fixed
 operations in bounded subprocesses, with an eight-second execution deadline.
 
@@ -53,7 +55,7 @@ Fixture scenarios are `success`, `fail_once` (a retry succeeds), `fail`, and
 ## API
 
 `GET /healthz` checks storage and executor readiness. `GET /v1/capabilities`
-reports the available fixture capability. `/v1/runs` supports creation and
+reports fixture capability and optional generation availability/verification. `/v1/runs` supports creation and
 bounded listing (`limit=1..100`, then `before=next_cursor`). Details are available
 at `/v1/runs/{id}`. `/cancel` and `/retry` accept `expected_version`.
 
@@ -100,3 +102,136 @@ restart recovery and event replay. Chromium drives the installed UI at desktop
 and narrow widths, including report access, retry, offline recovery, stale
 responses and repeated navigation. Browser tooling is locked for Linux x86_64
 and CPython 3.12. There are no frontend runtime dependencies or remote fonts.
+
+## Optional isolated video generation
+
+Generation uses a separate Linux environment. Install MoneyPrinterTurbo from
+revision `82bb4a7502704559575f4e3d002b9dcb31d4ed6a` into its own virtual
+environment, retaining the built wheel and its SHA256. The wheel digest identifies
+the candidate artifact; the source revision is an operator provenance declaration.
+For example, with Python 3.12 and Git available, provision the candidate outside
+this checkout (provider-specific dependencies still follow the upstream project):
+
+```sh
+python3.12 -m venv /opt/mpt
+/opt/mpt/bin/python -m pip wheel --no-deps --wheel-dir /opt/components \
+  'git+https://github.com/harry0703/MoneyPrinterTurbo.git@82bb4a7502704559575f4e3d002b9dcb31d4ed6a'
+/opt/mpt/bin/python -m pip install /opt/components/mpt-*.whl
+sha256sum /opt/components/mpt-*.whl
+```
+
+This provisioning recipe is not a locked transitive dependency environment or a
+claim of a successful live run; retain and independently validate its dependency
+inventory before use. The control plane never installs upstream packages for you.
+
+LoopCast checks installed wheel files before calling the public CLI. This is
+process and dependency isolation, not an OS security sandbox. Provision only
+trusted code. Generation providers may require network access and credentials.
+
+Use a trusted local JSON file with these fields:
+
+```json
+{
+  "python": "/opt/mpt/bin/python",
+  "wheel": "/opt/components/mpt-1.3.9-py3-none-any.whl",
+  "ffprobe": "/opt/media-tools/ffprobe",
+  "ffprobe_sha256": "<SHA256 of the provisioned probe>",
+  "config_ref": "/private/generation-provider.toml",
+  "timeout": 300,
+  "manifest": {
+    "source": "https://github.com/harry0703/MoneyPrinterTurbo",
+    "revision": "82bb4a7502704559575f4e3d002b9dcb31d4ed6a",
+    "artifact_sha256": "<SHA256 of the provisioned wheel>",
+    "contract_major": 1,
+    "verification": "unverified",
+    "capabilities": {
+      "generate": true, "publish": false, "query": false,
+      "schedule": false, "ai_disclosure": false
+    }
+  }
+}
+```
+
+Replace digest placeholders with actual SHA256 values. Start with
+`python -m loopcast serve --generator-config /private/generator.json` and select
+MPT in the creation form, or POST `{"mode":"mpt","title":"Your subject"}` to
+`/v1/runs` using the normal same-origin and idempotency headers. Unconfigured
+services reject this mode. Restarting without the matching component cannot
+silently execute queued generation as a fixture.
+
+The provider TOML accepts only an `[app]` section with generation provider
+settings: `llm_provider`, `openai_api_key`, `openai_base_url`, `openai_model_name`,
+`azure_api_key`, `azure_model_name`, `azure_base_url`, `pexels_api_keys`, and
+`pixabay_api_keys`. Both `upload_post_enabled` and `upload_post_auto_upload` are
+forced false; enabling either or adding undeclared settings is rejected. Provider
+configuration is copied into a private per-attempt runtime directory and removed
+on completion. Only the reference is configured locally; secrets never enter the
+run snapshot. Inherited environment variables are not forwarded to the runner.
+A hard control-plane kill can leave an unfinished work directory containing the
+configuration: keep the entire data directory private and remove recovered
+interrupted work directories before reuse. Do not share a data directory.
+
+The subprocess group has a deadline, cancellation and output bounds. A matching
+task JSON and one nonempty MP4 with a valid video stream, duration and dimensions
+are required. Media is copied into managed immutable storage and linked to its
+attempt and logical content. Artifacts are served through opaque identities and
+checked against their stored SHA256. Database upgrades are transactional; unknown
+schema versions are rejected. Back up the complete private directory while the
+service is stopped before upgrading. Downgrading a migrated database is unsupported.
+
+The automated generator checks use an independently installed CLI contract double
+and a tiny synthesized orange video. They prove adapter behavior and media
+validation, **not a successful real MPT/provider execution**. Configured generation
+is labeled live unverified. No real platform is declared supported.
+
+## Publication evidence simulator
+
+Completed runs can add named local simulator targets. Each target has a permanent
+identity for platform, stable account and logical content, plus append-only
+attempts and receipts. Changing titles, request keys or media bytes does not reset
+that identity. Run retry is disabled once publication intents exist. There is no
+real uploader, account login or external sending switch.
+
+The same-origin, idempotent endpoints are:
+
+- `POST /v1/runs/{run}/publications`: `platform` (always `simulator`), `account`,
+  and `expected_version`.
+- `POST /v1/runs/{run}/publications/{intent}/dispatch`: `expected_version` and
+  optional simulator `scenario`: `success`, `submitted`, `lost_response`,
+  `not_sent`, or `slow`.
+- `POST /v1/runs/{run}/publications/{intent}/verify`: `expected_version` only.
+
+The backend owns action policy and account exclusion. Before-send interruption
+can become NOT_SENT; interruption after the send boundary becomes UNKNOWN and
+blocks another send. Expired leases never authorize a replacement sender.
+`submitted`, exit code zero and missing work identity do not mean PUBLISHED.
+The query action reads a durable simulator receipt and requires observed sender
+exit before releasing the account lock. Missing evidence or a control-plane
+crash with an unproven sender exit stays UNKNOWN, including across restarts;
+there is no force-confirm button or generic retry escape hatch. A successful
+target remains settled while another target is unresolved. All outcomes remain
+explicitly simulated.
+
+Before any future real sending integration, implement and verify restore barriers
+so restoring an older backup cannot authorize another send. This version does not
+provide that operational guarantee and keeps real sending unavailable.
+
+## Media checks
+
+For Linux x86_64, optional test tools are downloaded from a public static FFmpeg
+7.0.2 distribution and verified against a pinned archive SHA256. The archive
+contains its license information; it is kept outside the application wheel.
+
+```sh
+export LOOPCAST_MEDIA_TOOLS=/tmp/loopcast-media-tools
+scripts/install-media-tools.sh
+scripts/check-tests.sh
+scripts/check-web.sh
+```
+
+The existing installed-package browser suite is preserved. An additional Chromium
+suite creates videos through the actual HTTP service at 1440 and 390 CSS pixels,
+opens the installed MP4, simulates a lost publication response, queries its
+receipt, and verifies that reload and disabled resend preserve the same facts.
+CI requires package, tests and browser to succeed; missing or skipped jobs fail
+the merge gate. Public CI needs no provider or platform credentials.

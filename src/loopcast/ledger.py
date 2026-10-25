@@ -33,7 +33,7 @@ class PublicationMethods:
         return result
 
     def publication_create(self, run_id, value, key, expected_version):
-        from .storage import digest, canonical
+        from .storage import digest
         if set(value) != {'platform', 'account'} or value['platform'] != 'simulator' or not isinstance(value['account'], str) or not re.fullmatch('[a-zA-Z0-9_-]{1,64}', value['account']):
             raise problem('CAPABILITY_UNAVAILABLE', 'Only named simulator accounts are available.', 422, run_id)
         with self.transaction(True) as db:
@@ -93,6 +93,19 @@ class PublicationMethods:
             db.execute('INSERT INTO publish_requests VALUES(?,?,?,?)', (scope,key,checksum,intent_id))
             snapshot = self._event(db, run_id, 'publication_prepared')
             return snapshot, {'intent_id':intent_id,'run_id':run_id,'token':token,'attempt_id':attempt_id}
+
+    def publication_abandon_prepared(self, job):
+        # No process was started by this worker. A stale lease does not prevent
+        # recording the definite pre-send fact, but the token and state must match.
+        with self.transaction(True) as db:
+            row = db.execute("SELECT * FROM publish_attempts WHERE token=? AND state='PREPARED'", (job['token'],)).fetchone()
+            if row is None: return False
+            db.execute("UPDATE publish_attempts SET state='NOT_SENT',ended_at=? WHERE token=?", (now(),job['token']))
+            db.execute("UPDATE publish_intents SET state='NOT_SENT',version=version+1 WHERE id=?", (row['intent_id'],))
+            db.execute('DELETE FROM account_locks WHERE token=?', (job['token'],))
+            db.execute('INSERT INTO receipts VALUES(?,?,?,?,?,?,?,?)', (uid(),row['intent_id'],row['id'],now(),'simulator','NOT_SENT',None,'Prepared dispatch expired before a process was started'))
+            self._event(db,job['run_id'],'publication_not_started')
+            return True
 
     def publication_sending(self, job):
         with self.transaction(True) as db:
