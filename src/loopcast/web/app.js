@@ -1,3 +1,4 @@
+import {requestKey} from './requests.js';
 const app = document.querySelector('#app');
 const sync = document.querySelector('#sync');
 const dialog = document.querySelector('#create-dialog');
@@ -217,7 +218,8 @@ async function command(id, action) {
   let operation = pending.get(identity);
   if (operation?.busy || !run.allowed_actions[action].enabled) return;
   if (!operation && action === 'cancel' && !confirm('Request cancellation of this fixture? Execution must stop before it is marked cancelled.')) return;
-  operation ||= {key: crypto.randomUUID(), version: run.state_version};
+  try { operation ||= {key: requestKey(), version: run.state_version}; }
+  catch (error) { notice(error.message); return; }
   operation.busy = true; pending.set(identity, operation);
   const generation = view;
   if (location.pathname === '/') renderList(); else renderDetail(run);
@@ -250,7 +252,8 @@ document.querySelector('#create-form').addEventListener('submit', async event =>
   if (submit.disabled) return;
   const body = form.elements.mode.value === 'mpt' ? {mode: 'mpt', title: form.elements.title.value} : {mode: 'fixture', title: form.elements.title.value, scenario: form.elements.scenario.value, delay_ms: Number(form.elements.delay_ms.value)};
   const signature = JSON.stringify(body);
-  if (createIdentity?.signature !== signature) createIdentity = {signature, key: crypto.randomUUID()};
+  try { if (createIdentity?.signature !== signature) createIdentity = {signature, key: requestKey()}; }
+  catch (error) { document.querySelector('#form-error').textContent = error.message; return; }
   submit.disabled = true; submit.textContent = 'Creating…'; document.querySelector('#form-error').textContent = '';
   try {
     const result = await request('/v1/runs', {method: 'POST', headers: {'Content-Type': 'application/json', 'Idempotency-Key': createIdentity.key}, body: signature});
@@ -297,7 +300,8 @@ async function publicationCommand(run, intentId, action, extra) {
   let operation = pending.get(identity);
   if (operation?.busy) return;
   const signature = JSON.stringify(extra);
-  if (!operation || operation.signature !== signature) operation = {key: crypto.randomUUID(), version: run.state_version, signature};
+  try { if (!operation || operation.signature !== signature) operation = {key: requestKey(), version: run.state_version, signature}; }
+  catch (error) { notice(error.message); return; }
   operation.busy = true; pending.set(identity, operation);
   const path = `/v1/runs/${run.run_id}/publications` + (intentId ? `/${intentId}/${action}` : '');
   try {

@@ -194,7 +194,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.wfile.write(content)
         if not write and (path == '/' or re.fullmatch('/runs/' + ID, path)):
             return self.asset('index.html', 'text/html; charset=utf-8')
-        if not write and path in ('/app.js', '/style.css'):
+        if not write and path in ('/app.js', '/requests.js', '/style.css'):
             return self.asset(path[1:], 'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8')
         if not write and not path.startswith('/v1/') and '.' not in path:
             return self.asset('index.html', 'text/html; charset=utf-8')
