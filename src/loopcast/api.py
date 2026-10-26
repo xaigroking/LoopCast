@@ -18,6 +18,7 @@ from .storage import Problem, uid, TERMINAL
 from .diagnostics import new_context, log_event
 from .studio_api import register_studio_routes
 from .feedback_api import register_feedback_routes
+from .operations_api import register_operations_routes
 
 ID = r"[a-f0-9]{32}"
 _RUN = re.compile(r"^/v1/runs/([a-f0-9]{32})(?:/(cancel|retry|events))?$")
@@ -538,6 +539,7 @@ def create_app(
 
     register_studio_routes(app, ERROR_RESPONSES)
     register_feedback_routes(app, ERROR_RESPONSES)
+    register_operations_routes(app, ERROR_RESPONSES)
 
     @app.api_route("/v1", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], include_in_schema=False)
     @app.api_route("/v1/{unknown:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], include_in_schema=False)
