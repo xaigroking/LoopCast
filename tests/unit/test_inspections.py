@@ -163,6 +163,37 @@ class InspectionTests(ScheduleFixture):
         with store.transaction()as db:self.assertEqual(db.execute('SELECT version FROM studio_projects').fetchone()[0],3)
 
 
+    def test_manual_and_periodic_race_share_one_check_for_each_channel(self):
+        self.store.inspection_settings=InspectionSettings(enabled=True)
+        barrier=threading.Barrier(8)
+        def trigger(index):
+            barrier.wait()
+            return self.service.tick() if index%2 else self.begin()
+        with ThreadPoolExecutor(max_workers=8)as pool:list(pool.map(trigger,range(8)))
+        with self.store.transaction()as db:
+            rows=db.execute('SELECT channel_id,COUNT(*) FROM inspection_checks GROUP BY channel_id').fetchall()
+            self.assertEqual(len(rows),4)
+            self.assertTrue(all(row[1]==1 for row in rows))
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM studio_jobs WHERE kind='inspection'AND state='READY'").fetchone()[0],4)
+
+    def test_passive_inspection_preserves_existing_unknown_guard_plan_and_quota_facts(self):
+        self.create(self.spec())
+        group=self.group();target=self.store.studio_release(group['batch_id'])['targets'][0]
+        self.store.studio_dispatch(group['batch_id'],target['id'],target['version'],uid(),self.caps,True)
+        job=self.store.studio_claim_job();self.assertTrue(self.store.studio_sending(job))
+        self.store.studio_release_result(job,{'outcome':'UNKNOWN'},'controlled-fixture');self.store.studio_complete_job(job)
+        self.store.prepare_restored_state({'backup_id':uid(),'created_at':self.clock.iso(),'schema_version':9},'b'*64)
+        tables=['release_targets','release_attempts','release_guards','release_account_locks','restore_guard','schedules','schedule_versions','publication_quota_reservations','publication_quota_baselines','studio_accounts']
+        def facts():
+            with self.store.transaction()as db:return {name:[tuple(row)for row in db.execute('SELECT * FROM '+name+' ORDER BY rowid')]for name in tables}
+        before=facts();check=self.begin('ACCOUNT')['check'];job=self.store.studio_claim_job()
+        with patch.object(self.social,'invoke',side_effect=AssertionError('No platform call'))as called:
+            self.service.execute(job,threading.Event());called.assert_not_called()
+        self.assertEqual(before,facts())
+        report=self.service.report(self.store.inspection_check(check['id'])['report_id'])
+        self.assertEqual(report['result'],'NOT_CONFIGURED')
+        self.assertTrue(all(count==0 for count in report['actual_operations'].values()))
+
     def test_missing_generator_configuration_is_not_a_damaged_component(self):
         from loopcast.inspection_probe import inspect
         report=inspect({'kind':'GENERATOR','generator':None,'media':None,'directory':'unused','ready':True})
