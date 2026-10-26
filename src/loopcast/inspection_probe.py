@@ -33,7 +33,7 @@ def inspect(value):
             mapping={'NOT_CONFIGURED':('NOT_CONFIGURED','GENERATOR_NOT_CONFIGURED'),'INVALID':('MISCONFIGURED','GENERATOR_INVALID'),'NOT_INSTALLED':('MISCONFIGURED','COMPONENT_UNAVAILABLE'),'CALLABLE':('CALLABLE','OK')}
             result,reason=mapping[report['state']];scope='COMPONENT_INSTALL'
             for item in report['checks']:
-                checks.append({'check_type':item['id'].upper(),'source':'generator.diagnostics','result':'CALLABLE' if item['state']=='PASS' else 'UNVERIFIED' if item['state']=='WARN' else 'MISCONFIGURED','reason_code':item['code']})
+                checks.append({'check_type':item['id'].upper(),'source':'generator.diagnostics','result':'NOT_CONFIGURED' if item['code']=='GENERATOR_NOT_CONFIGURED' else 'CALLABLE' if item['state']=='PASS' else 'UNVERIFIED' if item['state']=='WARN' else 'MISCONFIGURED','reason_code':item['code']})
             # CLI/install verification never upgrades to a live generation claim.
             evidence='source_inspected' if result=='CALLABLE' else 'unverified'
         elif kind=='MEDIA':

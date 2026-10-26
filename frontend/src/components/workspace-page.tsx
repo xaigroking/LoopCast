@@ -10,6 +10,7 @@ import { currentPreferences, type Preferences } from '@/lib/preferences';
 import { useWorkspace } from '@/lib/workspace';
 import { GeneratorStatus } from './generator-status';
 import { OperationsPanel } from './operations';
+import { InspectionPanel } from './inspections';
 import { subscribeEvents } from '@/lib/events';
 
 const terminal = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED']);
@@ -399,6 +400,7 @@ function SettingsView() {
     </div>
     <GeneratorStatus />
     <OperationsPanel />
+    <InspectionPanel />
     <Link className="back" href="/">{t('back')}</Link>
   </>;
 }

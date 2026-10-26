@@ -82,11 +82,15 @@ class StudioControl:
         fields = {'job_id': job['id'], {'authorize': 'session_id', 'check': 'account_id', 'dispatch': 'target_id', 'verify': 'target_id'}[kind]: identity}
         log_event('social', 'job.started', context, **fields)
         result_state, crossed = 'FAILED', False
+        inspection_deadline,check_timed_out=None,False
         work = self.social.session_directory(identity) if kind == 'authorize' else self.social.root / 'jobs' / job['id']
         work.mkdir(mode=0o700, parents=True, exist_ok=True)
         last_check, active, phase = 0, True, None
         def cancelled():
-            nonlocal last_check, active, phase
+            nonlocal last_check, active, phase, check_timed_out
+            if inspection_deadline is not None and time.monotonic()>=inspection_deadline:
+                check_timed_out=True
+                return True
             if stopping.is_set(): return True
             if time.monotonic() - last_check > .1:
                 active = self.store.studio_job_active(job)
@@ -114,10 +118,15 @@ class StudioControl:
                     self.social.remove_credentials(reference)
                     result_state = 'IGNORED'
             elif kind == 'check':
-                if self.inspections:self.store.inspection_running(job)
+                if self.inspections:
+                    self.inspections.refresh()
+                    self.store.inspection_running(job)
+                    inspection_deadline=self.store.inspection_account_deadline(job)
+                if cancelled():raise RunnerError('CANCELLED')
                 account = self.store.studio_private_account(identity)
                 shutil.copyfile(self.social.credential_path(account['credential_ref']), work / 'credentials.json')
                 (work / 'credentials.json').chmod(0o600)
+                if cancelled():raise RunnerError('CANCELLED')
                 if self.inspections:self.inspections.account_invoked(job)
                 result = self.social.invoke('check', account['platform'], work, {}, cancelled)
                 if self.inspections:self.inspections.before_account_result(job)
@@ -168,7 +177,7 @@ class StudioControl:
                     self.store.studio_verification_result(job, result, self.social.mode + ':query')
                 result_state = result.get('outcome', 'UNKNOWN')
         except Exception as error:
-            code = 'INTERRUPTED' if stopping.is_set() else error.code if isinstance(error, (RunnerError, Problem)) else 'ADAPTER_FAILED'
+            code = 'CHECK_TIMEOUT' if check_timed_out else 'INTERRUPTED' if stopping.is_set() else error.code if isinstance(error, (RunnerError, Problem)) else 'ADAPTER_FAILED'
             if kind == 'dispatch':
                 result = {'outcome': 'UNKNOWN'} if crossed else {'outcome': 'NOT_SENT', 'boundary_crossed': False}
                 self.store.studio_release_result(job, result, 'control:' + self.social.mode)

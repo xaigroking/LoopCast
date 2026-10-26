@@ -10,7 +10,7 @@ domain = {"domain", "contracts", "fixture", "generation", "ledger", "publisher",
 forbidden = {"fastapi", "starlette", "uvicorn", "next", "react"}
 # Store/ledger are the persistence adapter; pure run rules live in domain.py.
 allowed = {
-    "inspection_api": {"studio_models", "inspection_models"},
+    "inspection_api": {"studio_models", "inspection_models", "domain"},
     "inspection_models": {"studio_models"},
     "inspection_identity": {"domain"},
     "inspection_storage": {"domain", "inspection_models"},

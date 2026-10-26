@@ -22,6 +22,7 @@ class Publisher:
         self.store.publication_recover()
         if self.studio: self.store.studio_recover()
         self.next_schedule_scan = 0
+        self.next_inspection_scan = 0
         self.thread.start()
 
     def close(self):
@@ -41,6 +42,9 @@ class Publisher:
                 if time.monotonic() >= self.next_schedule_scan:
                     self.store.schedule_tick(self.studio.platform_map, self.studio.social.mode, self.studio.social.sending_enabled)
                     self.next_schedule_scan = time.monotonic() + 1
+                if self.inspections and time.monotonic()>=self.next_inspection_scan:
+                    self.inspections.tick()
+                    self.next_inspection_scan=time.monotonic()+1
                 durable = self.store.studio_claim_job()
                 if durable:
                     if durable['kind']=='inspection' and self.inspections:self.inspections.execute(durable,self.stopping)

@@ -62,6 +62,34 @@ LOOPCAST_INSTALLED_BRIDGE="$installed_bridge" "$browser_python" -I "$root_dir/te
 LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" "$browser_python" -I "$root_dir/tests/browser/check_feedback.py"
 LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" "$browser_python" -I "$root_dir/tests/browser/check_operations.py"
 
+# Reuse the existing owner with an explicit contract-only inspection allowlist.
+kill "$backend_pid"
+wait "$backend_pid" 2>/dev/null || true
+backend_pid=
+python - "$generator_dir" "$data_dir" <<'INSPECTIONS'
+import json,pathlib,sqlite3,sys
+root=pathlib.Path(sys.argv[1])
+with sqlite3.connect(pathlib.Path(sys.argv[2])/'state.sqlite3') as db:accounts=[r[0] for r in db.execute('SELECT id FROM studio_accounts')]
+(root/'inspections.json').write_text(json.dumps({'format':'loopcast.inspections.v1','enabled':False,'allow_live':False,'online_accounts':accounts}))
+INSPECTIONS
+"$work_dir/backend/bin/python" -I -m loopcast serve --host 127.0.0.1 --port 18888 --data-dir "$data_dir" --generator-config "$generator_dir/generator.json" --media-config "$generator_dir/media.json" --social-config "$generator_dir/social.json" --inspection-config "$generator_dir/inspections.json" --public-origin "http://127.0.0.1:$public_port" --trusted-proxy 127.0.0.1/32 >"$work_dir/inspection-backend.log" 2>&1 &
+backend_pid=$!
+for _ in $(seq 1 100); do
+  if curl -fsS "http://127.0.0.1:$public_port/healthz" >/dev/null 2>&1; then break; fi
+  sleep .1
+done
+LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" "$browser_python" -I "$root_dir/tests/browser/check_inspections.py"
+kill "$backend_pid"
+wait "$backend_pid" 2>/dev/null || true
+backend_pid=
+"$work_dir/backend/bin/python" -I -m loopcast serve --host 127.0.0.1 --port 18888 --data-dir "$work_dir/inspection-empty" --public-origin "http://127.0.0.1:$public_port" --trusted-proxy 127.0.0.1/32 >"$work_dir/inspection-empty.log" 2>&1 &
+backend_pid=$!
+for _ in $(seq 1 100); do
+  if curl -fsS "http://127.0.0.1:$public_port/healthz" >/dev/null 2>&1; then break; fi
+  sleep .1
+done
+LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" LOOPCAST_EXPECT_EMPTY_INSPECTIONS=1 "$browser_python" -I "$root_dir/tests/browser/check_inspections.py"
+
 # Reuse the owner with an explicit isolated local-scheduling policy.
 kill "$backend_pid"
 wait "$backend_pid" 2>/dev/null || true
@@ -97,3 +125,5 @@ curl -fsS "http://127.0.0.1:$public_port/healthz" | "$work_dir/backend/bin/pytho
 LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" LOOPCAST_EXPECT_RESTORE_GUARD=1 "$browser_python" -I "$root_dir/tests/browser/check_operations.py"
 
 LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" LOOPCAST_EXPECT_RESTORE_GUARD=1 "$browser_python" -I "$root_dir/tests/browser/check_scheduling.py"
+
+LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" LOOPCAST_EXPECT_RESTORE_GUARD=1 "$browser_python" -I "$root_dir/tests/browser/check_inspections.py"

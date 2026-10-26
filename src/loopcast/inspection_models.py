@@ -161,3 +161,40 @@ class ChannelList(Model):
     items: list[Channel]
     next_cursor: StrictStr | None
     policy: InspectionSettings
+
+
+class ChannelReportList(Model):
+    items: list[ChannelReport]
+    next_cursor: StrictStr | None
+    retained_from: StrictStr | None
+
+
+class ChannelEvent(Model):
+    id: Positive
+    channel_id: Id
+    channel_version: Positive
+    kind: Literal['INITIAL_OBSERVATION','ANOMALY','CHANGE','RECOVERY','CONFIG_CHANGED']
+    old_result: Result | None
+    new_result: Result
+    reason_code: Code
+    previous_report_id: Id | None
+    current_report_id: Id
+    created_at: StrictStr
+
+
+class ChannelEventList(Model):
+    items: list[ChannelEvent]
+    next_cursor: StrictStr | None
+    retained_from: StrictStr | None
+
+
+class InspectionError(Model):
+    code: Code
+    message: StrictStr
+    request_id: StrictStr
+    current_version: Positive | None = None
+    retry_after_seconds: Annotated[StrictInt, Field(ge=0)] | None = None
+
+
+class InspectionErrorEnvelope(Model):
+    error: InspectionError

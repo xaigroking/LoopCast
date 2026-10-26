@@ -80,6 +80,20 @@ class InspectionTests(ScheduleFixture):
         self.assertEqual(report['scope']['account_version'],self.store.studio_accounts()['items'][0]['version'])
         self.assertEqual(report['actual_operations']['check'],1);self.assertEqual(report['actual_operations']['upload'],0)
 
+    def test_inventory_snapshot_before_owned_account_transition_keeps_channel_version(self):
+        before=self.channel('ACCOUNT');original=self.service.channel(before['id'])['channel_version']
+        first=self.begin('ACCOUNT',True)
+        stale_view=self.store.inspection_channel(before,True)
+        self.assertEqual(stale_view['channel_version'],original)
+        self.assertEqual(stale_view['scope']['account_version'],self.store.studio_accounts()['items'][0]['version'])
+        joined=self.service.start(before['id'],ChannelCheckRequest(expected_version=stale_view['channel_version'],online=True,confirmed_online=True),uid())
+        self.assertEqual(joined['check']['id'],first['check']['id']);self.assertTrue(joined['joined'])
+        # A separate edit is still a new generation, even if its reader was delayed.
+        current=self.store.studio_accounts()['items'][0]
+        self.store.studio_account_update(current['id'],'Externally changed',[],current['version'],uid())
+        with self.assertRaises(Problem):
+            self.service.start(before['id'],ChannelCheckRequest(expected_version=original,online=True,confirmed_online=True),uid())
+
     def test_timeout_keeps_previous_account_observation_and_no_new_verification(self):
         before=self.store.studio_accounts()['items'][0];check=self.begin('ACCOUNT',True)['check'];job=self.store.studio_claim_job()
         with patch.object(self.social,'invoke',side_effect=RunnerError('TIMEOUT')):self.control.execute_job(job,threading.Event())
@@ -161,6 +175,168 @@ class InspectionTests(ScheduleFixture):
         with sqlite3.connect(path)as db:self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0],8);self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='inspection_channels'").fetchone())
         store=Store(old)
         with store.transaction()as db:self.assertEqual(db.execute('SELECT version FROM studio_projects').fetchone()[0],3)
+
+
+    def test_submicrosecond_timestamp_rounding_is_not_clock_rollback_or_expiry(self):
+        self.clock.value+=.1234567
+        check=self.begin()['check'];report=self.finish(check)
+        self.assertEqual(report['result'],'CALLABLE')
+        self.assertEqual(self.service.report(report['id'])['freshness'],'FRESH')
+
+    def test_late_success_after_monotonic_budget_preserves_previous_account_observation(self):
+        import time
+        before=self.store.studio_accounts()['items'][0];check=self.begin('ACCOUNT',True)['check'];job=self.store.studio_claim_job()
+        self.store.inspection_running(job)
+        with self.store.transaction(True)as db:
+            raw=json.loads(db.execute('SELECT private_input FROM inspection_checks WHERE id=?',(check['id'],)).fetchone()[0])
+            raw['monotonic_deadline']=time.monotonic()-1
+            db.execute('UPDATE inspection_checks SET private_input=? WHERE id=?',(json.dumps(raw),check['id']))
+        outcome=self.service.account_outcome({'valid':True},before)
+        self.store.studio_check_result(job,True,'schedule-fixture',outcome)
+        after=self.store.studio_accounts()['items'][0]
+        self.assertEqual(after['checked_at'],before['checked_at']);self.assertEqual(after['state'],before['state'])
+        report=self.service.report(self.store.inspection_check(check['id'])['report_id'])
+        self.assertEqual(report['result'],'UNKNOWN');self.assertEqual(report['reason_code'],'CHECK_TIMEOUT')
+
+    def test_online_deadline_is_monotonic_when_wall_clock_moves_backward(self):
+        import time
+        self.store.inspection_settings=InspectionSettings(timeout_seconds=5,online_accounts=[self.account['id']])
+        before=self.store.studio_accounts()['items'][0];check=self.begin('ACCOUNT',True)['check'];job=self.store.studio_claim_job();operations=[]
+        def blocked(operation,platform,work,payload,cancelled):
+            operations.append(operation);self.clock.value-=3600;start=time.monotonic()
+            while not cancelled():
+                if time.monotonic()-start>7:raise AssertionError('Configured monotonic deadline was bypassed')
+                time.sleep(.02)
+            raise RunnerError('CANCELLED')
+        start=time.monotonic()
+        with patch.object(self.social,'invoke',side_effect=blocked):self.control.execute_job(job,threading.Event())
+        self.assertLess(time.monotonic()-start,6.5);self.assertEqual(operations,['check'])
+        report=self.service.report(self.store.inspection_check(check['id'])['report_id'])
+        self.assertEqual(report['result'],'UNKNOWN');self.assertEqual(report['reason_code'],'CHECK_TIMEOUT')
+        after=self.store.studio_accounts()['items'][0];self.assertEqual(after['checked_at'],before['checked_at']);self.assertEqual(after['state'],before['state'])
+
+    def test_manual_and_periodic_race_share_one_check_for_each_channel(self):
+        self.store.inspection_settings=InspectionSettings(enabled=True)
+        barrier=threading.Barrier(8)
+        def trigger(index):
+            barrier.wait()
+            return self.service.tick() if index%2 else self.begin()
+        with ThreadPoolExecutor(max_workers=8)as pool:list(pool.map(trigger,range(8)))
+        with self.store.transaction()as db:
+            rows=db.execute('SELECT channel_id,COUNT(*) FROM inspection_checks GROUP BY channel_id').fetchall()
+            self.assertEqual(len(rows),4)
+            self.assertTrue(all(row[1]==1 for row in rows))
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM studio_jobs WHERE kind='inspection'AND state='READY'").fetchone()[0],4)
+
+    def test_passive_inspection_preserves_existing_unknown_guard_plan_and_quota_facts(self):
+        self.create(self.spec())
+        group=self.group();target=self.store.studio_release(group['batch_id'])['targets'][0]
+        self.store.studio_dispatch(group['batch_id'],target['id'],target['version'],uid(),self.caps,True)
+        job=self.store.studio_claim_job();self.assertTrue(self.store.studio_sending(job))
+        self.store.studio_release_result(job,{'outcome':'UNKNOWN'},'controlled-fixture');self.store.studio_complete_job(job)
+        self.store.prepare_restored_state({'backup_id':uid(),'created_at':self.clock.iso(),'schema_version':9},'b'*64)
+        tables=['release_targets','release_attempts','release_guards','release_account_locks','restore_guard','schedules','schedule_versions','publication_quota_reservations','publication_quota_baselines','studio_accounts']
+        def facts():
+            with self.store.transaction()as db:return {name:[tuple(row)for row in db.execute('SELECT * FROM '+name+' ORDER BY rowid')]for name in tables}
+        before=facts();check=self.begin('ACCOUNT')['check'];job=self.store.studio_claim_job()
+        with patch.object(self.social,'invoke',side_effect=AssertionError('No platform call'))as called:
+            self.service.execute(job,threading.Event());called.assert_not_called()
+        self.assertEqual(before,facts())
+        report=self.service.report(self.store.inspection_check(check['id'])['report_id'])
+        self.assertEqual(report['result'],'NOT_CONFIGURED')
+        self.assertTrue(all(count==0 for count in report['actual_operations'].values()))
+
+    def test_missing_generator_configuration_is_not_a_damaged_component(self):
+        from loopcast.inspection_probe import inspect
+        report=inspect({'kind':'GENERATOR','generator':None,'media':None,'directory':'unused','ready':True})
+        self.assertEqual(report['result'],'NOT_CONFIGURED')
+        self.assertEqual(report['checks'][0]['result'],'NOT_CONFIGURED')
+        self.assertEqual(report['checks'][0]['check_type'],'CONFIGURATION')
+        self.assertTrue(all(value==0 for value in report['actual_operations'].values()))
+
+    def test_first_account_inventory_version_detects_a_change_before_registration(self):
+        value=self.channel('ACCOUNT');old=self.service.channel(value['id'])
+        account=self.store.studio_accounts()['items'][0]
+        self.store.studio_account_update(account['id'],'Changed elsewhere',[],account['version'],uid())
+        with self.assertRaises(Problem)as error:self.service.start(value['id'],ChannelCheckRequest(expected_version=old['channel_version']),uid())
+        self.assertEqual(error.exception.code,'VERSION_CONFLICT')
+        self.assertGreater(self.service.channel(value['id'])['channel_version'],old['channel_version'])
+
+    def advance_cooldown(self, kind='CONTROL_STORAGE'):
+        with self.store.transaction()as db:row=db.execute('SELECT not_before FROM inspection_channels WHERE id=?',(self.channel(kind)['id'],)).fetchone()
+        if row:self.clock.value=max(self.clock.value,row[0]+1)
+
+    def test_transition_events_deduplicate_faults_and_recovery_references_last_report(self):
+        bad=OUTCOME|{'result':'UNKNOWN','reason_code':'CHECK_TIMEOUT'};reports=[]
+        for _ in range(3):
+            self.advance_cooldown();reports.append(self.finish(self.begin()['check'],bad))
+        events=self.store.inspection_events()['items'];self.assertEqual(len(events),1);self.assertEqual(events[0]['kind'],'ANOMALY')
+        self.advance_cooldown();recovered=self.finish(self.begin()['check'])
+        recovery=self.store.inspection_events()['items'][0];self.assertEqual(recovery['kind'],'RECOVERY')
+        self.assertEqual(recovery['previous_report_id'],reports[-1]['id']);self.assertEqual(recovery['current_report_id'],recovered['id'])
+        self.clock.value+=86401;self.service.report(recovered['id']);self.assertEqual(len(self.store.inspection_events()['items']),2)
+
+    def test_bounded_history_retires_old_request_without_replaying(self):
+        self.store.inspection_settings=InspectionSettings(reports_per_channel=2,events_per_channel=2)
+        key=uid();first=self.begin(key=key)['check'];self.finish(first)
+        for i in range(7):
+            self.advance_cooldown();self.finish(self.begin()['check'],OUTCOME|({'result':'UNKNOWN','reason_code':'CHECK_TIMEOUT'} if i%2==0 else {}))
+        with self.store.transaction()as db:
+            reports={r[0]for r in db.execute('SELECT id FROM inspection_reports')};self.assertLessEqual(len(reports),2)
+            rows=db.execute('SELECT previous_report,current_report FROM inspection_events').fetchall();self.assertLessEqual(len(rows),2)
+            for row in rows:self.assertTrue(row[0]is None or row[0]in reports);self.assertIn(row[1],reports)
+            before=db.execute('SELECT COUNT(*) FROM studio_jobs').fetchone()[0]
+        with self.assertRaises(Problem)as error:self.begin(key=key)
+        self.assertEqual(error.exception.status,410)
+        with self.store.transaction()as db:self.assertEqual(before,db.execute('SELECT COUNT(*) FROM studio_jobs').fetchone()[0])
+
+    def test_new_component_generation_does_not_fabricate_recovery(self):
+        self.finish(self.begin('GENERATOR')['check'],OUTCOME|{'result':'FAILED','reason_code':'COMPONENT_UNAVAILABLE'})
+        self.advance_cooldown('GENERATOR');self.runtime.generator_settings={}
+        self.finish(self.begin('GENERATOR')['check'])
+        self.assertEqual(self.store.inspection_events()['items'][0]['kind'],'CONFIG_CHANGED')
+        self.assertFalse(any(e['kind']=='RECOVERY'for e in self.store.inspection_events()['items']))
+
+    def test_periodic_policy_admits_at_most_four_and_no_online_operations_by_default(self):
+        self.assertEqual(self.service.tick(),0)
+        self.store.inspection_settings=InspectionSettings(enabled=True,interval_seconds=60)
+        self.assertEqual(self.service.tick(),4);self.assertEqual(self.service.tick(),0)
+        with self.store.transaction()as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM inspection_checks WHERE state='QUEUED'").fetchone()[0],4)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM studio_jobs WHERE kind='check'AND state='READY'").fetchone()[0],0)
+
+    def test_backoff_is_durable_and_cannot_be_reset_by_new_request_key(self):
+        report=self.finish(self.begin()['check'],OUTCOME|{'result':'FAILED','reason_code':'CHECK_UNAVAILABLE'})
+        with self.assertRaises(Problem)as error:self.begin()
+        self.assertEqual(error.exception.code,'CHECK_COOLDOWN')
+        reopened=Store(self.store.directory,clock=self.clock,inspection_settings=self.store.inspection_settings)
+        self.runtime.store=reopened;service=InspectionService(self.runtime)
+        channel=service.find(report['channel_id'])
+        with self.assertRaises(Problem)as error:service.start(channel['id'],ChannelCheckRequest(expected_version=1),uid())
+        self.assertEqual(error.exception.code,'CHECK_COOLDOWN')
+        self.clock.value+=61;result=service.start(channel['id'],ChannelCheckRequest(expected_version=1),uid());self.assertEqual(result['check']['state'],'QUEUED')
+
+    def test_event_commit_failure_rolls_back_report_and_latest_together(self):
+        check=self.begin()['check'];job=self.store.studio_claim_job();self.store.inspection_running(job)
+        with patch.object(self.store,'_inspection_trim',side_effect=sqlite3.OperationalError('private-event-canary')):
+            with self.assertRaises(sqlite3.OperationalError):self.store.inspection_finish(job,OUTCOME)
+        with self.store.transaction()as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM inspection_reports').fetchone()[0],0)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM inspection_events').fetchone()[0],0)
+        self.assertIsNone(self.store.inspection_check(check['id'])['report_id'])
+        self.store.inspection_finish(job,OUTCOME);self.assertEqual(len(self.store.inspection_events()['items']),1)
+
+    def test_backward_clock_during_check_records_unknown_without_new_permission(self):
+        check=self.begin()['check'];job=self.store.studio_claim_job();self.store.inspection_running(job);self.clock.value-=10
+        self.store.inspection_finish(job,OUTCOME)
+        report=self.service.report(self.store.inspection_check(check['id'])['report_id'])
+        self.assertEqual(report['result'],'UNKNOWN');self.assertEqual(report['reason_code'],'CHECK_CLOCK_CHANGED')
+
+    def test_scoped_history_cursors_cannot_cross_channels_or_event_lists(self):
+        for _ in range(3):self.finish(self.begin()['check'])
+        page=self.store.inspection_reports(self.channel(),limit=1);self.assertIsNotNone(page['next_cursor'])
+        with self.assertRaises(Problem):self.store.inspection_reports(self.channel('MEDIA'),page['next_cursor'])
+        with self.assertRaises(Problem):self.store.inspection_events(cursor=page['next_cursor'])
 
 
 class SocialReadOnlyClassificationTests(unittest.TestCase):

@@ -47,7 +47,7 @@ class InspectionAPITests(unittest.TestCase):
                 self.assertEqual(code,202,replayed);self.assertEqual(replayed['check']['id'],first['check']['id'])
             generate.assert_not_called();create.assert_not_called();platform.assert_not_called()
         self.assertEqual(self.owner.request('/v1/runs')[1]['items'],[])
-        self.assertEqual(len(self.server.app.openapi()['paths']),61)
+        self.assertEqual(len(self.server.app.openapi()['paths']),63)
 
     def test_strict_requests_readonly_get_invalid_cursor_and_stale_component(self):
         channel=self.channel('GENERATOR');path='/v1/operations/channels/'+channel['id']+'/checks'
@@ -105,3 +105,17 @@ class InspectionAPITests(unittest.TestCase):
             if pid is not None:
                 try:os.kill(pid,signal.SIGKILL)
                 except ProcessLookupError:pass
+
+    def test_history_events_and_explicit_cooldown_http_contract(self):
+        channel=self.channel('GENERATOR');_,report=self.check(channel)
+        path='/v1/operations/channels/'+channel['id']
+        code,history=self.owner.request(path+'/reports');self.assertEqual(code,200);self.assertEqual(history['items'][0]['id'],report['id'])
+        code,events=self.owner.request('/v1/operations/channel-events?channel_id='+channel['id']);self.assertEqual(code,200);self.assertEqual(events['items'][0]['current_report_id'],report['id'])
+        self.assertEqual(events['items'][0]['kind'],'INITIAL_OBSERVATION')
+        self.server.runtime.generator_settings=self.generator|{'manifest':self.generator['manifest']|{'artifact_sha256':'0'*64}}
+        channel=self.channel('GENERATOR');_,failed=self.check(channel)
+        self.assertEqual(failed['result'],'MISCONFIGURED')
+        code,error=self.owner.request(path+'/checks',{'expected_version':channel['channel_version']})
+        self.assertEqual(code,429,error);self.assertGreater(error['error']['retry_after_seconds'],0)
+        code,value=self.owner.request('/v1/operations/channel-events?cursor=invalid');self.assertEqual(code,400,value)
+        self.assertEqual(self.owner.request('/v1/operations/channels')[0],200)

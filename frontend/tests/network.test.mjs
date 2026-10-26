@@ -177,3 +177,17 @@ test('authorization controls never persist sensitive text and a definite rejecti
   globalThis.fetch = async () => new Response('{"error":{"code":"AUTHORIZATION_CLOSED"}}',{ status:409 });
   await assert.rejects(client.retry(), (e) => e instanceof ApiError); assert.equal(client.pending.size,0);
 });
+
+test('read-only channel request identity survives reload without permitting other operations writes', async () => {
+  const { StudioClient } = await load('studio-client');
+  const channel = 'a'.repeat(32);
+  const body = { expected_version: 1, online: false, confirmed_online: false };
+  const values = [
+    { identity: 'inspection-' + channel, path: `/v1/operations/channels/${channel}/checks`, method: 'POST', key: 'stable-inspection-key', body },
+    { identity: 'unrecognized', path: '/v1/operations/status', method: 'POST', key: 'other', body },
+  ];
+  const client = new StudioClient();
+  client.hydrate({ getItem: () => JSON.stringify(values), setItem() {}, removeItem() {} });
+  assert.equal(client.pending.size, 1);
+  assert.equal(client.pending.get('inspection-' + channel).key, 'stable-inspection-key');
+});

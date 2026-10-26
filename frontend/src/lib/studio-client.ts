@@ -33,7 +33,7 @@ export class StudioClient {
       if (!Array.isArray(values)) throw Error('INVALID_CACHE');
       for (const value of values) {
         if (value && typeof value.identity === 'string' && value.identity.length <= 200
-          && typeof value.path === 'string' && /^\/v1\/(?:studio|feedback)\/[a-z0-9/]+$/.test(value.path) && !value.path.endsWith('/controls')
+          && typeof value.path === 'string' && (/^\/v1\/(?:studio|feedback)\/[a-z0-9/]+$/.test(value.path) || /^\/v1\/operations\/channels\/[a-f0-9]{32}\/checks$/.test(value.path)) && !value.path.endsWith('/controls')
           && ['POST', 'PUT'].includes(value.method) && typeof value.key === 'string' && value.key.length <= 128 && value.body && typeof value.body === 'object') {
           this.pending.set(value.identity, { ...value, sensitive: false });
         }

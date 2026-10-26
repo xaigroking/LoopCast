@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import time
 from .backup import code_identity
 from .domain import Problem
 from .inspection_identity import descriptor
@@ -62,9 +63,32 @@ class InspectionService:
     def report(self, identity):
         with self.store.transaction() as db:row=db.execute('SELECT channel_id FROM inspection_reports WHERE id=?',(identity,)).fetchone()
         if not row:raise Problem('HISTORY_RETIRED','This report is no longer retained.',410)
-        try:value=self.find(row[0])
+        try:value=self.find(row['channel_id'])
         except Problem:value=None
         return self.store.inspection_report(identity,value)
+
+    def tick(self):
+        policy=self.store.inspection_settings
+        if not policy.enabled:return 0
+        with self.store.transaction()as db:
+            if db.execute("SELECT 1 FROM studio_jobs WHERE state IN ('READY','RUNNING') AND kind!='inspection' LIMIT 1").fetchone():return 0
+        self.refresh();admitted=0
+        for value in sorted(self.descriptors(),key=lambda d:d['id']):
+            if admitted>=4:break
+            with self.store.transaction()as db:
+                channel=db.execute('SELECT * FROM inspection_channels WHERE id=?',(value['id'],)).fetchone()
+                active=db.execute("SELECT 1 FROM inspection_checks WHERE channel_id=? AND state IN ('QUEUED','RUNNING')",(value['id'],)).fetchone()
+                if active or channel and (channel['next_due']>self.store.clock.now() or channel['not_before']>self.store.clock.now()):continue
+            try:
+                from .inspection_models import ChannelCheckRequest
+                online=self.allowed(value)
+                body=ChannelCheckRequest(expected_version=self.channel(value['id'])['channel_version'],online=online,confirmed_online=online)
+                from .domain import uid
+                self.start(value['id'],body,uid());admitted+=1
+            except Problem as error:
+                if error.code=='QUEUE_FULL':break
+                if error.code not in {'VERSION_CONFLICT','CHECK_BUSY','CHECK_COOLDOWN','CHANNEL_LIMIT','ACCOUNT_DISCONNECTED','CAPABILITY_UNAVAILABLE'}:raise
+        return admitted
 
     def account_invoked(self, job):
         with self.store.transaction(True) as db:
@@ -105,10 +129,10 @@ class InspectionService:
 
     def execute(self, job, stopping):
         if not self.store.inspection_running(job):self.store.studio_complete_job(job);return
-        with self.store.transaction() as db:row=db.execute('SELECT channel_id FROM inspection_checks WHERE job_id=?',(job['id'],)).fetchone()
+        with self.store.transaction() as db:row=db.execute('SELECT * FROM inspection_checks WHERE job_id=?',(job['id'],)).fetchone()
         terminal='COMPLETED'
         try:
-            self.refresh();value=self.find(row[0])
+            self.refresh();value=self.find(row['channel_id'])
             if not self.store.studio_job_active(job):raise RunnerError('CANCELLED')
             if value['kind']=='ACCOUNT':outcome=self.passive_account(value)
             else:
@@ -116,7 +140,7 @@ class InspectionService:
                     path=Path(temporary)/'input.json';path.touch(mode=0o600)
                     path.write_text(json.dumps({'kind':value['kind'],'directory':str(self.store.directory),'generator':self.runtime.generator_settings,'media':self.runtime.media_settings,'ready':self.runtime.ready()}))
                     raw=run([sys.executable,'-I','-m','loopcast.inspection_probe',str(path)],temporary,{'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'},
-                            self.store.inspection_settings.timeout_seconds,lambda:stopping.is_set() or not self.store.studio_job_active(job),limit=65536)
+                            max(.01,min(self.store.inspection_settings.timeout_seconds,json.loads(row['private_input']).get('monotonic_deadline',float('inf'))-time.monotonic())),lambda:stopping.is_set() or not self.store.studio_job_active(job),limit=65536)
                     outcome=InspectionOutcome.model_validate_json(raw).model_dump()
             self.refresh()
         except RunnerError as error:
