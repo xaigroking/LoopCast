@@ -47,7 +47,7 @@ class InspectionAPITests(unittest.TestCase):
                 self.assertEqual(code,202,replayed);self.assertEqual(replayed['check']['id'],first['check']['id'])
             generate.assert_not_called();create.assert_not_called();platform.assert_not_called()
         self.assertEqual(self.owner.request('/v1/runs')[1]['items'],[])
-        self.assertEqual(len(self.server.app.openapi()['paths']),61)
+        self.assertEqual(len(self.server.app.openapi()['paths']),63)
 
     def test_strict_requests_readonly_get_invalid_cursor_and_stale_component(self):
         channel=self.channel('GENERATOR');path='/v1/operations/channels/'+channel['id']+'/checks'
@@ -81,3 +81,41 @@ class InspectionAPITests(unittest.TestCase):
         self.assertEqual(report['evidence_status'],'fixture_verified');self.assertEqual(report['actual_operations']['check'],1)
         self.assertFalse(self.owner.request('/v1/operations/status')[1]['upload_allowed_by_recovery'])
         self.assertFalse(next(c for c in report['declarations']if c['operation']=='native_schedule')['supported'])
+
+    def test_total_probe_timeout_reaps_nested_cli_process(self):
+        import os
+        import signal
+        import generation_support
+        marker=self.root/'diagnostic-child.pid'
+        launcher=generation_support.LAUNCHER.replace('def main():',"def main():\n import time\n Path("+repr(str(marker))+").write_text(str(os.getpid()))\n time.sleep(20)")
+        with patch.object(generation_support,'LAUNCHER',launcher):paths=configurations(self.root/'slow-components')
+        self.server.runtime.generator_settings=json.loads(paths[0].read_text())
+        self.server.runtime.store.inspection_settings=InspectionSettings(timeout_seconds=5)
+        pid=None
+        try:
+            _,report=self.check(self.channel('GENERATOR'))
+            self.assertEqual(report['result'],'UNKNOWN');self.assertEqual(report['reason_code'],'CHECK_TIMEOUT')
+            self.assertTrue(marker.exists());pid=int(marker.read_text())
+            proc=Path('/proc')/str(pid)/'stat'
+            if proc.exists():self.assertEqual(proc.read_text().rsplit(')',1)[1].split()[0],'Z','Diagnostic descendant remains running')
+            else:
+                with self.assertRaises(ProcessLookupError):os.kill(pid,0)
+        finally:
+            if pid is None and marker.exists():pid=int(marker.read_text())
+            if pid is not None:
+                try:os.kill(pid,signal.SIGKILL)
+                except ProcessLookupError:pass
+
+    def test_history_events_and_explicit_cooldown_http_contract(self):
+        channel=self.channel('GENERATOR');_,report=self.check(channel)
+        path='/v1/operations/channels/'+channel['id']
+        code,history=self.owner.request(path+'/reports');self.assertEqual(code,200);self.assertEqual(history['items'][0]['id'],report['id'])
+        code,events=self.owner.request('/v1/operations/channel-events?channel_id='+channel['id']);self.assertEqual(code,200);self.assertEqual(events['items'][0]['current_report_id'],report['id'])
+        self.assertEqual(events['items'][0]['kind'],'INITIAL_OBSERVATION')
+        self.server.runtime.generator_settings=self.generator|{'manifest':self.generator['manifest']|{'artifact_sha256':'0'*64}}
+        channel=self.channel('GENERATOR');_,failed=self.check(channel)
+        self.assertEqual(failed['result'],'MISCONFIGURED')
+        code,error=self.owner.request(path+'/checks',{'expected_version':channel['channel_version']})
+        self.assertEqual(code,429,error);self.assertGreater(error['error']['retry_after_seconds'],0)
+        code,value=self.owner.request('/v1/operations/channel-events?cursor=invalid');self.assertEqual(code,400,value)
+        self.assertEqual(self.owner.request('/v1/operations/channels')[0],200)

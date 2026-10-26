@@ -19,10 +19,11 @@ class InspectionService:
 
     def descriptors(self):
         runtime=self.runtime
-        values=[descriptor(k,self.application,runtime.generator_settings,runtime.media_settings,runtime.social) for k in ('CONTROL_STORAGE','GENERATOR','MEDIA')]
+        with self.store.transaction()as db:epoch=self.store._execution_epoch(db)
+        values=[descriptor(k,self.application,runtime.generator_settings,runtime.media_settings,runtime.social,execution_epoch=epoch) for k in ('CONTROL_STORAGE','GENERATOR','MEDIA')]
         for account in self.store.studio_accounts()['items']:
             private=self.store.studio_private_account(account['id'])
-            values.append(descriptor('ACCOUNT',self.application,runtime.generator_settings,runtime.media_settings,runtime.social,private))
+            values.append(descriptor('ACCOUNT',self.application,runtime.generator_settings,runtime.media_settings,runtime.social,private,execution_epoch=epoch))
         return values
 
     def find(self, identity):
@@ -33,6 +34,8 @@ class InspectionService:
     def allowed(self, value):
         if value['kind']!='ACCOUNT':return False
         policy=self.store.inspection_settings;scope=value['scope'];social=self.runtime.social
+        account=self.store.studio_private_account(scope['account_id'])
+        if not account['credential_ref'] or account['state']=='DISCONNECTED':return False
         capability=next((p for p in social.capabilities() if p['platform']==scope['platform']),None)
         return bool(capability and capability['configured'] and scope['account_id'] in policy.online_accounts and
                     (scope['evidence_mode']=='contract' or policy.allow_live) and scope['evidence_mode']==social.mode)
@@ -62,6 +65,29 @@ class InspectionService:
         try:value=self.find(row[0])
         except Problem:value=None
         return self.store.inspection_report(identity,value)
+
+    def tick(self):
+        policy=self.store.inspection_settings
+        if not policy.enabled:return 0
+        with self.store.transaction()as db:
+            if db.execute("SELECT 1 FROM studio_jobs WHERE state IN ('READY','RUNNING') AND kind!='inspection' LIMIT 1").fetchone():return 0
+        self.refresh();admitted=0
+        for value in sorted(self.descriptors(),key=lambda d:d['id']):
+            if admitted>=4:break
+            with self.store.transaction()as db:
+                channel=db.execute('SELECT * FROM inspection_channels WHERE id=?',(value['id'],)).fetchone()
+                active=db.execute("SELECT 1 FROM inspection_checks WHERE channel_id=? AND state IN ('QUEUED','RUNNING')",(value['id'],)).fetchone()
+                if active or channel and (channel['next_due']>self.store.clock.now() or channel['not_before']>self.store.clock.now()):continue
+            try:
+                from .inspection_models import ChannelCheckRequest
+                online=self.allowed(value)
+                body=ChannelCheckRequest(expected_version=self.channel(value['id'])['channel_version'],online=online,confirmed_online=online)
+                from .domain import uid
+                self.start(value['id'],body,uid());admitted+=1
+            except Problem as error:
+                if error.code=='QUEUE_FULL':break
+                if error.code not in {'VERSION_CONFLICT','CHECK_BUSY','CHECK_COOLDOWN','CHANNEL_LIMIT','ACCOUNT_DISCONNECTED','CAPABILITY_UNAVAILABLE'}:raise
+        return admitted
 
     def account_invoked(self, job):
         with self.store.transaction(True) as db:

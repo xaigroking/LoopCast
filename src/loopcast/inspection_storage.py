@@ -57,8 +57,8 @@ class InspectionMethods:
         account_version=descriptor['scope']['account_version']
         if row is None:
             if db.execute('SELECT COUNT(*) FROM inspection_channels').fetchone()[0]>=256:raise Problem('CHANNEL_LIMIT','The inspection channel limit was reached.',429)
-            db.execute('INSERT INTO inspection_channels(id,kind,account_id,version,input_digest,account_version,scope,inventory_at) VALUES(?,?,?,1,?,?,?,?)',
-                       (descriptor['id'],descriptor['kind'],descriptor['account_id'],descriptor['fingerprint'],account_version,canonical(descriptor['scope']),self.clock.iso()))
+            db.execute('INSERT INTO inspection_channels(id,kind,account_id,version,input_digest,account_version,scope,inventory_at) VALUES(?,?,?,?,?,?,?,?)',
+                       (descriptor['id'],descriptor['kind'],descriptor['account_id'],account_version or 1,descriptor['fingerprint'],account_version,canonical(descriptor['scope']),self.clock.iso()))
         elif row['input_digest']!=descriptor['fingerprint'] or row['account_version']!=account_version:
             active=db.execute("SELECT * FROM inspection_checks WHERE channel_id=? AND state IN ('QUEUED','RUNNING')",(row['id'],)).fetchone()
             if active:
@@ -98,7 +98,7 @@ class InspectionMethods:
 
     def _inspection_channel(self, db, descriptor, online_allowed):
         row=db.execute('SELECT * FROM inspection_channels WHERE id=?',(descriptor['id'],)).fetchone()
-        version=1 if not row else row['version']+int(row['input_digest']!=descriptor['fingerprint'] or row['account_version']!=descriptor['scope']['account_version'])
+        version=(descriptor['scope']['account_version'] or 1) if not row else row['version']+int(row['input_digest']!=descriptor['fingerprint'] or row['account_version']!=descriptor['scope']['account_version'])
         active=db.execute("SELECT id FROM inspection_checks WHERE channel_id=? AND state IN ('QUEUED','RUNNING')",(descriptor['id'],)).fetchone()
         latest=self._inspection_report(db,row['latest_report'],descriptor) if row and row['latest_report'] else None
         cooldown=max(0,int(row['not_before']-self.clock.now()+.999)) if row else 0
@@ -173,6 +173,8 @@ class InspectionMethods:
         if not current and terminal!='INTERRUPTED':terminal='SUPERSEDED'
         elif self.clock.now()>check['deadline'] and terminal=='COMPLETED':
             terminal='TIMED_OUT';outcome.update(result='UNKNOWN',reason_code='CHECK_TIMEOUT',evidence_status='unverified')
+        if self.clock.now()<datetime.fromisoformat(check['started_at'] or check['created_at']).timestamp():
+            outcome.update(result='UNKNOWN',reason_code='CHECK_CLOCK_CHANGED',evidence_status='unverified')
         identity=uid();time=self.clock.iso();value=outcome|{'id':identity,'channel_id':check['channel_id'],'channel_version':check['channel_version'],'check_id':check['id'],
              'observed_at':time,'started_at':check['started_at'] or check['created_at'],'completed_at':time,'valid_until':stamp(self.clock.now()+self.inspection_settings.freshness_seconds),
              'scope':scope or json.loads(check['scope']),'freshness':'FRESH' if current else 'SUPERSEDED','superseded_by_version':None if current else channel['version']}
@@ -184,8 +186,71 @@ class InspectionMethods:
             self._inspection_observed(db,channel,value)
 
     def _inspection_observed(self, db, channel, report):
-        # Retention and transition events are added by the bounded observation policy.
-        pass
+        previous=None
+        if channel['latest_report']:
+            prior=db.execute('SELECT payload FROM inspection_reports WHERE id=?',(channel['latest_report'],)).fetchone()
+            if prior:previous=json.loads(prior[0])
+        bad={'MISCONFIGURED','FAILED','UNKNOWN'}
+        signature=lambda item:(item['result'],item['reason_code'],item['evidence_scope'])
+        same=previous and previous['channel_version']==report['channel_version']
+        if not previous:kind='ANOMALY' if report['result'] in bad else 'INITIAL_OBSERVATION'
+        elif not same:kind='ANOMALY' if report['result'] in bad else 'CONFIG_CHANGED'
+        elif signature(previous)==signature(report):kind=None
+        elif previous['result'] in bad and report['result']=='CALLABLE':kind='RECOVERY'
+        elif report['result'] in bad and previous['result'] not in bad:kind='ANOMALY'
+        else:kind='CHANGE'
+        if kind:
+            value={'channel_id':channel['id'],'channel_version':report['channel_version'],'kind':kind,
+                   'old_result':previous['result'] if previous else None,'new_result':report['result'],'reason_code':report['reason_code'],
+                   'previous_report_id':previous['id'] if previous else None,'current_report_id':report['id'],'created_at':report['completed_at']}
+            cur=db.execute('INSERT INTO inspection_events(channel_id,channel_version,kind,previous_report,current_report,created_at,payload) VALUES(?,?,?,?,?,?,?)',
+                           (channel['id'],report['channel_version'],kind,value['previous_report_id'],report['id'],report['completed_at'],'{}'))
+            value['id']=cur.lastrowid
+            db.execute('UPDATE inspection_events SET payload=? WHERE id=?',(canonical(value),cur.lastrowid))
+        failures=min(channel['failure_count']+1,16) if report['result'] in bad else 0
+        delay=min(self.inspection_settings.backoff_max_seconds,self.inspection_settings.backoff_initial_seconds*2**max(0,failures-1)) if failures else 0
+        now=self.clock.now();not_before=max(channel['not_before'],now+delay) if failures else 0
+        due=not_before if failures else now+self.inspection_settings.interval_seconds
+        db.execute('UPDATE inspection_channels SET failure_count=?,not_before=?,next_due=? WHERE id=?',(failures,not_before,due,channel['id']))
+        self._inspection_trim(db,channel['id'])
+
+    def _inspection_trim(self, db, channel):
+        db.execute('DELETE FROM inspection_events WHERE channel_id=? AND id NOT IN (SELECT id FROM inspection_events WHERE channel_id=? ORDER BY id DESC LIMIT ?)',
+                   (channel,channel,self.inspection_settings.events_per_channel))
+        latest=db.execute('SELECT latest_report FROM inspection_channels WHERE id=?',(channel,)).fetchone()[0]
+        rows=db.execute('SELECT id FROM inspection_reports WHERE channel_id=? ORDER BY rowid DESC',(channel,)).fetchall()
+        keep={r[0]for r in rows[:self.inspection_settings.reports_per_channel]};keep.add(latest)
+        for row in rows:
+            if row[0] in keep:continue
+            # Retire dependent old events in the same transaction before their reports.
+            db.execute('DELETE FROM inspection_events WHERE previous_report=? OR current_report=?',(row[0],row[0]))
+            db.execute('DELETE FROM inspection_reports WHERE id=?',(row[0],))
+        retired_jobs=[r[0]for r in db.execute("SELECT job_id FROM inspection_checks WHERE channel_id=? AND owns_job=1 AND state NOT IN ('QUEUED','RUNNING') AND id NOT IN (SELECT check_id FROM inspection_reports) AND id NOT IN (SELECT id FROM inspection_checks WHERE channel_id=? ORDER BY rowid DESC LIMIT ?)",
+                                              (channel,channel,self.inspection_settings.reports_per_channel))]
+        db.execute("DELETE FROM inspection_checks WHERE channel_id=? AND state NOT IN ('QUEUED','RUNNING') AND id NOT IN (SELECT check_id FROM inspection_reports) AND id NOT IN (SELECT id FROM inspection_checks WHERE channel_id=? ORDER BY rowid DESC LIMIT ?)",
+                   (channel,channel,self.inspection_settings.reports_per_channel))
+        for job in retired_jobs:
+            db.execute("DELETE FROM studio_jobs WHERE id=? AND state IN ('DONE','CANCELLED') AND id NOT IN (SELECT job_id FROM inspection_checks WHERE job_id IS NOT NULL)",(job,))
+
+    def inspection_reports(self, descriptor, cursor=None, limit=30):
+        after=self._inspection_after('reports:'+descriptor['id'],cursor)
+        with self.transaction() as db:
+            rows=db.execute('SELECT rowid,id FROM inspection_reports WHERE channel_id=? AND rowid<COALESCE(?,9223372036854775807) ORDER BY rowid DESC LIMIT ?',
+                            (descriptor['id'],after,limit+1)).fetchall()
+            oldest=db.execute('SELECT payload FROM inspection_reports WHERE channel_id=? ORDER BY rowid LIMIT 1',(descriptor['id'],)).fetchone()
+            return {'items':[self._inspection_report(db,r['id'],descriptor)for r in rows[:limit]],
+                    'next_cursor':self._inspection_cursor('reports:'+descriptor['id'],rows[limit-1]['rowid']) if len(rows)>limit else None,
+                    'retained_from':json.loads(oldest[0])['completed_at'] if oldest else None}
+
+    def inspection_events(self, channel=None, cursor=None, limit=30):
+        scope='events:'+(channel or 'all');after=self._inspection_after(scope,cursor)
+        with self.transaction() as db:
+            rows=db.execute('SELECT * FROM inspection_events WHERE (? IS NULL OR channel_id=?) AND id<COALESCE(?,9223372036854775807) ORDER BY id DESC LIMIT ?',
+                            (channel,channel,after,limit+1)).fetchall()
+            oldest=db.execute('SELECT created_at FROM inspection_events WHERE (? IS NULL OR channel_id=?) ORDER BY id LIMIT 1',(channel,channel)).fetchone()
+            return {'items':[json.loads(row['payload'])for row in rows[:limit]],
+                    'next_cursor':self._inspection_cursor(scope,rows[limit-1]['id']) if len(rows)>limit else None,'retained_from':oldest[0] if oldest else None}
+
 
     def inspection_finish(self, job, outcome, terminal='COMPLETED'):
         with self.transaction(True) as db:
@@ -222,5 +287,6 @@ class InspectionMethods:
             self._inspection_finish(db,check,outcome,terminal='INTERRUPTED')
         for check in db.execute("SELECT * FROM inspection_checks WHERE state='QUEUED' AND (deadline<=? OR execution_epoch!=?)",(self.clock.now(),self._execution_epoch(db))).fetchall():
             self._inspection_release_account(db,check)
-            outcome={'result':'UNKNOWN','reason_code':'CHECK_TIMEOUT','evidence_scope':'ACCOUNT_IDENTITY' if check['online'] else 'LOCAL_RUNTIME','checks':[],'actual_operations':{}}
-            self._inspection_finish(db,check,outcome,terminal='TIMED_OUT')
+            restored=check['execution_epoch']!=self._execution_epoch(db)
+            outcome={'result':'UNKNOWN','reason_code':'CHECK_INTERRUPTED' if restored else 'CHECK_TIMEOUT','evidence_scope':'ACCOUNT_IDENTITY' if check['online'] else 'LOCAL_RUNTIME','checks':[],'actual_operations':{}}
+            self._inspection_finish(db,check,outcome,terminal='INTERRUPTED' if restored else 'TIMED_OUT')

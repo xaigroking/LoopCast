@@ -226,6 +226,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/operations/channel-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Events */
+        get: operations["events_v1_operations_channel_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/operations/channel-reports/{report_id}": {
         parameters: {
             query?: never;
@@ -288,6 +305,23 @@ export interface paths {
         put?: never;
         /** Check */
         post: operations["check_v1_operations_channels__channel_id__checks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/operations/channels/{channel_id}/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reports */
+        get: operations["reports_v1_operations_channels__channel_id__reports_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1367,6 +1401,44 @@ export interface components {
             /** Supported */
             supported: boolean;
         };
+        /** ChannelEvent */
+        ChannelEvent: {
+            /** Channel Id */
+            channel_id: string;
+            /** Channel Version */
+            channel_version: number;
+            /** Created At */
+            created_at: string;
+            /** Current Report Id */
+            current_report_id: string;
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "INITIAL_OBSERVATION" | "ANOMALY" | "CHANGE" | "RECOVERY" | "CONFIG_CHANGED";
+            /**
+             * New Result
+             * @enum {string}
+             */
+            new_result: "NOT_CONFIGURED" | "MISCONFIGURED" | "UNVERIFIED" | "UNSUPPORTED" | "CALLABLE" | "FAILED" | "UNKNOWN";
+            /** Old Result */
+            old_result: ("NOT_CONFIGURED" | "MISCONFIGURED" | "UNVERIFIED" | "UNSUPPORTED" | "CALLABLE" | "FAILED" | "UNKNOWN") | null;
+            /** Previous Report Id */
+            previous_report_id: string | null;
+            /** Reason Code */
+            reason_code: string;
+        };
+        /** ChannelEventList */
+        ChannelEventList: {
+            /** Items */
+            items: components["schemas"]["ChannelEvent"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Retained From */
+            retained_from: string | null;
+        };
         /** ChannelItem */
         ChannelItem: {
             /** Check Type */
@@ -1446,6 +1518,15 @@ export interface components {
             superseded_by_version: number | null;
             /** Valid Until */
             valid_until: string;
+        };
+        /** ChannelReportList */
+        ChannelReportList: {
+            /** Items */
+            items: components["schemas"]["ChannelReport"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Retained From */
+            retained_from: string | null;
         };
         /** ChannelScope */
         ChannelScope: {
@@ -2056,6 +2137,23 @@ export interface components {
              * @default 0
              */
             wheel_verify_process: number;
+        };
+        /** InspectionError */
+        InspectionError: {
+            /** Code */
+            code: string;
+            /** Current Version */
+            current_version: number | null;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /** Retry After Seconds */
+            retry_after_seconds: number | null;
+        };
+        /** InspectionErrorEnvelope */
+        InspectionErrorEnvelope: {
+            error: components["schemas"]["InspectionError"];
         };
         /** InspectionSettings */
         InspectionSettings: {
@@ -4704,6 +4802,102 @@ export interface operations {
             };
         };
     };
+    events_v1_operations_channel_events_get: {
+        parameters: {
+            query?: {
+                channel_id?: string | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelEventList"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     report_v1_operations_channel_reports__report_id__get: {
         parameters: {
             query?: never;
@@ -5011,6 +5205,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChannelCheckResult"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InspectionErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InspectionErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    reports_v1_operations_channels__channel_id__reports_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                channel_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelReportList"];
                 };
             };
             /** @description Stable LoopCast error envelope */

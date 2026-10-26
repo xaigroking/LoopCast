@@ -18,6 +18,8 @@ def inspect(value):
             elif argv[-1:] == ['--help']:counts['cli_help_process']+=1
             elif '-c' in argv and generation.VERIFY in argv:counts['wheel_verify_process']+=1
             else:raise RunnerError('READ_ONLY_OPERATION_REQUIRED')
+            # Keep nested diagnostic processes inside the bounded outer group.
+            kwargs['new_session']=False
             try:return original(argv,*args,**kwargs)
             except RunnerError as error:
                 failure.append(error.code);raise
