@@ -143,6 +143,15 @@ class InspectionTests(ScheduleFixture):
         for private in ['credential-canary',str(self.root),'credential_ref','fingerprint']:self.assertNotIn(private,raw)
         ChannelReport.model_validate(report)
 
+    def test_restore_epoch_supersedes_old_reports_and_interrupts_queued_checks(self):
+        report=self.finish(self.begin()['check'])
+        queued=self.begin('MEDIA')['check']
+        self.store.prepare_restored_state({'backup_id':uid(),'created_at':self.clock.iso(),'schema_version':9},'a'*64)
+        self.assertEqual(self.service.report(report['id'])['freshness'],'SUPERSEDED')
+        self.assertEqual(self.store.inspection_check(queued['id'])['state'],'INTERRUPTED')
+        self.assertTrue(self.store.operations_status()['restore_guard'])
+        self.assertFalse(self.service.allowed(self.channel('ACCOUNT')))
+
     def test_v8_migration_failure_rolls_back_without_touching_existing_facts(self):
         old=self.root/'old';old.mkdir();path=old/'state.sqlite3'
         script=''.join(getattr(migrations,'VERSION_'+n)for n in ['ONE','TWO','THREE','FOUR','FIVE','SIX','SEVEN','EIGHT'])

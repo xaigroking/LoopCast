@@ -20,11 +20,11 @@ def file_identity(value):
     except (OSError,ValueError):return ['unavailable',value]
 
 
-def descriptor(kind, application, generator, media, social, account=None):
+def descriptor(kind, application, generator, media, social, account=None, execution_epoch=None):
     settings={'CONTROL_STORAGE':None,'GENERATOR':generator,'MEDIA':media,'ACCOUNT':social.settings}[kind]
     configured=settings if isinstance(settings,dict) else {}
     refs={k:file_identity(v) for k,v in configured.items() if k in {'wheel','python','config_ref','ffmpeg','ffprobe','browser_path','biliup'}}
-    private={'kind':kind,'settings':settings,'files':refs,'application':application}
+    private={'kind':kind,'settings':settings,'files':refs,'application':application,'execution_epoch':execution_epoch}
     if kind=='ACCOUNT':
         private['account']={k:account[k] for k in ('id','platform','stable_subject','evidence_mode','credential_ref','label','tags')}
         private['credential']=file_identity(str(social.credentials/(str(account['credential_ref'])+'.json')))

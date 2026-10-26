@@ -19,10 +19,11 @@ class InspectionService:
 
     def descriptors(self):
         runtime=self.runtime
-        values=[descriptor(k,self.application,runtime.generator_settings,runtime.media_settings,runtime.social) for k in ('CONTROL_STORAGE','GENERATOR','MEDIA')]
+        with self.store.transaction()as db:epoch=self.store._execution_epoch(db)
+        values=[descriptor(k,self.application,runtime.generator_settings,runtime.media_settings,runtime.social,execution_epoch=epoch) for k in ('CONTROL_STORAGE','GENERATOR','MEDIA')]
         for account in self.store.studio_accounts()['items']:
             private=self.store.studio_private_account(account['id'])
-            values.append(descriptor('ACCOUNT',self.application,runtime.generator_settings,runtime.media_settings,runtime.social,private))
+            values.append(descriptor('ACCOUNT',self.application,runtime.generator_settings,runtime.media_settings,runtime.social,private,execution_epoch=epoch))
         return values
 
     def find(self, identity):
@@ -33,6 +34,8 @@ class InspectionService:
     def allowed(self, value):
         if value['kind']!='ACCOUNT':return False
         policy=self.store.inspection_settings;scope=value['scope'];social=self.runtime.social
+        account=self.store.studio_private_account(scope['account_id'])
+        if not account['credential_ref'] or account['state']=='DISCONNECTED':return False
         capability=next((p for p in social.capabilities() if p['platform']==scope['platform']),None)
         return bool(capability and capability['configured'] and scope['account_id'] in policy.online_accounts and
                     (scope['evidence_mode']=='contract' or policy.allow_live) and scope['evidence_mode']==social.mode)

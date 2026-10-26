@@ -222,5 +222,6 @@ class InspectionMethods:
             self._inspection_finish(db,check,outcome,terminal='INTERRUPTED')
         for check in db.execute("SELECT * FROM inspection_checks WHERE state='QUEUED' AND (deadline<=? OR execution_epoch!=?)",(self.clock.now(),self._execution_epoch(db))).fetchall():
             self._inspection_release_account(db,check)
-            outcome={'result':'UNKNOWN','reason_code':'CHECK_TIMEOUT','evidence_scope':'ACCOUNT_IDENTITY' if check['online'] else 'LOCAL_RUNTIME','checks':[],'actual_operations':{}}
-            self._inspection_finish(db,check,outcome,terminal='TIMED_OUT')
+            restored=check['execution_epoch']!=self._execution_epoch(db)
+            outcome={'result':'UNKNOWN','reason_code':'CHECK_INTERRUPTED' if restored else 'CHECK_TIMEOUT','evidence_scope':'ACCOUNT_IDENTITY' if check['online'] else 'LOCAL_RUNTIME','checks':[],'actual_operations':{}}
+            self._inspection_finish(db,check,outcome,terminal='INTERRUPTED' if restored else 'TIMED_OUT')
