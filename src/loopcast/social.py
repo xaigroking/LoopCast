@@ -168,10 +168,11 @@ class SocialAdapter:
         path = self.sessions / identity
         if path.parent == self.sessions and not path.is_symlink(): shutil.rmtree(path, ignore_errors=True)
 
-    def invoke(self, operation, platform, work, payload, cancelled):
+    def invoke(self, operation, platform, work, payload, cancelled, on_started=None):
         self.require_platform(platform)
         self.verify()
         if self.backend == 'contract':
+            if on_started:on_started()
             return self._contract(operation, platform, work, payload, cancelled)
         settings = {'source_root': str(self.source_root), 'browser_path': self.settings['browser_path'],
                     'identity_probe': self.probes.get(platform), 'biliup': self.settings.get('biliup'), 'proxy_url': self.network.get('HTTPS_PROXY')}
@@ -181,6 +182,7 @@ class SocialAdapter:
             path.chmod(0o600); json.dump(request, stream)
         env = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'HOME': str(work), 'TMPDIR': str(work), **self.network}
         bridge = Path(__file__).with_name('social_bridge.py')
+        if on_started:on_started()
         try:
             raw = run([self.python, '-I', str(bridge), str(path)], work, env, self.timeout if operation in {'authorize', 'upload'} else 60, cancelled)
             result = json.loads(raw)

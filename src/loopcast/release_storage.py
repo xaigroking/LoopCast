@@ -35,7 +35,7 @@ class ReleaseMethods:
             if not capability['configured'] or not capability['video']: reasons.append('CAPABILITY_UNAVAILABLE')
             if account['state'] != 'AVAILABLE': reasons.append('ACCOUNT_UNAVAILABLE')
             if account['evidence_mode'] != evidence_mode: reasons.append('EVIDENCE_MISMATCH')
-            if not account['checked_at'] or (datetime.now(timezone.utc) - datetime.fromisoformat(account['checked_at'])).total_seconds() > 300:
+            if not account['checked_at'] or self.clock.now() - datetime.fromisoformat(account['checked_at']).timestamp() > 300:
                 reasons.append('ACCOUNT_STALE')
             if len(value['title']) > capability['title_limit']: reasons.append('TITLE_TOO_LONG')
             if capability['requires_category'] and not target['fields'].get('category'): reasons.append('CATEGORY_REQUIRED')
@@ -105,7 +105,7 @@ class ReleaseMethods:
             if not check['allowed']:
                 raise Problem('PREFLIGHT_BLOCKED', 'Resolve every target before confirming.', 409)
             identity = uid()
-            db.execute('INSERT INTO release_batches VALUES(?,?,?,?,?)', (identity, value['asset_id'], canonical(value), digest(value), now()))
+            db.execute('INSERT INTO release_batches VALUES(?,?,?,?,?)', (identity, value['asset_id'], canonical(value), digest(value), self.clock.iso()))
             asset = self._asset(db, value['asset_id'])
             family = self._family_root(db, asset['family_id'])
             for target in value['targets']:
@@ -119,6 +119,7 @@ class ReleaseMethods:
             return self._release(db, identity, [p for p, c in capabilities.items() if c['query']])
 
     def studio_dispatch(self, batch_id, target_id, expected_version, key, capabilities, sending_enabled, trace=None, timeout=300):
+        self.publication_initialize_budget(target_id)
         scope, request = 'release.dispatch:' + target_id, {'expected_version': expected_version}
         with self.transaction(True) as db:
             self._require_upload(db)
@@ -130,25 +131,36 @@ class ReleaseMethods:
                 raise Problem('NOT_FOUND', 'Release target does not exist.', 404)
             if row['version'] != expected_version:
                 raise Problem('VERSION_CONFLICT', 'Refresh the release target.', 409)
-            account = self._account(db, row['account_id'])
-            if not sending_enabled:
-                raise Problem('SENDING_DISABLED', 'Sending is disabled by service configuration.', 409)
-            if row['state'] not in {'READY', 'NOT_SENT'} or self._release_blocker(db, account, row['family_id'], exclude=target_id):
-                raise Problem('PUBLICATION_NOT_RETRYABLE', 'Resolve earlier publication evidence.', 409)
-            if account['state'] != 'AVAILABLE' or not capabilities[row['platform']]['configured']:
-                raise Problem('ACCOUNT_UNAVAILABLE', 'Verify the account first.', 409)
-            if not account['checked_at'] or (datetime.now(timezone.utc) - datetime.fromisoformat(account['checked_at'])).total_seconds() > 300:
-                raise Problem('ACCOUNT_STALE', 'Verify the account again.', 409)
-            if db.execute('SELECT 1 FROM release_account_locks WHERE account_id=?', (account['id'],)).fetchone():
-                raise Problem('ACCOUNT_BUSY', 'The account has an unresolved attempt.', 409)
-            attempt_id, token = uid(), uid()
-            deadline = time.time() + timeout
-            db.execute('INSERT INTO release_account_locks VALUES(?,?)', (account['id'], token))
-            db.execute('INSERT INTO release_attempts VALUES(?,?,?,?,?,?,?)', (attempt_id, target_id, token, 'PREPARED', deadline + 15, now(), None))
-            db.execute("UPDATE release_targets SET state='PREPARED',version=version+1 WHERE id=?", (target_id,))
-            self._studio_enqueue(db, 'dispatch', target_id, deadline, trace, {'attempt_id': attempt_id}, token=token)
+            self._prepare_dispatch(db, row, capabilities, sending_enabled, trace, timeout)
             self._studio_remember(db, scope, key, request, {'id': target_id})
             return self._release(db, batch_id, [p for p, c in capabilities.items() if c['query']])
+
+    def _prepare_dispatch(self, db, row, capabilities, sending_enabled, trace=None, timeout=300, schedule=None, plan_limit=None):
+        self._require_upload(db)
+        target_id = row['id']
+        owner = db.execute('SELECT schedule_id FROM schedule_target_owners WHERE target_id=? AND active=1', (target_id,)).fetchone()
+        if owner and owner['schedule_id'] != schedule:
+            raise Problem('TARGET_ALREADY_SCHEDULED', 'Use the owning schedule to control this frozen target.', 409)
+        account = self._account(db, row['account_id'])
+        if not sending_enabled:
+            raise Problem('SENDING_DISABLED', 'Sending is disabled by service configuration.', 409)
+        if row['state'] not in {'READY', 'NOT_SENT'} or self._release_blocker(db, account, row['family_id'], exclude=target_id):
+            raise Problem('PUBLICATION_NOT_RETRYABLE', 'Resolve earlier publication evidence.', 409)
+        if account['state'] != 'AVAILABLE' or not capabilities[row['platform']]['configured']:
+            raise Problem('ACCOUNT_UNAVAILABLE', 'Verify the account first.', 409)
+        if not account['checked_at'] or self.clock.now() - datetime.fromisoformat(account['checked_at']).timestamp() > 300:
+            raise Problem('ACCOUNT_STALE', 'Verify the account again.', 409)
+        if db.execute('SELECT 1 FROM release_account_locks WHERE account_id=?', (account['id'],)).fetchone():
+            raise Problem('ACCOUNT_BUSY', 'The account has an unresolved attempt.', 409)
+        attempt_id, token = uid(), uid()
+        deadline = self.clock.now() + timeout
+        db.execute('INSERT INTO release_account_locks VALUES(?,?)', (account['id'], token))
+        db.execute('INSERT INTO release_attempts VALUES(?,?,?,?,?,?,?)', (attempt_id, target_id, token, 'PREPARED', deadline + 15, self.clock.iso(), None))
+        db.execute("UPDATE release_targets SET state='PREPARED',version=version+1 WHERE id=?", (target_id,))
+        self._quota_reserve(db, row, attempt_id, schedule, plan_limit)
+        self._studio_enqueue(db, 'dispatch', target_id, deadline, trace, {'attempt_id': attempt_id}, token=token)
+        job = db.execute('SELECT id FROM studio_jobs WHERE token=?', (token,)).fetchone()
+        return {'attempt_id': attempt_id, 'job_id': job['id'], 'token': token}
 
     def studio_release_job(self, job):
         with self.transaction() as db:
@@ -161,15 +173,44 @@ class ReleaseMethods:
             return dict(target) | {'batch': json.loads(batch['frozen']), 'fields': json.loads(target['frozen'])['fields'],
                                    'account': dict(db.execute('SELECT * FROM studio_accounts WHERE id=?', (target['account_id'],)).fetchone())}
 
+    def studio_validate_dispatch(self, job, capabilities, mode):
+        with self.transaction() as db:
+            self._require_upload(db)
+            self._schedule_require_job(db, job)
+            target = db.execute('SELECT * FROM release_targets WHERE id=?', (job['subject_id'],)).fetchone()
+            account = self._account(db, target['account_id'])
+            if target['evidence_mode'] != mode or account['evidence_mode'] != mode or target['stable_subject'] != account['stable_subject']:
+                raise Problem('EVIDENCE_MISMATCH', 'The frozen account identity or evidence mode changed.', 409)
+            capability = capabilities[target['platform']]
+            batch = json.loads(db.execute('SELECT frozen FROM release_batches WHERE id=?', (target['batch_id'],)).fetchone()[0])
+            frozen = json.loads(target['frozen'])
+            fields = frozen['fields']
+            asset = self._asset(db, batch['asset_id'])
+            if asset['kind'] != 'video' or asset['sha256'] != frozen['asset_sha256']:
+                raise Problem('FROZEN_INPUT_CHANGED', 'The frozen media identity changed.', 409)
+            if not capability['configured'] or not capability['video']:
+                raise Problem('CAPABILITY_UNAVAILABLE', 'The platform cannot upload this video.', 409)
+            if len(batch['title']) > capability['title_limit'] or fields['visibility'] not in capability['visibility_options']:
+                raise Problem('PLATFORM_FIELDS_CHANGED', 'The frozen platform fields are no longer supported.', 409)
+            if capability['requires_category'] and not fields.get('category') or not capability['requires_category'] and fields.get('category') is not None:
+                raise Problem('PLATFORM_FIELDS_CHANGED', 'The frozen category is not supported.', 409)
+            if fields.get('declaration') and not capability['ai_disclosure'] or batch.get('cover_id') and not capability['thumbnail']:
+                raise Problem('CAPABILITY_UNAVAILABLE', 'The frozen publication options are no longer supported.', 409)
+            if account['state'] != 'AVAILABLE' or not account['checked_at'] or self.clock.now()-datetime.fromisoformat(account['checked_at']).timestamp()>300:
+                raise Problem('ACCOUNT_STALE', 'Verify the account before sending.', 409)
+
     def studio_sending(self, job):
         with self.transaction(True) as db:
             if self._restore_guard(db) or not self._job_epoch_current(db, job):return False
-            row = db.execute("SELECT a.*,t.account_id,t.family_id FROM release_attempts a JOIN release_targets t ON t.id=a.target_id WHERE a.token=? AND a.state='PREPARED' AND a.lease_until>?", (job['token'], time.time())).fetchone()
+            row = db.execute("SELECT a.*,t.account_id,t.family_id FROM release_attempts a JOIN release_targets t ON t.id=a.target_id WHERE a.token=? AND a.state='PREPARED' AND a.lease_until>?", (job['token'], self.clock.now())).fetchone()
             if row is None:
                 return False
             account = self._account(db, row['account_id'])
             if account['state'] != 'AVAILABLE' or self._release_blocker(db, account, row['family_id'], exclude=row['target_id']):
                 return False
+            target = db.execute('SELECT * FROM release_targets WHERE id=?', (job['subject_id'],)).fetchone()
+            self._schedule_require_job(db, job)
+            self._quota_admit(db, target, job)
             db.execute("UPDATE release_attempts SET state='SENDING' WHERE token=?", (job['token'],))
             db.execute("UPDATE release_targets SET state='SENDING',version=version+1 WHERE id=?", (job['subject_id'],))
             return True
@@ -178,17 +219,19 @@ class ReleaseMethods:
         outcome, work_id, evidence_code = classify_result(result)
         with self.transaction(True) as db:
             if self._restore_guard(db) or not self._job_epoch_current(db, job):return False
-            row = db.execute("SELECT * FROM release_attempts WHERE token=? AND state IN ('PREPARED','SENDING') AND lease_until>?", (job['token'], time.time())).fetchone()
+            row = db.execute("SELECT * FROM release_attempts WHERE token=? AND state IN ('PREPARED','SENDING') AND lease_until>?", (job['token'], self.clock.now())).fetchone()
             if row is None:
                 return False
+            self._quota_result(db, job, outcome)
             # Work identifiers and definitive assertions must come from the execution
             # adapter. There is no HTTP endpoint for inventing receipts or clearing guards.
-            db.execute('UPDATE release_attempts SET state=?,ended_at=? WHERE token=?', (outcome, now(), job['token']))
+            db.execute('UPDATE release_attempts SET state=?,ended_at=? WHERE token=?', (outcome, self.clock.iso(), job['token']))
             db.execute('UPDATE release_targets SET state=?,version=version+1 WHERE id=?', (outcome, job['subject_id']))
-            db.execute('INSERT INTO release_receipts VALUES(?,?,?,?,?,?,?,?)', (uid(), job['subject_id'], row['id'], now(), source, outcome, work_id, evidence_code))
+            db.execute('INSERT INTO release_receipts VALUES(?,?,?,?,?,?,?,?)', (uid(), job['subject_id'], row['id'], self.clock.iso(), source, outcome, work_id, evidence_code))
             if outcome in {'PUBLISHED', 'NOT_SENT'}:
                 db.execute('DELETE FROM release_account_locks WHERE token=?', (job['token'],))
             db.execute("UPDATE studio_jobs SET state='DONE' WHERE id=? AND token=?", (job['id'], job['token']))
+            self._schedule_result(db, job['subject_id'], outcome, job['payload']['attempt_id'])
             return True
 
     def studio_verify(self, batch_id, target_id, expected_version, key, query_platforms, trace=None):
@@ -203,7 +246,7 @@ class ReleaseMethods:
             attempt = db.execute('SELECT * FROM release_attempts WHERE target_id=? ORDER BY rowid DESC LIMIT 1', (target_id,)).fetchone()
             if attempt['ended_at'] is None:
                 raise Problem('EXECUTOR_UNRESOLVED', 'Previous publisher exit is not proven.', 409)
-            self._studio_enqueue(db, 'verify', target_id, time.time() + 60, trace, {'attempt_id': attempt['id']})
+            self._studio_enqueue(db, 'verify', target_id, self.clock.now() + 60, trace, {'attempt_id': attempt['id']})
             db.execute('UPDATE release_targets SET version=version+1 WHERE id=?', (target_id,))
             self._studio_remember(db, scope, key, request, {'id': target_id})
             return self._release(db, batch_id, query_platforms)
@@ -219,13 +262,14 @@ class ReleaseMethods:
             if target['state'] not in {'SUBMITTED', 'UNKNOWN'} or attempt is None or attempt['ended_at'] is None: return False
             # A read-only lookup may establish publication; absence proves nothing.
             if outcome != 'PUBLISHED': outcome, work_id, evidence_code = 'UNKNOWN', None, 'NO_DEFINITIVE_RECEIPT'
-            db.execute('INSERT INTO release_receipts VALUES(?,?,?,?,?,?,?,?)', (uid(), target['id'], attempt['id'], now(), source, outcome, work_id, evidence_code))
+            db.execute('INSERT INTO release_receipts VALUES(?,?,?,?,?,?,?,?)', (uid(), target['id'], attempt['id'], self.clock.iso(), source, outcome, work_id, evidence_code))
             if outcome == 'PUBLISHED':
                 db.execute("UPDATE release_targets SET state='PUBLISHED',version=version+1 WHERE id=?", (target['id'],))
                 db.execute('DELETE FROM release_account_locks WHERE token=?', (attempt['token'],))
             else:
                 db.execute('UPDATE release_targets SET version=version+1 WHERE id=?', (target['id'],))
             db.execute("UPDATE studio_jobs SET state='DONE' WHERE id=? AND token=?", (job['id'], job['token']))
+            self._schedule_result(db, target['id'], outcome, job['payload']['attempt_id'])
             return True
 
     def studio_cancel_release(self, batch_id, target_id, expected_version, key, query_platforms):
@@ -237,7 +281,7 @@ class ReleaseMethods:
             if target['version'] != expected_version: raise Problem('VERSION_CONFLICT', 'Refresh the release target.', 409)
             if target['state'] not in {'READY', 'PREPARED', 'NOT_SENT'}: raise Problem('ACTION_UNAVAILABLE', 'An active or unresolved send cannot be cancelled as unsent.', 409)
             for attempt in db.execute("SELECT token FROM release_attempts WHERE target_id=? AND state='PREPARED'", (target_id,)).fetchall():
-                db.execute("UPDATE release_attempts SET state='CANCELLED',ended_at=? WHERE token=?", (now(), attempt['token']))
+                db.execute("UPDATE release_attempts SET state='CANCELLED',ended_at=? WHERE token=?", (self.clock.iso(), attempt['token']))
                 db.execute('DELETE FROM release_account_locks WHERE token=?', (attempt['token'],))
             db.execute("UPDATE release_targets SET state='CANCELLED',version=version+1 WHERE id=?", (target_id,))
             db.execute("UPDATE studio_jobs SET state='CANCELLED' WHERE subject_id=? AND kind='dispatch' AND state='READY'", (target_id,))

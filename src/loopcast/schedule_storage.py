@@ -34,7 +34,9 @@ class ScheduleMethods:
                 target = db.execute('SELECT * FROM release_targets WHERE id=? AND batch_id=?', (target_id, batch['id'])).fetchone()
                 if target is None:raise Problem('INVALID_INPUT', 'The target is not part of this frozen release.', 400)
                 owner = db.execute('SELECT * FROM schedule_target_owners WHERE target_id=? AND active=1', (target_id,)).fetchone()
-                if owner and owner['schedule_id'] != identity:raise Problem('TARGET_ALREADY_SCHEDULED', 'This target already belongs to another schedule.', 409)
+                old_occurrence = db.execute('SELECT t.state FROM schedule_occurrence_targets t JOIN schedule_occurrences o ON o.id=t.occurrence_id WHERE o.schedule_id=? AND t.target_id=? ORDER BY o.rowid DESC LIMIT 1', (identity, target_id)).fetchone() if identity else None
+                settled = old_occurrence and old_occurrence['state'] in {'SKIPPED_MISSED','SKIPPED_TIME_GAP','CANCELLED','PUBLISHED'}
+                if owner and owner['schedule_id'] != identity and not settled:raise Problem('TARGET_ALREADY_SCHEDULED', 'This target already belongs to another schedule.', 409)
                 account = self._account(db, target['account_id'])
                 cap = capabilities[account['platform']]
                 fields = json.loads(target['frozen'])
@@ -107,7 +109,7 @@ class ScheduleMethods:
             raise Problem('SCHEDULE_LIMIT', 'The finite schedule exceeds trusted limits.', 429)
         if spec['missed']['policy'] == 'BOUNDED_CATCHUP' and (spec['missed']['max_age_seconds'] > settings.max_catchup_age_seconds or spec['missed']['max_slots'] > settings.max_catchup_slots):
             raise Problem('SCHEDULE_LIMIT', 'The requested catch-up exceeds trusted limits.', 429)
-        if db.execute("SELECT COUNT(*) FROM schedules WHERE control_state!='CANCELLED'").fetchone()[0] >= settings.max_active_plans:
+        if db.execute("SELECT COUNT(*) FROM schedules s WHERE control_state!='CANCELLED' AND EXISTS(SELECT 1 FROM schedule_target_owners o WHERE o.schedule_id=s.id AND o.active=1)").fetchone()[0] >= settings.max_active_plans:
             raise Problem('SCHEDULE_LIMIT', 'The plan limit has been reached.', 429)
         owned = db.execute('SELECT COUNT(*) FROM schedule_target_owners WHERE active=1').fetchone()[0]
         if owned + count > settings.max_pending_targets:raise Problem('SCHEDULE_LIMIT', 'The pending target limit has been reached.', 429)
@@ -199,6 +201,9 @@ class ScheduleMethods:
                 raise Problem('SCHEDULE_LIMIT', 'The requested quota exceeds trusted limits.', 429)
             if value['missed']['policy'] == 'BOUNDED_CATCHUP' and (value['missed']['max_age_seconds'] > self.schedule_settings.max_catchup_age_seconds or value['missed']['max_slots'] > self.schedule_settings.max_catchup_slots):
                 raise Problem('SCHEDULE_LIMIT', 'The catch-up exceeds trusted limits.', 429)
+            pending_count = db.execute('SELECT COUNT(*) FROM schedule_target_owners WHERE schedule_id=? AND active=1', (identity,)).fetchone()[0]
+            if pending_count > value['quota']['pending_targets']:
+                raise Problem('SCHEDULE_LIMIT', 'The pending limit cannot be below existing target authorizations.', 429)
             number = row['spec_version'] + 1
             db.execute('INSERT INTO schedule_versions VALUES(?,?,?,?,?,?,?,?)', (identity, number, canonical(data['spec']), raw, data['tzif_sha256'], canonical(data['frozen']), effective, self.clock.iso()))
             db.execute('UPDATE schedules SET spec_version=?,version=version+1,confirmed_digest=NULL,confirmed_at=NULL WHERE id=?', (number, identity))
@@ -222,7 +227,12 @@ class ScheduleMethods:
                 version = self._schedule_version(db, identity)
                 data, _ = self._schedule_confirm(db, json.loads(version['spec']), checksum, capabilities, mode, identity, expected_version)
                 if data['blockers']:raise Problem('PREFLIGHT_BLOCKED', 'Resolve the frozen target checks before enabling.', 409)
-            if row['control_state'] != states[action]:
+            rearmed = 0
+            if action == 'resume':
+                rearmed = db.execute("UPDATE schedule_occurrence_targets SET state='READY',reason='USER_RECONFIRMED' WHERE state='WAITING_CONFIRMATION' AND occurrence_id IN (SELECT id FROM schedule_occurrences WHERE schedule_id=?)", (identity,)).rowcount
+            elif action in {'pause','cancel'}:
+                self._schedule_revoke(db, identity, 'USER_' + action.upper())
+            if row['control_state'] != states[action] or rearmed:
                 db.execute('UPDATE schedules SET control_state=?,version=version+1,pause_reason=?,confirmed_digest=COALESCE(?,confirmed_digest),confirmed_at=CASE WHEN ? IS NULL THEN confirmed_at ELSE ? END WHERE id=?',
                            (states[action], None if action == 'resume' else 'USER_' + action.upper(), checksum, checksum, self.clock.iso(), identity))
                 self._schedule_event(db, identity, action.upper(), 'USER_CONFIRMED' if action == 'resume' else 'USER_' + action.upper())

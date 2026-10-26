@@ -10,6 +10,8 @@ domain = {"domain", "contracts", "fixture", "generation", "ledger", "publisher",
 forbidden = {"fastapi", "starlette", "uvicorn", "next", "react"}
 # Store/ledger are the persistence adapter; pure run rules live in domain.py.
 allowed = {
+    "schedule_execution": {"domain", "schedule_time"},
+    "quota_storage": {"domain"},
     "schedule_models": {"studio_models"}, "schedule_config": {"studio_models"},
     "schedule_time": {"domain", "schedule_models"}, "schedule_storage": {"domain", "schedule_time"},
     "ownership": set(), "backup": {"migrations", "ownership"},
@@ -18,7 +20,7 @@ allowed = {
     "operations_models": {"studio_models"}, "operations_api": {"operations_models", "operations_snapshot"},
     "domain": set(), "contracts": set(), "fixture": set(), "runner": set(),
     "migrations": set(), "diagnostics": set(), "publisher_cli": set(),
-    "storage": {"domain", "ledger", "migrations", "studio_storage", "account_storage", "release_storage", "feedback_storage", "operations_storage", "schedule_storage", "schedule_config"}, "ledger": {"domain"},
+    "storage": {"domain", "ledger", "migrations", "studio_storage", "account_storage", "release_storage", "feedback_storage", "operations_storage", "schedule_storage", "schedule_config", "quota_storage", "schedule_execution"}, "ledger": {"domain"},
     "feedback_demo": {"domain","runtime","runner"},
     "feedback_models": {"studio_models"}, "feedback_rules": {"domain"},
     "feedback_storage": {"domain","feedback_models","feedback_rules","studio_models"},
@@ -37,7 +39,7 @@ allowed = {
     "publisher": {"runner", "diagnostics"},
     "runtime": {"storage", "worker", "generation", "publisher", "media", "creation", "social", "studio_service", "ownership"},
     "api": {"runtime", "storage", "diagnostics", "studio_api", "feedback_api", "operations_api"}, "openapi": {"api"},
-    "__main__": {"api", "diagnostics", "generator_diagnostics", "mpt_install", "feedback_demo", "backup", "restore", "operations_snapshot"}, "__init__": set(),
+    "__main__": {"api", "diagnostics", "generator_diagnostics", "mpt_install", "feedback_demo", "backup", "restore", "operations_snapshot", "schedule_config"}, "__init__": set(),
 }
 graph = {name: set() for name in modules}
 for name, path in modules.items():

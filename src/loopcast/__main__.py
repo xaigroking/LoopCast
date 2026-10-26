@@ -24,7 +24,10 @@ async def _serve(args, settings):
     port = sock.getsockname()[1]
     media_settings = json.loads(args.media_config.read_text()) if args.media_config else None
     social_settings = json.loads(args.social_config.read_text()) if args.social_config else None
-    app = create_app(args.data_dir, settings, public_origin=args.public_origin, trusted_proxies=tuple(args.trusted_proxy), media_settings=media_settings, social_settings=social_settings)
+    schedule_settings = json.loads(args.schedule_config.read_text()) if args.schedule_config else None
+    from .schedule_config import ScheduleSettings
+    schedule_settings = ScheduleSettings.model_validate(schedule_settings or {})
+    app = create_app(args.data_dir, settings, schedule_settings=schedule_settings, public_origin=args.public_origin, trusted_proxies=tuple(args.trusted_proxy), media_settings=media_settings, social_settings=social_settings)
     config = uvicorn.Config(app, host=args.host, port=port, workers=1, reload=False, access_log=False, proxy_headers=False, lifespan="on", timeout_graceful_shutdown=5)
     server = uvicorn.Server(config)
     task = asyncio.create_task(server.serve(sockets=[sock]))
@@ -52,6 +55,7 @@ def main():
     serve.add_argument('--data-dir', type=Path, default=Path.home() / '.local/share/loopcast')
     serve.add_argument('--generator-config', type=Path, help='Trusted local generator settings JSON')
     serve.add_argument('--media-config', type=Path, help='Pinned local media tools JSON')
+    serve.add_argument('--schedule-config', type=Path, help='Trusted finite local-publication policy JSON; automatic sending defaults off')
     serve.add_argument('--social-config', type=Path, help='Isolated social adapter settings JSON; live sending defaults off')
     serve.add_argument('--public-origin', default=os.environ.get('LOOPCAST_PUBLIC_ORIGIN'), help='Exact public origin served by the configured reverse proxy')
     serve.add_argument('--trusted-proxy', action='append', default=[item for item in os.environ.get('LOOPCAST_TRUSTED_PROXIES', '').split(',') if item], help='Trusted reverse-proxy address or CIDR; may be repeated')

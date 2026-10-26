@@ -2,8 +2,9 @@
 
 The installed storage layer supports one-time and finite daily-local plans for
 existing frozen release targets. Automatic scheduled publication is disabled by
-default. The current storage/time foundation does not start a scheduling worker
-or expose schedule HTTP actions.
+default. The existing publication owner advances due slots when a trusted schedule
+policy is explicitly enabled. Schedule HTTP and browser actions are not exposed
+by this execution foundation.
 
 Each daily date has a distinct, explicitly selected group of frozen targets.
 A daily plan never repeats one video indefinitely or creates new content. Slot
@@ -34,3 +35,37 @@ Local delayed sending is distinct from platform-native scheduling: a platform's
 `schedule=false` capability continues to mean native scheduling is unavailable.
 No plan grants permission to bypass credentials, permanent media protection,
 unresolved publication evidence or a recovery guard.
+
+## Trusted execution policy
+
+Pass a private JSON file with `serve --schedule-config FILE`. Its fixed format is
+`loopcast.scheduling.v1`. `enabled` and `allow_live` both default to false. Live
+execution also requires the existing social sending switch, matching account
+and evidence identity, valid credentials, frozen media, platform capabilities,
+permanent protection and a clear restore guard. No implicit login or generation
+occurs. Platform-native scheduling remains unavailable.
+
+Limits include active plans, finite slots, pending targets, plan/account attempts
+per UTC day and bounded catch-up age/count. Pending authorization includes future
+confirmed targets, including paused plans. Cancel an unused plan to release its
+reliably unsent authorizations. Midnight does not reset a permanent media guard.
+
+Each target reserves budget before entering the durable publication queue.
+Final admission rechecks the current UTC day and policy and consumes the attempt.
+A proven pre-admission cancellation releases a reservation; consumed, unknown or
+submitted attempts are never refunded into a new send permission. Legacy attempt
+time evidence contributes a conservative baseline. Incomplete legacy time
+history blocks admission rather than becoming zero usage.
+
+Default missed slots are skipped after a 60-second normal execution window.
+Explicit bounded catch-up has both age and count limits stored across scan pages
+and restarts. Account/capability/quota waits retain the original deadline. A
+backward clock change beyond five seconds blocks new admission until time catches
+up with its durable high-water mark. Network execution never runs in a SQLite
+transaction.
+
+Pause and cancel revoke unadmitted jobs. An operation already handed to the
+adapter remains in flight and may complete; its actual result is retained even
+when the plan is paused or cancelled. Unknown results keep the original target
+and account lock. A reliable NOT_SENT requires explicit confirmation to retry
+the original occurrence and remains subject to the shared attempt budget.
