@@ -3,8 +3,7 @@
 The installed storage layer supports one-time and finite daily-local plans for
 existing frozen release targets. Automatic scheduled publication is disabled by
 default. The existing publication owner advances due slots when a trusted schedule
-policy is explicitly enabled. Schedule HTTP and browser actions are not exposed
-by this execution foundation.
+policy is explicitly enabled. Manage finite plans in the publishing workspace.
 
 Each daily date has a distinct, explicitly selected group of frozen targets.
 A daily plan never repeats one video indefinitely or creates new content. Slot
@@ -69,3 +68,41 @@ adapter remains in flight and may complete; its actual result is retained even
 when the plan is paused or cancelled. Unknown results keep the original target
 and account lock. A reliable NOT_SENT requires explicit confirmation to retry
 the original occurrence and remains subject to the shared attempt budget.
+
+## Publishing workspace
+
+First freeze a video and its publication targets using the existing publishing
+preflight. Under **Publication plans**, choose eligible frozen targets. A
+one-time plan uses one group; a finite daily plan uses the chosen group order,
+one date per group. Review every nominal local date/time, IANA zone, UTC instant,
+missed-slot policy and budget before saving. Saving always creates a paused plan.
+Review that plan again and explicitly enable it when service policy permits.
+
+An ambiguous write response retains its original request identity. Reloading
+reads state; it never automatically repeats a write. Resolve the pending action
+before changing its payload. Version conflicts retain your draft. Pause before
+editing future times or limits; saving a revision keeps the plan paused until
+another review and confirmation. Already materialized occurrences are immutable.
+
+The history separates waiting, missed, skipped, in-flight, unresolved, partial
+and published states. Each occurrence links to the original frozen release,
+target, attempts and receipts, including releases older than the initial list.
+An ended slot is not proof of publication. Browser language does not change the
+plan's time zone or the content language.
+
+## HTTP management
+
+The strict OpenAPI schema describes:
+
+- `GET /v1/studio/schedules/capabilities` and `POST /v1/studio/schedules/preview`.
+- `GET/POST /v1/studio/schedules` and `GET/PUT /v1/studio/schedules/{id}`.
+- `POST /v1/studio/schedules/{id}/pause`, `/resume`, `/cancel`.
+- `GET /v1/studio/schedules/{id}/occurrences`.
+
+Writes require `Idempotency-Key`; modifications and control actions also require
+`expected_version`. Create and resume require literal `confirmed: true` and a
+current preview/confirmation digest. Preview pages do not create business slots.
+List cursors are scoped, signed and bounded to the current owner session; reload
+the list after an owner restart. Persisted write identities do not depend on
+preview or list tokens. There are no force, ledger-delete,
+credential-upload, arbitrary command or native-platform scheduling endpoints.

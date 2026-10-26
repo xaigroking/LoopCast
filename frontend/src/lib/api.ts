@@ -13,13 +13,15 @@ export class ApiError extends Error {
   code: string;
   snapshot?: RunSnapshot;
   requestId?: string;
+  resource?: components['schemas']['ScheduleRecord'];
 
-  constructor(status: number, code: string, snapshot?: RunSnapshot, requestId?: string) {
+  constructor(status: number, code: string, snapshot?: RunSnapshot, requestId?: string, resource?: components['schemas']['ScheduleRecord']) {
     super(code);
     this.status = status;
     this.code = code;
     this.snapshot = snapshot;
     this.requestId = requestId;
+    this.resource = resource;
   }
 }
 
@@ -40,9 +42,9 @@ export async function apiRequest<T>(path: keyof paths | string, options: Request
   // Keep the caller's pending identity for an explicit retry with the same key.
   if ((write && response.status >= 500) || (response.ok && data === null)) throw new TransportError('NETWORK_ERROR');
   if (!response.ok) {
-    const error = data && typeof data === 'object' && 'error' in data ? data.error : undefined;
+    const error = (data && typeof data === 'object' && 'error' in data ? data.error : undefined) as (ErrorEnvelope['error'] & { current_plan?: components['schemas']['ScheduleRecord'] | null }) | undefined;
     throw new ApiError(response.status, error?.code ?? 'INTERNAL_ERROR', error?.snapshot as RunSnapshot | undefined,
-      error?.request_id ?? response.headers.get('X-Request-ID') ?? undefined);
+      error?.request_id ?? response.headers.get('X-Request-ID') ?? undefined, error?.current_plan ?? undefined);
   }
   return data as T;
 }

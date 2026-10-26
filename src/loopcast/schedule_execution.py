@@ -43,7 +43,7 @@ class ScheduleExecutionMethods:
         elif any(s=='PREPARED' for s in values):state='PREPARED'
         elif any(s=='PUBLISHED' for s in values):state='PARTIAL'
         elif all(s.startswith('SKIPPED_') for s in values):state='SKIPPED'
-        elif any(s in WAITING for s in values):state='WAITING'
+        elif any(s in WAITING for s in values):state=next((key for key in ('BLOCKED_RESTORE','WAITING_CLOCK','WAITING_QUOTA','WAITING_ACCOUNT','WAITING_CAPABILITY') if key in values),'WAITING_CHECKS')
         else:state='WAITING_CONFIRMATION'
         db.execute('UPDATE schedule_occurrences SET state=?,version=version+1 WHERE id=? AND state!=?',(state,occurrence,state))
 

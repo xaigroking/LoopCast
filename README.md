@@ -384,3 +384,8 @@ versions, font hashes, OFL notices and glyph coverage. `scripts/check-web.sh`
 starts both production artifacts and routes browser traffic through a local
 streaming same-origin proxy. Browsers without secure randomness show a recoverable
 error without sending an unkeyed write.
+
+Finite local publication plans use explicitly confirmed frozen targets, paused
+creation, IANA time-zone previews and shared attempt budgets. Automatic execution
+defaults off; see [publication planning](SCHEDULING.md) for policy and recovery
+boundaries. They do not generate content or provide platform-native scheduling.

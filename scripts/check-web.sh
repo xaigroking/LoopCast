@@ -62,13 +62,32 @@ LOOPCAST_INSTALLED_BRIDGE="$installed_bridge" "$browser_python" -I "$root_dir/te
 LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" "$browser_python" -I "$root_dir/tests/browser/check_feedback.py"
 LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" "$browser_python" -I "$root_dir/tests/browser/check_operations.py"
 
+# Reuse the owner with an explicit isolated local-scheduling policy.
+kill "$backend_pid"
+wait "$backend_pid" 2>/dev/null || true
+backend_pid=
+python - "$generator_dir" <<'SCHEDULING'
+import json,pathlib,sys
+root=pathlib.Path(sys.argv[1]);path=root/'social.json';social=json.loads(path.read_text())
+social['contract_profiles']['douyin'].extend([{'stable_subject':p,'label':p+' contract account'} for p in ('plan-douyin','plan-second','plan-third')])
+path.write_text(json.dumps(social))
+(root/'scheduling.json').write_text(json.dumps({'format':'loopcast.scheduling.v1','enabled':True,'allow_live':False}))
+SCHEDULING
+"$work_dir/backend/bin/python" -I -m loopcast serve --host 127.0.0.1 --port 18888 --data-dir "$data_dir" --generator-config "$generator_dir/generator.json" --media-config "$generator_dir/media.json" --social-config "$generator_dir/social.json" --schedule-config "$generator_dir/scheduling.json" --public-origin "http://127.0.0.1:$public_port" --trusted-proxy 127.0.0.1/32 >"$work_dir/scheduling-backend.log" 2>&1 &
+backend_pid=$!
+for _ in $(seq 1 100); do
+  if curl -fsS "http://127.0.0.1:$public_port/healthz" >/dev/null 2>&1; then break; fi
+  sleep .1
+done
+LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" "$browser_python" -I "$root_dir/tests/browser/check_scheduling.py"
+
 # Exercise the same installed distributions after an actual stopped-owner restore.
 kill "$backend_pid"
 wait "$backend_pid" 2>/dev/null || true
 backend_pid=
 backup_digest=$("$work_dir/backend/bin/python" -I -m loopcast backup create --data-dir "$data_dir" --output "$work_dir/private-backup" | "$work_dir/backend/bin/python" -c 'import json,sys; print(json.load(sys.stdin)["manifest_sha256"])')
 "$work_dir/backend/bin/python" -I -m loopcast restore --backup "$work_dir/private-backup" --expected-manifest-sha256 "$backup_digest" --data-dir "$work_dir/restored" >"$work_dir/restore-report.json"
-"$work_dir/backend/bin/python" -I -m loopcast serve --host 127.0.0.1 --port 18888 --data-dir "$work_dir/restored" --generator-config "$generator_dir/generator.json" --media-config "$generator_dir/media.json" --social-config "$generator_dir/social.json" --public-origin "http://127.0.0.1:$public_port" --trusted-proxy 127.0.0.1/32 >"$work_dir/restored-backend.log" 2>&1 &
+"$work_dir/backend/bin/python" -I -m loopcast serve --host 127.0.0.1 --port 18888 --data-dir "$work_dir/restored" --schedule-config "$generator_dir/scheduling.json" --generator-config "$generator_dir/generator.json" --media-config "$generator_dir/media.json" --social-config "$generator_dir/social.json" --public-origin "http://127.0.0.1:$public_port" --trusted-proxy 127.0.0.1/32 >"$work_dir/restored-backend.log" 2>&1 &
 backend_pid=$!
 for _ in $(seq 1 100); do
   if curl -fsS "http://127.0.0.1:$public_port/healthz" >/dev/null 2>&1; then break; fi
@@ -76,3 +95,5 @@ for _ in $(seq 1 100); do
 done
 curl -fsS "http://127.0.0.1:$public_port/healthz" | "$work_dir/backend/bin/python" -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
 LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" LOOPCAST_EXPECT_RESTORE_GUARD=1 "$browser_python" -I "$root_dir/tests/browser/check_operations.py"
+
+LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" LOOPCAST_EXPECT_RESTORE_GUARD=1 "$browser_python" -I "$root_dir/tests/browser/check_scheduling.py"

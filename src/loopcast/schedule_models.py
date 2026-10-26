@@ -1,8 +1,9 @@
 """Strict finite local-publication schedule contracts."""
 from datetime import date
 from typing import Annotated, Literal
-from pydantic import Field, StrictInt, StrictStr, field_validator, model_validator
-from .studio_models import Model, Id
+from pydantic import ConfigDict, Field, StrictInt, StrictStr, field_validator, model_validator
+from .studio_models import Model, Id, Number, Platform, EvidenceMode
+from .schedule_config import ScheduleSettings
 
 Date = Annotated[StrictStr, Field(pattern=r'^\d{4}-\d{2}-\d{2}$')]
 LocalTime = Annotated[StrictStr, Field(pattern=r'^(?:[01]\d|2[0-3]):[0-5]\d$')]
@@ -100,7 +101,9 @@ class ScheduleCreateRequest(Model):
         return value
 
 
-class ScheduleUpdateRequest(ScheduleCreateRequest):
+class ScheduleUpdateRequest(Model):
+    spec: Spec
+    preview_digest: Hash
     expected_version: Version
     effective_from_local_date: Date | None
 
@@ -118,3 +121,145 @@ class ScheduleResume(ScheduleCommand):
     def strict_confirmation(cls, value):
         if value is not True:raise ValueError('Explicit confirmation is required')
         return value
+
+
+class ScheduleBlocker(Model):
+    target_id: Id
+    reasons: list[StrictStr]
+
+
+class ScheduleSlot(Model):
+    slot_key: StrictStr
+    position: StrictInt
+    nominal_local: StrictStr
+    timezone: StrictStr
+    tzif_sha256: Hash
+    selected_fold: Literal[0,1] | None
+    scheduled_at_utc: StrictStr | None
+    reason: StrictStr
+    group: ReleaseGroup
+
+
+class SchedulePreview(Model):
+    blockers: list[ScheduleBlocker]
+    time_rule_version: Literal['local-daily-v1']
+    fold_policy: Literal['EARLIER']
+    gap_policy: Literal['SKIP']
+    tzif_sha256: Hash
+    tzdb_version: StrictStr | None
+    preview_digest: Hash
+    confirmation_digest: Hash
+    expires_at: StrictStr
+    total: StrictInt
+    items: list[ScheduleSlot]
+    next_cursor: StrictStr | None
+
+
+class ScheduleInFlight(Model):
+    target_id: Id
+    attempt_id: Id
+    state: StrictStr
+
+
+class ScheduleFrozenTarget(Model):
+    target_id: Id
+    batch_id: Id
+    target_version: Version
+    account_id: Id
+    account_version: Version
+    platform: Platform
+    stable_subject: StrictStr
+    evidence_mode: EvidenceMode
+    asset_id: Id
+    asset_sha256: Hash
+    family_id: Id
+    input_digest: Hash
+
+
+class ScheduleRecord(Model):
+    id: Id
+    control_version: Version
+    spec_version: Version
+    control_state: Literal['ACTIVE','PAUSED','CANCELLED']
+    display_state: StrictStr
+    pause_reason: StrictStr | None
+    confirmed_digest: Hash | None
+    confirmed_at: StrictStr | None
+    created_at: StrictStr
+    spec: Spec
+    tzif_sha256: Hash
+    counts: dict[str,int]
+    reasons: list[StrictStr]
+    frozen_targets: list[ScheduleFrozenTarget]
+    next_slot: ScheduleSlot | None
+    limits: ScheduleSettings
+    slot_count: StrictInt
+    classified_count: StrictInt
+    in_flight: list[ScheduleInFlight]
+
+
+class ScheduleList(Model):
+    items: list[ScheduleRecord]
+    next_cursor: StrictStr | None
+
+
+class OccurrenceTarget(Model):
+    occurrence_id: Id
+    target_id: Id
+    batch_id: Id
+    state: StrictStr
+    reason: StrictStr
+    attempt_id: Id | None
+    job_id: Id | None
+
+
+class ScheduleOccurrence(Model):
+    id: Id
+    schedule_id: Id
+    slot_key: StrictStr
+    spec_version: Version
+    nominal_local: StrictStr
+    timezone: StrictStr
+    tzif_sha256: Hash
+    selected_fold: Literal[0,1] | None
+    scheduled_at_utc: StrictStr | None
+    eligible_until: Number | None
+    state: StrictStr
+    reason: StrictStr
+    version: Version
+    created_at: StrictStr
+    classified_at: StrictStr
+    targets: list[OccurrenceTarget]
+
+
+class ScheduleOccurrenceList(Model):
+    items: list[ScheduleOccurrence]
+    next_cursor: StrictStr | None
+
+
+class ScheduleCapability(Model):
+    management: Literal[True]
+    enabled: bool
+    allow_live: bool
+    effective_sending_enabled: bool
+    native_scheduling: Literal[False]
+    evidence_mode: Literal['contract','live']
+    time_rule_version: Literal['local-daily-v1']
+    fold_policy: Literal['EARLIER']
+    gap_policy: Literal['SKIP']
+    clock_state: Literal['STABLE','CLOCK_BACKWARD']
+    limits: ScheduleSettings
+
+
+
+class ScheduleConflictDetails(Model):
+    model_config = ConfigDict(json_schema_serialization_defaults_required=False)
+    code: StrictStr
+    message: StrictStr
+    request_id: StrictStr
+    run_id: StrictStr | None = None
+    current_plan: ScheduleRecord | None = None
+
+
+class ScheduleConflictEnvelope(Model):
+    error: ScheduleConflictDetails

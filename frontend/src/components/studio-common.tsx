@@ -10,14 +10,16 @@ export function StateBadge({ value }: { value: string }) {
   return <span className="state" data-state={value}>{t(`studio:state_${value}`, { defaultValue: value })}</span>;
 }
 
-export function ErrorNotice({ error }: { error: unknown }) {
+export function ErrorNotice({ error, retryPending = true }: { error: unknown; retryPending?: boolean }) {
   const { t } = useTranslation();
   const { client, perform } = useStudio();
   const code = error instanceof ApiError ? error.code : error instanceof Error ? error.message : 'INTERNAL_ERROR';
-  const key = code === 'VERSION_CONFLICT' ? 'conflict' : code === 'REQUEST_UNRESOLVED' ? 'pendingAction' : code.includes('CAPABILITY') || code.includes('COMPONENT') ? 'missingConfig' : code.includes('MEDIA') || code.includes('ARTIFACT') ? 'invalidMedia' : 'failed';
+  const scheduleKey = code === 'PREVIEW_EXPIRED' ? 'schedPreviewExpired' : ['SCHEDULE_LIMIT','ACCOUNT_QUOTA_EXHAUSTED','PLAN_QUOTA_EXHAUSTED'].includes(code) ? 'schedLimitError' : ['INVALID_TIMEZONE','INVALID_TIME_RULE','NONEXISTENT_LOCAL_TIME'].includes(code) ? 'schedTimeError' : code === 'TARGET_ALREADY_SCHEDULED' ? 'schedOwnedError' : ['OCCURRENCE_FROZEN','IMMUTABLE_SCHEDULE_IDENTITY'].includes(code) ? 'schedFrozenError' : null;
+  const unresolved = client.pending.size > 0 && !(error instanceof ApiError);
+  const key = unresolved ? 'pendingAction' : scheduleKey ?? (code === 'VERSION_CONFLICT' ? 'conflict' : code === 'REQUEST_UNRESOLVED' ? 'pendingAction' : code.includes('CAPABILITY') || code.includes('COMPONENT') ? 'missingConfig' : code.includes('MEDIA') || code.includes('ARTIFACT') ? 'invalidMedia' : 'failed');
   return <div className="studio-alert" role="alert"><span>{t(`studio:${key}`)}</span>
     {error instanceof ApiError && error.requestId && <small><bdi>{error.requestId}</bdi></small>}
-    {client.pending.size > 0 && <button type="button" onClick={() => void perform('pending', () => client.retry()).catch(() => undefined)}>{t('studio:retryPending')}</button>}
+    {retryPending && client.pending.size > 0 && <button type="button" onClick={() => void perform('pending', () => client.retry()).catch(() => undefined)}>{t('studio:retryPending')}</button>}
   </div>;
 }
 

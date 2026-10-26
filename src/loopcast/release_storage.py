@@ -61,13 +61,14 @@ class ReleaseMethods:
             raise Problem('NOT_FOUND', 'Release target does not exist.', 404)
         account = self._account(db, row['account_id'])
         blocked = self._release_blocker(db, account, row['family_id'], exclude=identity)
+        scheduled = db.execute('SELECT 1 FROM schedule_target_owners WHERE target_id=? AND active=1', (identity,)).fetchone() is not None
         value = {key: row[key] for key in ('id', 'account_id', 'platform', 'stable_subject', 'state', 'version', 'evidence_mode')}
         frozen = json.loads(row['frozen'])
         value.update({'fields': frozen['fields'], 'asset_sha256': frozen['asset_sha256']})
         value.update({
-            'can_dispatch': row['state'] in {'READY', 'NOT_SENT'} and not blocked and account['state'] == 'AVAILABLE' and not self._restore_guard(db),
+            'can_dispatch': row['state'] in {'READY', 'NOT_SENT'} and not scheduled and not blocked and account['state'] == 'AVAILABLE' and not self._restore_guard(db),
             'can_verify': row['state'] in {'UNKNOWN', 'SUBMITTED'} and row['platform'] in query_platforms,
-            'can_cancel': row['state'] in {'READY', 'PREPARED', 'NOT_SENT'},
+            'can_cancel': row['state'] in {'READY', 'PREPARED', 'NOT_SENT'} and not scheduled,
             'attempts': [dict(a) for a in db.execute('SELECT id,state,started_at,ended_at FROM release_attempts WHERE target_id=? ORDER BY rowid', (identity,))],
             'receipts': [dict(r) for r in db.execute('SELECT id,created_at,source,outcome,work_id,evidence_code FROM release_receipts WHERE target_id=? ORDER BY rowid', (identity,))],
         })
@@ -279,6 +280,8 @@ class ReleaseMethods:
             if target is None: raise Problem('NOT_FOUND', 'Release target does not exist.', 404)
             if self._studio_prior(db, scope, key, request): return self._release(db, batch_id, query_platforms)
             if target['version'] != expected_version: raise Problem('VERSION_CONFLICT', 'Refresh the release target.', 409)
+            if db.execute('SELECT 1 FROM schedule_target_owners WHERE target_id=? AND active=1', (target_id,)).fetchone():
+                raise Problem('TARGET_ALREADY_SCHEDULED', 'Cancel the owning plan before changing this target.', 409)
             if target['state'] not in {'READY', 'PREPARED', 'NOT_SENT'}: raise Problem('ACTION_UNAVAILABLE', 'An active or unresolved send cannot be cancelled as unsent.', 409)
             for attempt in db.execute("SELECT token FROM release_attempts WHERE target_id=? AND state='PREPARED'", (target_id,)).fetchall():
                 db.execute("UPDATE release_attempts SET state='CANCELLED',ended_at=? WHERE token=?", (self.clock.iso(), attempt['token']))

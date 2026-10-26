@@ -6,17 +6,23 @@ from importlib import resources
 from io import BytesIO
 from pathlib import Path
 import re
-from zoneinfo import TZPATH, ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import TZPATH, ZoneInfo, ZoneInfoNotFoundError, available_timezones
 from .domain import Problem
 from .schedule_models import SchedulePreviewRequest
 
 RULE_VERSION = 'local-daily-v1'
 
 
+@lru_cache(maxsize=1)
+def installed_zones():
+    return frozenset(available_timezones()) - {'localtime', 'posixrules'}
+
+
 @lru_cache(maxsize=128)
 def zone_bytes(key):
     if not isinstance(key, str) or len(key) > 128 or not re.fullmatch(r'[A-Za-z0-9_+-]+(?:/[A-Za-z0-9_+-]+)*', key):
         raise Problem('INVALID_TIMEZONE', 'Choose an installed IANA time zone.', 422)
+    if key not in installed_zones():raise Problem('INVALID_TIMEZONE', 'Choose an installed IANA time zone.', 422)
     raw = None
     for root in TZPATH:
         path = Path(root).joinpath(*key.split('/'))
@@ -51,9 +57,12 @@ def expand_slots(value, raw=None):
         candidates = {}
         for fold in (0, 1):
             aware = local.replace(tzinfo=zone, fold=fold)
-            utc = aware.astimezone(timezone.utc)
-            if utc.astimezone(zone).replace(tzinfo=None) == local:
-                candidates.setdefault(utc, fold)
+            try:
+                utc = aware.astimezone(timezone.utc)
+                if utc.astimezone(zone).replace(tzinfo=None) == local:
+                    candidates.setdefault(utc, fold)
+            except OverflowError:
+                raise Problem('INVALID_TIME_RULE', 'This local rule exceeds the supported UTC calendar.', 422) from None
         selected = min(candidates) if candidates else None
         if selected is None and spec['kind'] == 'ONCE':
             raise Problem('NONEXISTENT_LOCAL_TIME', 'This local time does not exist in the selected zone.', 422)

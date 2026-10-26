@@ -43,7 +43,7 @@ class ScheduleModelsTests(ScheduleFixture):
                 self.assertEqual(error.exception.code,'NONEXISTENT_LOCAL_TIME')
                 daily={k:v for k,v in base.items() if k!='local_date'}|{'kind':'DAILY_LOCAL','start_local_date':day,'timezone':zone,'local_time':clock}
                 slot=expand_slots(daily)[2][0];self.assertIsNone(slot['scheduled_at_utc']);self.assertEqual(slot['reason'],'SKIPPED_TIME_GAP')
-        for invalid in ('../UTC','/etc/passwd','Unknown/Place','UTC/../../passwd'):
+        for invalid in ('../UTC','/etc/passwd','Unknown/Place','UTC/../../passwd','localtime','posixrules','posix/UTC','right/UTC'):
             with self.assertRaises(Problem):zone_bytes(invalid)
 
     def test_pinned_tzif_and_slot_identity_survive_time_edit_and_host_change(self):
@@ -90,15 +90,19 @@ class ScheduleModelsTests(ScheduleFixture):
         spec={k:v for k,v in once.items() if k!='local_date'}|{'kind':'DAILY_LOCAL','start_local_date':'2026-10-27','items':groups}
         plan=self.create(spec);pre=self.preview(spec,plan)
         active=self.store.schedule_control(plan['id'],'resume',plan['control_version'],uid(),self.caps,'contract',pre['confirmation_digest'])
-        self.assertEqual(active['control_state'],'ACTIVE')
+        self.assertEqual(active['control_state'],'ACTIVE');self.assertEqual(active['display_state'],'SCHEDULED')
         with self.assertRaises(Problem):self.store.schedule_control(plan['id'],'pause',1,uid(),self.caps,'contract')
         paused=self.store.schedule_control(plan['id'],'pause',active['control_version'],uid(),self.caps,'contract')
         edited=spec|{'local_time':'11:00'};pre=self.preview(edited,paused)
         updated=self.store.schedule_update(plan['id'],edited,paused['control_version'],pre['preview_digest'],'2026-10-28',uid(),self.caps,'contract')
+        self.assertEqual(updated['next_slot']['nominal_local'],'2026-10-27T09:00')
         self.assertEqual(updated['spec_version'],2);self.assertEqual(updated['control_state'],'PAUSED')
         with self.store.transaction() as db:
             old=self.store._schedule_version(db,plan['id'],'2026-10-27');new=self.store._schedule_version(db,plan['id'],'2026-10-28')
             self.assertEqual(json.loads(old['spec'])['local_time'],'09:00');self.assertEqual(json.loads(new['spec'])['local_time'],'11:00')
+        actual_preview=self.preview(edited,updated)
+        self.assertEqual(actual_preview['items'][0]['nominal_local'],'2026-10-27T09:00')
+        self.assertEqual(actual_preview['items'][1]['nominal_local'],'2026-10-28T11:00')
         cancelled=self.store.schedule_control(plan['id'],'cancel',updated['control_version'],uid(),self.caps,'contract')
         with self.assertRaises(Problem):self.store.schedule_control(plan['id'],'resume',cancelled['control_version'],uid(),self.caps,'contract',pre['confirmation_digest'])
         replacement=self.create(once);self.assertNotEqual(replacement['id'],plan['id'])
