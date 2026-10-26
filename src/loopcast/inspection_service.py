@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import time
 from .backup import code_identity
 from .domain import Problem
 from .inspection_identity import descriptor
@@ -62,7 +63,7 @@ class InspectionService:
     def report(self, identity):
         with self.store.transaction() as db:row=db.execute('SELECT channel_id FROM inspection_reports WHERE id=?',(identity,)).fetchone()
         if not row:raise Problem('HISTORY_RETIRED','This report is no longer retained.',410)
-        try:value=self.find(row[0])
+        try:value=self.find(row['channel_id'])
         except Problem:value=None
         return self.store.inspection_report(identity,value)
 
@@ -128,10 +129,10 @@ class InspectionService:
 
     def execute(self, job, stopping):
         if not self.store.inspection_running(job):self.store.studio_complete_job(job);return
-        with self.store.transaction() as db:row=db.execute('SELECT channel_id FROM inspection_checks WHERE job_id=?',(job['id'],)).fetchone()
+        with self.store.transaction() as db:row=db.execute('SELECT * FROM inspection_checks WHERE job_id=?',(job['id'],)).fetchone()
         terminal='COMPLETED'
         try:
-            self.refresh();value=self.find(row[0])
+            self.refresh();value=self.find(row['channel_id'])
             if not self.store.studio_job_active(job):raise RunnerError('CANCELLED')
             if value['kind']=='ACCOUNT':outcome=self.passive_account(value)
             else:
@@ -139,7 +140,7 @@ class InspectionService:
                     path=Path(temporary)/'input.json';path.touch(mode=0o600)
                     path.write_text(json.dumps({'kind':value['kind'],'directory':str(self.store.directory),'generator':self.runtime.generator_settings,'media':self.runtime.media_settings,'ready':self.runtime.ready()}))
                     raw=run([sys.executable,'-I','-m','loopcast.inspection_probe',str(path)],temporary,{'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'},
-                            self.store.inspection_settings.timeout_seconds,lambda:stopping.is_set() or not self.store.studio_job_active(job),limit=65536)
+                            max(.01,min(self.store.inspection_settings.timeout_seconds,json.loads(row['private_input']).get('monotonic_deadline',float('inf'))-time.monotonic())),lambda:stopping.is_set() or not self.store.studio_job_active(job),limit=65536)
                     outcome=InspectionOutcome.model_validate_json(raw).model_dump()
             self.refresh()
         except RunnerError as error:

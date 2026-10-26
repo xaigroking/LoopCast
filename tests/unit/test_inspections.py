@@ -163,6 +163,38 @@ class InspectionTests(ScheduleFixture):
         with store.transaction()as db:self.assertEqual(db.execute('SELECT version FROM studio_projects').fetchone()[0],3)
 
 
+    def test_late_success_after_monotonic_budget_preserves_previous_account_observation(self):
+        import time
+        before=self.store.studio_accounts()['items'][0];check=self.begin('ACCOUNT',True)['check'];job=self.store.studio_claim_job()
+        self.store.inspection_running(job)
+        with self.store.transaction(True)as db:
+            raw=json.loads(db.execute('SELECT private_input FROM inspection_checks WHERE id=?',(check['id'],)).fetchone()[0])
+            raw['monotonic_deadline']=time.monotonic()-1
+            db.execute('UPDATE inspection_checks SET private_input=? WHERE id=?',(json.dumps(raw),check['id']))
+        outcome=self.service.account_outcome({'valid':True},before)
+        self.store.studio_check_result(job,True,'schedule-fixture',outcome)
+        after=self.store.studio_accounts()['items'][0]
+        self.assertEqual(after['checked_at'],before['checked_at']);self.assertEqual(after['state'],before['state'])
+        report=self.service.report(self.store.inspection_check(check['id'])['report_id'])
+        self.assertEqual(report['result'],'UNKNOWN');self.assertEqual(report['reason_code'],'CHECK_TIMEOUT')
+
+    def test_online_deadline_is_monotonic_when_wall_clock_moves_backward(self):
+        import time
+        self.store.inspection_settings=InspectionSettings(timeout_seconds=5,online_accounts=[self.account['id']])
+        before=self.store.studio_accounts()['items'][0];check=self.begin('ACCOUNT',True)['check'];job=self.store.studio_claim_job();operations=[]
+        def blocked(operation,platform,work,payload,cancelled):
+            operations.append(operation);self.clock.value-=3600;start=time.monotonic()
+            while not cancelled():
+                if time.monotonic()-start>7:raise AssertionError('Configured monotonic deadline was bypassed')
+                time.sleep(.02)
+            raise RunnerError('CANCELLED')
+        start=time.monotonic()
+        with patch.object(self.social,'invoke',side_effect=blocked):self.control.execute_job(job,threading.Event())
+        self.assertLess(time.monotonic()-start,6.5);self.assertEqual(operations,['check'])
+        report=self.service.report(self.store.inspection_check(check['id'])['report_id'])
+        self.assertEqual(report['result'],'UNKNOWN');self.assertEqual(report['reason_code'],'CHECK_TIMEOUT')
+        after=self.store.studio_accounts()['items'][0];self.assertEqual(after['checked_at'],before['checked_at']);self.assertEqual(after['state'],before['state'])
+
     def test_manual_and_periodic_race_share_one_check_for_each_channel(self):
         self.store.inspection_settings=InspectionSettings(enabled=True)
         barrier=threading.Barrier(8)

@@ -217,6 +217,10 @@ class AccountMethods:
             account = self._account(db, job['subject_id'])
             expected = job['payload']['account_version']
             applied=account['version']==expected and account['state']=='PENDING'
+            if observation and self._inspection_owned_expired(db,job):
+                self._inspection_account_failed(db,job,'CHECK_TIMEOUT')
+                db.execute("UPDATE studio_jobs SET state='DONE' WHERE id=? AND token=?",(job['id'],job['token']))
+                return True
             if observation and observation['result']=='UNKNOWN' and self._inspection_account_failed(db,job,observation['reason_code']):
                 db.execute("UPDATE studio_jobs SET state='DONE' WHERE id=? AND token=?",(job['id'],job['token']))
                 return True

@@ -58,3 +58,11 @@ History reads use `GET /v1/operations/channels/{channel_id}/reports` and
 reports together. A retired request identity returns a retained-history error
 instead of starting a replacement check. Browser reloads only read state; a lost
 response keeps its original request key and payload for an explicit retry.
+
+
+Inspection time budgets include queued work and use a monotonic deadline. Moving
+the wall clock backward does not extend an owned account check. A timed-out or
+late result does not replace its previous account observation or invent a new
+verification time. Joining an existing manual check does not grant permission to
+cancel that check; the observer can time out while the original job keeps its
+own deadline.

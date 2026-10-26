@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import hashlib
 import hmac
 import json
+import time
 from .domain import Problem, canonical, uid
 from .inspection_models import ChannelReport, InspectionOutcome
 
@@ -154,6 +155,7 @@ class InspectionMethods:
             else:
                 token=self._studio_enqueue(db,'inspection',identity,deadline,token=token)
                 job_id=db.execute('SELECT id FROM studio_jobs WHERE token=?',(token,)).fetchone()[0]
+            private['monotonic_deadline']=time.monotonic()+self.inspection_settings.timeout_seconds
             db.execute('INSERT INTO inspection_checks VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                        (identity,channel['id'],channel['version'],state,int(online),self.clock.iso(),self.clock.iso() if state=='RUNNING' else None,None,deadline,token,self._execution_epoch(db),job_id,int(owns),canonical(scope),canonical(private),None,'CHECK_QUEUED'))
             self._studio_remember(db,'inspection:'+channel['id'],key,request,{'id':identity})
@@ -171,16 +173,16 @@ class InspectionMethods:
         outcome=InspectionOutcome.model_validate(outcome).model_dump();channel=db.execute('SELECT * FROM inspection_channels WHERE id=?',(check['channel_id'],)).fetchone()
         current=channel['version']==check['channel_version'] and self._execution_epoch(db)==check['execution_epoch'] and check['state'] in ACTIVE
         if not current and terminal!='INTERRUPTED':terminal='SUPERSEDED'
-        elif self.clock.now()>check['deadline'] and terminal=='COMPLETED':
+        elif (self.clock.now()>check['deadline'] or time.monotonic()>json.loads(check['private_input']).get('monotonic_deadline',float('inf'))) and terminal=='COMPLETED':
             terminal='TIMED_OUT';outcome.update(result='UNKNOWN',reason_code='CHECK_TIMEOUT',evidence_status='unverified')
-        if self.clock.now()<datetime.fromisoformat(check['started_at'] or check['created_at']).timestamp():
+        if current and terminal!='TIMED_OUT' and self.clock.now()<datetime.fromisoformat(check['started_at'] or check['created_at']).timestamp():
             outcome.update(result='UNKNOWN',reason_code='CHECK_CLOCK_CHANGED',evidence_status='unverified')
-        identity=uid();time=self.clock.iso();value=outcome|{'id':identity,'channel_id':check['channel_id'],'channel_version':check['channel_version'],'check_id':check['id'],
-             'observed_at':time,'started_at':check['started_at'] or check['created_at'],'completed_at':time,'valid_until':stamp(self.clock.now()+self.inspection_settings.freshness_seconds),
+        identity=uid();completed=self.clock.iso();value=outcome|{'id':identity,'channel_id':check['channel_id'],'channel_version':check['channel_version'],'check_id':check['id'],
+             'observed_at':completed,'started_at':check['started_at'] or check['created_at'],'completed_at':completed,'valid_until':stamp(self.clock.now()+self.inspection_settings.freshness_seconds),
              'scope':scope or json.loads(check['scope']),'freshness':'FRESH' if current else 'SUPERSEDED','superseded_by_version':None if current else channel['version']}
         value=ChannelReport.model_validate(value).model_dump()
         db.execute('INSERT INTO inspection_reports VALUES(?,?,?,?,?)',(identity,check['channel_id'],check['channel_version'],check['id'],canonical(value)))
-        db.execute('UPDATE inspection_checks SET state=?,completed_at=?,report_id=?,reason_code=? WHERE id=?',(terminal,time,identity,outcome['reason_code'],check['id']))
+        db.execute('UPDATE inspection_checks SET state=?,completed_at=?,report_id=?,reason_code=? WHERE id=?',(terminal,completed,identity,outcome['reason_code'],check['id']))
         if current:
             db.execute('UPDATE inspection_channels SET latest_report=? WHERE id=?',(identity,check['channel_id']))
             self._inspection_observed(db,channel,value)
@@ -258,6 +260,17 @@ class InspectionMethods:
             if check:self._inspection_finish(db,check,outcome,terminal=terminal)
             db.execute("UPDATE studio_jobs SET state='DONE' WHERE id=? AND token=? AND state='RUNNING'",(job['id'],job['token']))
 
+    def inspection_account_deadline(self, job):
+        with self.transaction()as db:
+            row=db.execute("SELECT * FROM inspection_checks WHERE job_id=? AND token=? AND owns_job=1 AND state IN ('QUEUED','RUNNING')",(job['id'],job['token'])).fetchone()
+            if not row:return None
+            remaining=max(0,min(self.inspection_settings.timeout_seconds,row['deadline']-self.clock.now()))
+            return min(json.loads(row['private_input']).get('monotonic_deadline',float('inf')),time.monotonic()+remaining)
+
+    def _inspection_owned_expired(self, db, job):
+        row=db.execute("SELECT * FROM inspection_checks WHERE job_id=? AND token=? AND owns_job=1 AND state IN ('QUEUED','RUNNING')",(job['id'],job['token'])).fetchone()
+        return bool(row and (self.clock.now()>=row['deadline'] or time.monotonic()>=json.loads(row['private_input']).get('monotonic_deadline',float('inf'))))
+
     def _inspection_account_result(self, db, job, observation, applied, scope_version=None):
         checks=db.execute('SELECT * FROM inspection_checks WHERE job_id=? AND token=?',(job['id'],job['token'])).fetchall()
         for check in checks:
@@ -275,7 +288,7 @@ class InspectionMethods:
         scope=json.loads(check['scope']);account=db.execute('SELECT version FROM studio_accounts WHERE id=?',(scope['account_id'],)).fetchone()
         scope['account_version']=account[0]
         db.execute('UPDATE inspection_channels SET account_version=?,scope=? WHERE id=? AND version=?',(account[0],canonical(scope),check['channel_id'],check['channel_version']))
-        timeout=reason in {'TIMEOUT','CHECK_TIMEOUT'} or self.clock.now()>=check['deadline']
+        timeout=reason in {'TIMEOUT','CHECK_TIMEOUT'} or self.clock.now()>=check['deadline'] or time.monotonic()>=json.loads(check['private_input']).get('monotonic_deadline',float('inf'))
         outcome={'result':'UNKNOWN','reason_code':'CHECK_TIMEOUT' if timeout else 'CHECK_INTERRUPTED' if reason=='INTERRUPTED' else 'CHECK_UNAVAILABLE','evidence_scope':'ACCOUNT_IDENTITY','checks':[],'actual_operations':{'check':int(bool(json.loads(check['private_input']).get('invoked')))}}
         self._inspection_finish(db,check,outcome,scope,terminal='TIMED_OUT' if timeout else 'INTERRUPTED' if reason=='INTERRUPTED' else 'COMPLETED')
         return True
