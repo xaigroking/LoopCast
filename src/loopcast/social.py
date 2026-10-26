@@ -1,6 +1,9 @@
 """Pinned isolated social execution and explicit per-platform capabilities."""
 import hashlib
 import json
+import os
+import tempfile
+import threading
 from pathlib import Path
 import re
 import shutil
@@ -53,6 +56,7 @@ class SocialAdapter:
         self.credentials.mkdir(mode=0o700, exist_ok=True)
         self.sessions = self.root / 'sessions'
         self.sessions.mkdir(mode=0o700, exist_ok=True)
+        self._control_lock = threading.Lock()
         self.settings = settings or {}
         self.backend = self.settings.get('backend', 'disabled')
         self.mode = 'contract' if self.backend == 'contract' else 'live'
@@ -120,13 +124,18 @@ class SocialAdapter:
         path = controls / name
         # The private control payload lasts only for this authorization session.
         # It is never stored in business events, request records or diagnostics.
-        if path.exists() or (work / ('done-' + name)).exists(): return
-        payload = dict(value, sequence=time.time_ns())
-        try:
-            with path.open('x') as stream:
-                path.chmod(0o600); json.dump(payload, stream)
-        except FileExistsError:
-            pass
+        with self._control_lock:
+            if path.exists() or (work / ('done-' + name)).exists(): return
+            payload = dict(value, sequence=time.time_ns())
+            # Only complete private JSON becomes visible to either consumer.
+            handle, temporary = tempfile.mkstemp(prefix='.control-', suffix='.pending', dir=controls)
+            try:
+                with os.fdopen(handle, 'w') as stream:
+                    json.dump(payload, stream);stream.flush();os.fsync(stream.fileno())
+                if (work / ('done-' + name)).exists(): return
+                try:os.link(temporary, path)
+                except FileExistsError:pass
+            finally:Path(temporary).unlink(missing_ok=True)
 
     def screen(self, identity):
         path = self.session_directory(identity) / 'frame.png'
@@ -193,9 +202,10 @@ class SocialAdapter:
                 controls = work / 'controls'
                 pending = list(controls.glob('*.json')) if controls.exists() else []
                 for path in pending:
-                    value = json.loads(path.read_text())
-                    path.unlink(missing_ok=True)
+                    try:value = json.loads(path.read_text())
+                    except (OSError, ValueError):continue
                     (work / ('done-' + path.name)).touch(mode=0o600)
+                    path.unlink(missing_ok=True)
                     if value.get('kind') == 'confirm':
                         profile = next((p for p in choices if p['stable_subject'] == value.get('text')), None) if value.get('text') else choices[0]
                         if profile is None: raise RunnerError('FIXTURE_PROFILE_MISSING')
