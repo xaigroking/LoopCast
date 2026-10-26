@@ -15,9 +15,10 @@ from .studio_storage import StudioMethods
 from .account_storage import AccountMethods
 from .release_storage import ReleaseMethods
 from .feedback_storage import FeedbackMethods
+from .operations_storage import OperationsMethods
 
 
-class Store(PublicationMethods, StudioMethods, AccountMethods, ReleaseMethods, FeedbackMethods):
+class Store(PublicationMethods, StudioMethods, AccountMethods, ReleaseMethods, FeedbackMethods, OperationsMethods):
     def __init__(self, directory, component=None):
         self.component = component
         self.directory = Path(directory).resolve()

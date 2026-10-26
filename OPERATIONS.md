@@ -50,3 +50,54 @@ starts from an old database has not thereby proved that sending is safe. Keep
 newer facts and use the controlled recovery tooling for the compatible release.
 Removing application binaries or rotating logs must retain state, permanent
 publication records, required evidence and backups.
+
+## Controlled recovery
+
+Restore only to a new private directory, using the independently recorded digest:
+
+```sh
+python -I -m loopcast restore \
+  --backup /private/backups/loopcast-new \
+  --expected-manifest-sha256 RECORDED_MANIFEST_SHA256 \
+  --data-dir /var/lib/loopcast/recovered-new
+
+python -I -m loopcast reconcile --data-dir /var/lib/loopcast/recovered-new
+```
+
+The operator workflow accepts compatible v6/v7 backup databases and upgrades the
+new directory to schema v7. It verifies the complete private package before
+migration and publishes a usable directory only after the restore barrier is
+durable. Failures do not overwrite the package, an existing destination or newer
+application facts. Ordinary upgrades and restarts do not create a restore event.
+
+Controlled recovery blocks all studio uploads, including explicit requests,
+durable queued work and the final adapter call. Interrupted prepared/sending
+attempts become recovery-uncertain and retain their account locks. Old execution
+identities cannot accept late results. Existing published/unknown facts, receipts
+and media families remain protected. Reauthorizing an account, changing the
+sending configuration, selecting another evidence mode or waiting does not remove
+the barrier. Credentials are excluded, so recovered accounts require authorization.
+
+The service can remain ready for history, media, creation, feedback and diagnostics
+while uploads are blocked. The fixed publication simulator continues to be a
+simulator; its results cannot authorize a studio upload.
+
+`reconcile` is a business read-only report of the recorded boundary, known targets
+and receipts, missing coverage and declared query availability. It does not call a
+platform or alter publication facts. The CLI cannot establish runtime adapter
+readiness, so its query status is unavailable. Existing explicitly configured
+per-target verification can still append a trusted receipt under current execution
+identity; it cannot establish complete coverage of unknown works after the backup.
+
+This release has no adapter capable of proving complete external coverage and no
+command or HTTP switch for releasing the global barrier. A found target, empty
+list, imported metrics or manual confirmation does not establish that coverage.
+The report keeps `release_eligible=false` and explains the unbounded unknown scope.
+Future release support requires a reliable coverage verifier and compatible
+evidence semantics. Never clear a guard, lock or permanent record manually.
+
+On schema v7, successful backups also try to record their identity, time and
+manifest digest in the source database. The package is verified independently;
+the audit field reports unavailable if that optional metadata cannot be recorded.
+The audit contains no private destination path and is not a replacement for
+verifying the actual package against its independently recorded digest.

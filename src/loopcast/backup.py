@@ -113,6 +113,7 @@ def copy_reference(source_fd, relative, destination, expected):
         handle = regular(parent, name)
         with os.fdopen(handle, 'rb') as origin:
             before = os.fstat(origin.fileno())
+            if before.st_size != expected[0]:raise ValueError('FILE_INTEGRITY_FAILED')
             destination.parent.mkdir(mode=0o700, exist_ok=True)
             out = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             with os.fdopen(out, 'wb') as target:
@@ -177,9 +178,18 @@ def create_backup(source, output):
                 os.fsync(stream.fileno())
             sync_directory(staging)
             publish_directory(staging, target)
+            audit = 'unavailable'
+            if schema >= 7:
+                try:
+                    with closing(sqlite3.connect(f'file:/proc/self/fd/{owner.directory_fd}/state.sqlite3?mode=rw', uri=True)) as db:
+                        with db:
+                            db.execute('INSERT INTO backup_audit VALUES(?,?,?,?)', (manifest['backup_id'], manifest['created_at'], digest, 'VERIFIED_PRIVATE_BACKUP'))
+                    audit = 'recorded'
+                except sqlite3.Error:
+                    audit = 'unavailable'
             return {'format': FORMAT, 'backup_id': manifest['backup_id'], 'manifest_sha256': digest,
                     'schema_version': schema, 'files': len(paths), 'state': 'VERIFIED_PRIVATE_BACKUP',
-                    'credentials_policy': 'excluded_reauthorize'}
+                    'credentials_policy': 'excluded_reauthorize', 'audit': audit}
         finally:
             if staging.exists():
                 shutil.rmtree(staging)

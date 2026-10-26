@@ -64,7 +64,7 @@ class AccountMethods:
             raise Problem('QUEUE_FULL', 'The execution queue is full.', 429)
         identity, token = uid(), token or uid()
         db.execute('INSERT INTO studio_jobs VALUES(?,?,?,?,?,?,?,?)',
-                   (identity, kind, subject_id, 'READY', token, deadline, canonical({'trace': trace or {}, 'payload': payload or {}}), now()))
+                   (identity, kind, subject_id, 'READY', token, deadline, canonical({'trace': trace or {}, 'payload': payload or {}, 'execution_epoch': self._execution_epoch(db)}), now()))
         return token
 
     def studio_authorize(self, platform, account_id, method, owner_hash, key, trace=None, ttl=300):
@@ -117,10 +117,15 @@ class AccountMethods:
 
     def studio_claim_job(self):
         with self.transaction(True) as db:
-            row = db.execute("SELECT * FROM studio_jobs WHERE state='READY' ORDER BY rowid LIMIT 1").fetchone()
+            clause = " AND kind!='dispatch'" if self._restore_guard(db) else ''
+            row = db.execute("SELECT * FROM studio_jobs WHERE state='READY'" + clause + " ORDER BY rowid LIMIT 1").fetchone()
             if row is None:
                 return None
             job = dict(row)
+            epoch = json.loads(job['context']).get('execution_epoch')
+            if epoch is not None and epoch != self._execution_epoch(db):
+                db.execute("UPDATE studio_jobs SET state='CANCELLED' WHERE id=?", (job['id'],))
+                return None
             if job['deadline'] <= time.time():
                 db.execute("UPDATE studio_jobs SET state='CANCELLED' WHERE id=?", (job['id'],))
                 if job['kind'] == 'authorize':
@@ -144,6 +149,8 @@ class AccountMethods:
 
     def studio_job_active(self, job):
         with self.transaction() as db:
+            if not self._job_epoch_current(db, job) or job['kind'] == 'dispatch' and self._restore_guard(db):
+                return False
             row = db.execute("SELECT 1 FROM studio_jobs WHERE id=? AND token=? AND state='RUNNING' AND deadline>?", (job['id'], job['token'], time.time())).fetchone()
             if not row:
                 return False
@@ -172,6 +179,7 @@ class AccountMethods:
         if not isinstance(subject, str) or not re.fullmatch(r'[A-Za-z0-9_:.@-]{1,128}', subject):
             return self.studio_fail_job(job, 'IDENTITY_UNVERIFIED')
         with self.transaction(True) as db:
+            if not self._job_epoch_current(db, job):return False
             session = db.execute('SELECT * FROM auth_sessions WHERE id=? AND token=?', (job['subject_id'], job['token'])).fetchone()
             if session is None or session['state'] not in ACTIVE_AUTH or session['expires_at'] <= time.time():
                 return False
@@ -194,6 +202,7 @@ class AccountMethods:
 
     def studio_check_result(self, job, valid, subject=None):
         with self.transaction(True) as db:
+            if not self._job_epoch_current(db, job):return False
             row = db.execute("SELECT 1 FROM studio_jobs WHERE id=? AND token=? AND state='RUNNING'", (job['id'], job['token'])).fetchone()
             if not row:
                 return False
@@ -207,6 +216,7 @@ class AccountMethods:
 
     def studio_fail_job(self, job, code):
         with self.transaction(True) as db:
+            if not self._job_epoch_current(db, job):return False
             if job['kind'] == 'authorize':
                 db.execute("UPDATE auth_sessions SET state=CASE WHEN expires_at<=? THEN 'EXPIRED' ELSE 'FAILED' END,error_code=?,version=version+1 WHERE id=? AND token=? AND state IN ('PENDING','WAITING','VERIFYING')", (time.time(), code, job['subject_id'], job['token']))
             elif job['kind'] == 'check':
@@ -219,7 +229,7 @@ class AccountMethods:
             db.execute("UPDATE auth_sessions SET state='FAILED',error_code='INTERRUPTED',version=version+1 WHERE id IN (SELECT subject_id FROM studio_jobs WHERE kind='authorize' AND state='RUNNING') AND state IN ('PENDING','WAITING','VERIFYING')")
             db.execute("UPDATE studio_accounts SET state='EXPIRED',version=version+1 WHERE state='PENDING'")
             for row in db.execute("SELECT * FROM release_attempts WHERE state IN ('PREPARED','SENDING')").fetchall():
-                outcome = 'NOT_SENT' if row['state'] == 'PREPARED' else 'UNKNOWN'
+                outcome = 'NOT_SENT' if row['state'] == 'PREPARED' and not self._restore_guard(db) else 'UNKNOWN'
                 db.execute('UPDATE release_attempts SET state=? WHERE id=?', (outcome, row['id']))
                 db.execute('UPDATE release_targets SET state=?,version=version+1 WHERE id=?', (outcome, row['target_id']))
                 if outcome == 'NOT_SENT':
