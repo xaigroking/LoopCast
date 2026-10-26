@@ -12,6 +12,38 @@ from loopcast.social import SocialAdapter, validate_probe, SAU_REVISION
 
 
 class SocialContractTests(unittest.TestCase):
+
+    def test_contract_authorization_never_reads_a_partially_written_control(self):
+        from concurrent.futures import ThreadPoolExecutor
+        import threading
+        with tempfile.TemporaryDirectory() as directory:
+            adapter=SocialAdapter(directory,{'backend':'contract','sending_enabled':False,'timeout':5,
+                'contract_profiles':{'douyin':[{'stable_subject':'atomic-control','label':'Fixture'}]}})
+            work=adapter.session_directory('a'*32)
+            writing,finish=threading.Event(),threading.Event()
+            def slow_dump(value,stream):
+                raw=json.dumps(value);middle=len(raw)//2
+                stream.write(raw[:middle]);stream.flush();writing.set()
+                if not finish.wait(3):raise AssertionError('Controlled writer was not released')
+                stream.write(raw[middle:])
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                with patch('loopcast.social.json.dump',side_effect=slow_dump):
+                    producer=pool.submit(adapter.interaction,'a'*32,'same-key',{'kind':'confirm','text':'atomic-control'})
+                    self.assertTrue(writing.wait(2))
+                    self.assertEqual(list((work/'controls').glob('*.json')),[])
+                    consumer=pool.submit(adapter.invoke,'authorize','douyin',work,{},lambda:False)
+                    try:
+                        import time
+                        time.sleep(.1)
+                        self.assertFalse(consumer.done(),'Consumer observed incomplete control JSON')
+                    finally:finish.set()
+                    producer.result(3)
+                result=consumer.result(3)
+            self.assertEqual(result['profile']['stable_subject'],'atomic-control')
+            adapter.interaction('a'*32,'same-key',{'kind':'confirm','text':'atomic-control'})
+            self.assertEqual(list((work/'controls').glob('*.json')),[])
+            self.assertEqual(list((work/'controls').glob('.*')),[])
+
     def test_all_four_commands_map_frozen_fields_and_only_report_submission(self):
         contracts = {
             'douyin': ('DouyinVideoUploadRequest','upload_video', {'publish_date':0,'thumbnail_file':None,'headless':True,'debug':False,'declaration':None}),

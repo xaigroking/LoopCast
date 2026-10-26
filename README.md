@@ -68,7 +68,7 @@ place. Shutdown drains HTTP requests for at most five seconds, then cancels
 remaining streams before stopping the executor and publisher. Queued work stays
 durable; interrupted active work records an interruption and is recovered at
 restart. For code rollback, stop both services and choose a binary that supports
-the current database schema. Schema v7 retains the creation/release tables, prior runs/events/receipts
+the current database schema. Schema v8 retains the creation/release tables, prior runs/events/receipts
 and feedback references, and adds durable recovery boundaries and execution fencing.
 Pre-v7 binaries reject it. If no compatible prior binary exists, use a forward fix. Keep the
 current database and immutable media; do not restore an older snapshot over new

@@ -18,7 +18,7 @@ class OperationsAPITests(unittest.TestCase):
                 code,status=owner.request('/v1/operations/status');self.assertEqual(code,200,status)
                 self.assertTrue(status['service_ready']);self.assertTrue(status['effective_sending_enabled']);self.assertEqual(status['evidence_mode'],'contract')
                 code,report=owner.request('/v1/operations/snapshot');self.assertEqual(code,200,report)
-                self.assertTrue(report['runtime']['service_ready']['value']);self.assertEqual(report['database']['schema']['value'],7)
+                self.assertTrue(report['runtime']['service_ready']['value']);self.assertEqual(report['database']['schema']['value'],8)
                 self.assertEqual(report['media']['ffmpeg']['status'],'verified')
                 self.assertEqual(report['application']['build_source']['status'],'unavailable')
                 code,reconciliation=owner.request('/v1/operations/reconciliation');self.assertEqual(code,200)

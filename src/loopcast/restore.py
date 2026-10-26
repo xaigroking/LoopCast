@@ -58,7 +58,7 @@ def reconciliation_report(path):
     try:
         with closing(readonly(handle)) as db:
             schemas = [row[0] for row in db.execute('SELECT version FROM schema_version')]
-            if schemas != [7]:raise ValueError('SCHEMA_UNSUPPORTED')
+            if schemas not in ([7], [8]):raise ValueError('SCHEMA_UNSUPPORTED')
             db.execute('BEGIN')
             return ReadOnlyOperations(db).operations_reconciliation()
     finally:

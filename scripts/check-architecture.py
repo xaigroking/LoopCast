@@ -10,13 +10,15 @@ domain = {"domain", "contracts", "fixture", "generation", "ledger", "publisher",
 forbidden = {"fastapi", "starlette", "uvicorn", "next", "react"}
 # Store/ledger are the persistence adapter; pure run rules live in domain.py.
 allowed = {
+    "schedule_models": {"studio_models"}, "schedule_config": {"studio_models"},
+    "schedule_time": {"domain", "schedule_models"}, "schedule_storage": {"domain", "schedule_time"},
     "ownership": set(), "backup": {"migrations", "ownership"},
     "operations_storage": {"domain"}, "restore": {"backup", "ownership", "storage", "operations_storage"},
     "operations_snapshot": {"backup", "migrations", "ownership", "runner"},
     "operations_models": {"studio_models"}, "operations_api": {"operations_models", "operations_snapshot"},
     "domain": set(), "contracts": set(), "fixture": set(), "runner": set(),
     "migrations": set(), "diagnostics": set(), "publisher_cli": set(),
-    "storage": {"domain", "ledger", "migrations", "studio_storage", "account_storage", "release_storage", "feedback_storage", "operations_storage"}, "ledger": {"domain"},
+    "storage": {"domain", "ledger", "migrations", "studio_storage", "account_storage", "release_storage", "feedback_storage", "operations_storage", "schedule_storage", "schedule_config"}, "ledger": {"domain"},
     "feedback_demo": {"domain","runtime","runner"},
     "feedback_models": {"studio_models"}, "feedback_rules": {"domain"},
     "feedback_storage": {"domain","feedback_models","feedback_rules","studio_models"},

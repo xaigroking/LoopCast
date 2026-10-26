@@ -65,7 +65,7 @@ python -I -m loopcast reconcile --data-dir /var/lib/loopcast/recovered-new
 ```
 
 The operator workflow accepts compatible v6/v7 backup databases and upgrades the
-new directory to schema v7. It verifies the complete private package before
+new directory to schema v8. It verifies the complete private package before
 migration and publishes a usable directory only after the restore barrier is
 durable. Failures do not overwrite the package, an existing destination or newer
 application facts. Ordinary upgrades and restarts do not create a restore event.
@@ -96,7 +96,7 @@ The report keeps `release_eligible=false` and explains the unbounded unknown sco
 Future release support requires a reliable coverage verifier and compatible
 evidence semantics. Never clear a guard, lock or permanent record manually.
 
-On schema v7, successful backups also try to record their identity, time and
+On schema v7 and later, successful backups also try to record their identity, time and
 manifest digest in the source database. The package is verified independently;
 the audit field reports unavailable if that optional metadata cannot be recorded.
 The audit contains no private destination path and is not a replacement for

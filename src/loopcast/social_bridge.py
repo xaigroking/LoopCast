@@ -34,8 +34,8 @@ def take_controls(work):
             try: values.append((json.loads(path.read_text()), path))
             except (OSError, ValueError): continue
     for value, path in sorted(values, key=lambda pair: pair[0].get('sequence', 0)):
-        path.unlink(missing_ok=True)
         (work / ('done-' + path.name)).touch(mode=0o600)
+        path.unlink(missing_ok=True)
         yield value
 
 

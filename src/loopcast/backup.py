@@ -44,7 +44,7 @@ def readonly(root_fd):
 
 def check_database(db):
     schemas = db.execute('SELECT version FROM schema_version').fetchall()
-    if len(schemas) != 1 or schemas[0][0] not in {6, CURRENT_VERSION}:
+    if len(schemas) != 1 or schemas[0][0] not in {6, 7, CURRENT_VERSION}:
         raise ValueError('SCHEMA_UNSUPPORTED')
     if db.execute('PRAGMA integrity_check').fetchall() != [('ok',)]:
         # Row factories differ between backup and inspection connections.
