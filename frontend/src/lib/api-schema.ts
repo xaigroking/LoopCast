@@ -209,6 +209,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/operations/reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reconciliation */
+        get: operations["reconciliation_v1_operations_reconciliation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/operations/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Runtime Snapshot */
+        get: operations["runtime_snapshot_v1_operations_snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/operations/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status */
+        get: operations["status_v1_operations_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runs": {
         parameters: {
             query?: never;
@@ -937,6 +988,20 @@ export interface components {
              */
             platform: "douyin" | "xiaohongshu" | "bilibili" | "youtube";
         };
+        /** BackupAudit */
+        BackupAudit: {
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Manifest Sha256 */
+            manifest_sha256: string;
+            /**
+             * State
+             * @constant
+             */
+            state: "VERIFIED_PRIVATE_BACKUP";
+        };
         /** Capabilities */
         Capabilities: {
             /** Generation Verification */
@@ -1636,6 +1701,75 @@ export interface components {
             /** Source */
             source: string;
         };
+        /** Observation */
+        Observation: {
+            /** Source */
+            source: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "verified" | "unverified" | "unavailable";
+            /** Value */
+            value: string | number | boolean | {
+                [key: string]: number;
+            } | null;
+        };
+        /** OperationsSnapshot */
+        OperationsSnapshot: {
+            /** Application */
+            application: {
+                [key: string]: components["schemas"]["Observation"];
+            };
+            /** Database */
+            database: {
+                [key: string]: components["schemas"]["Observation"];
+            };
+            /**
+             * Format
+             * @constant
+             */
+            format: "loopcast.snapshot.v1";
+            /** Generator */
+            generator: {
+                [key: string]: components["schemas"]["Observation"];
+            };
+            /** Media */
+            media: {
+                [key: string]: components["schemas"]["Observation"];
+            };
+            /** Observed At */
+            observed_at: string;
+            /** Recovery */
+            recovery: {
+                [key: string]: components["schemas"]["Observation"];
+            };
+            /** Runtime */
+            runtime: {
+                [key: string]: components["schemas"]["Observation"];
+            };
+        };
+        /** OperationsStatus */
+        OperationsStatus: {
+            backup: components["schemas"]["BackupAudit"] | null;
+            /** Configured Sending Enabled */
+            configured_sending_enabled: boolean;
+            /** Effective Sending Enabled */
+            effective_sending_enabled: boolean;
+            /**
+             * Evidence Mode
+             * @enum {string}
+             */
+            evidence_mode: "live" | "contract";
+            /** Release Supported */
+            release_supported: boolean;
+            restore: components["schemas"]["RestoreEvent"] | null;
+            restore_guard: components["schemas"]["RestoreGuard"] | null;
+            /** Service Ready */
+            service_ready: boolean;
+            /** Upload Allowed By Recovery */
+            upload_allowed_by_recovery: boolean;
+        };
         /** PlatformCapability */
         PlatformCapability: {
             /** Ai Disclosure */
@@ -1831,6 +1965,86 @@ export interface components {
             /** Work Id */
             work_id: string | null;
         };
+        /** ReconciliationReceipt */
+        ReconciliationReceipt: {
+            /** Evidence Code */
+            evidence_code: string;
+            /** Id */
+            id: string;
+            /** Outcome */
+            outcome: string;
+            /** Source */
+            source: string;
+            /** Work Id */
+            work_id: string | null;
+        };
+        /** ReconciliationReport */
+        ReconciliationReport: {
+            /**
+             * Coverage
+             * @enum {string}
+             */
+            coverage: "INCONCLUSIVE" | "NOT_RESTORED";
+            /**
+             * Format
+             * @constant
+             */
+            format: "loopcast.reconciliation.v1";
+            guard: components["schemas"]["RestoreGuard"] | null;
+            /**
+             * Reason
+             * @constant
+             */
+            reason: "NO_COMPLETE_EXTERNAL_COVERAGE_VERIFIER";
+            /**
+             * Release Eligible
+             * @constant
+             */
+            release_eligible: false;
+            restore: components["schemas"]["RestoreEvent"] | null;
+            /**
+             * Scope
+             * @constant
+             */
+            scope: "ALL_STUDIO_UPLOADS";
+            /** Targets */
+            targets: components["schemas"]["ReconciliationTarget"][];
+            /**
+             * Unknown External Works
+             * @enum {string}
+             */
+            unknown_external_works: "UNBOUNDED_AFTER_BACKUP" | "NOT_ASSESSED";
+        };
+        /** ReconciliationTarget */
+        ReconciliationTarget: {
+            /** Account Id */
+            account_id: string;
+            /**
+             * Evidence Mode
+             * @enum {string}
+             */
+            evidence_mode: "live" | "contract";
+            /**
+             * Known Publication
+             * @enum {string}
+             */
+            known_publication: "FOUND" | "INCONCLUSIVE";
+            /** Platform */
+            platform: string;
+            /**
+             * Query
+             * @enum {string}
+             */
+            query: "available" | "unavailable";
+            /** Receipts */
+            receipts: components["schemas"]["ReconciliationReceipt"][];
+            /** Stable Subject */
+            stable_subject: string;
+            /** State */
+            state: string;
+            /** Target Id */
+            target_id: string;
+        };
         /** ReleaseAttempt */
         ReleaseAttempt: {
             /** Ended At */
@@ -1950,6 +2164,50 @@ export interface components {
             /** Account Id */
             account_id: string;
             fields?: components["schemas"]["PlatformFields-Input"];
+        };
+        /** RestoreEvent */
+        RestoreEvent: {
+            /** Backup Created At */
+            backup_created_at: string;
+            /** Backup Id */
+            backup_id: string;
+            /** Execution Epoch */
+            execution_epoch: string;
+            /** Id */
+            id: string;
+            /** Manifest Sha256 */
+            manifest_sha256: string;
+            /** Restored At */
+            restored_at: string;
+            /**
+             * Scope
+             * @constant
+             */
+            scope: "ALL_STUDIO_UPLOADS";
+            /** Source Schema */
+            source_schema: number;
+        };
+        /** RestoreGuard */
+        RestoreGuard: {
+            /**
+             * Id
+             * @constant
+             */
+            id: 1;
+            /**
+             * Reason
+             * @constant
+             */
+            reason: "EXTERNAL_HISTORY_UNRECONCILED";
+            /** Restore Id */
+            restore_id: string;
+            /**
+             * State
+             * @constant
+             */
+            state: "ACTIVE";
+            /** Version */
+            version: number;
         };
         /** Revision */
         Revision: {
@@ -3256,6 +3514,282 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkBinding"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    reconciliation_v1_operations_reconciliation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconciliationReport"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    runtime_snapshot_v1_operations_snapshot_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationsSnapshot"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    status_v1_operations_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationsStatus"];
                 };
             };
             /** @description Stable LoopCast error envelope */

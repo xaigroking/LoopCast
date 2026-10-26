@@ -101,3 +101,35 @@ manifest digest in the source database. The package is verified independently;
 the audit field reports unavailable if that optional metadata cannot be recorded.
 The audit contains no private destination path and is not a replacement for
 verifying the actual package against its independently recorded digest.
+
+## Read-only runtime snapshot
+
+```sh
+python -I -m loopcast snapshot --data-dir /var/lib/loopcast/state
+python -I -m loopcast snapshot --data-dir /var/lib/loopcast/state \
+  --media-config /etc/loopcast/media.json --format markdown \
+  --output /private/reports/loopcast-runtime.md
+```
+
+The report uses a fixed allowlist and labels each observation with its source and
+verified/unverified/unavailable state. It reads compatible v6/v7 databases without
+migrating or recovering them. Unsupported schemas fail explicitly. Output is
+sorted and file output is private and atomically replaced; state, configuration,
+tools and application files cannot be selected as report destinations.
+
+CLI snapshots observe their own interpreter, linked SQLite, current installed
+files and the readable database. They do not contact a service, so service health
+is unavailable. A held directory lock is a separate kernel observation and does
+not establish service health. Optional configured media tools are checked against
+their digest and run only with the fixed `-version` argument. Generator revision
+claims remain unverified; available wheel bytes have a measured digest. No model,
+platform login, upload, full environment, provider configuration or arbitrary
+exception output is included. Missing permissions/tools/configuration preserve
+unavailable fields instead of inventing versions.
+
+Settings and publishing provide read-only operations status and recovery reports.
+`GET /v1/operations/status`, `/v1/operations/reconciliation` and
+`/v1/operations/snapshot` use the same database policy as upload enforcement. The
+HTTP snapshot can observe its current owner's readiness; this is still separate
+from upload permission and external account/provider verification. The page offers
+no backup file upload/download, host-path form or manual barrier release.

@@ -80,7 +80,33 @@ def main():
     restore.add_argument('--data-dir', type=Path, required=True)
     reconcile = commands.add_parser('reconcile', help='Read the controlled-restore publication boundary without calling a platform')
     reconcile.add_argument('--data-dir', type=Path, required=True)
+    snapshot_parser = commands.add_parser('snapshot',help='Read a redacted runtime and schema compatibility report without starting services')
+    snapshot_parser.add_argument('--data-dir',type=Path,required=True)
+    snapshot_parser.add_argument('--format',choices=['json','markdown'],default='json')
+    snapshot_parser.add_argument('--output',type=Path)
+    snapshot_parser.add_argument('--media-config',type=Path)
+    snapshot_parser.add_argument('--generator-config',type=Path)
     args = parser.parse_args()
+    if args.command == 'snapshot':
+        from .operations_snapshot import snapshot,render_snapshot,write_report
+        try:
+            def optional_settings(path):
+                if path is None:return None
+                try:return json.loads(path.read_text())
+                except (OSError,ValueError):return {}
+            media = optional_settings(args.media_config)
+            generator = optional_settings(args.generator_config)
+            report = snapshot(args.data_dir,media,generator)
+            output = render_snapshot(report,args.format)
+            if args.output:
+                protected = [args.data_dir,*[path for path in (args.media_config,args.generator_config) if path]]
+                if isinstance(media,dict):protected.extend(path for key,path in media.items() if key in {'ffmpeg','ffprobe'} and isinstance(path,str))
+                if isinstance(generator,dict):protected.extend(path for key,path in generator.items() if key in {'wheel','python','config_ref','ffmpeg','ffprobe'} and isinstance(path,str))
+                write_report(args.output,output,protected)
+            else:print(output,end='')
+            return
+        except (OSError,ValueError,RuntimeError,KeyError,TypeError,AttributeError,sqlite3.Error):
+            parser.exit(1,'Snapshot unavailable. Check the existing state, compatible schema and trusted optional tool configuration.\n')
     if args.command in {'restore', 'reconcile'}:
         from .restore import restore_backup, reconciliation_report
         try:
