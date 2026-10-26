@@ -57,6 +57,8 @@ class OperationsMethods:
                 fence('authorization', row['id'], row['token'])
                 db.execute("UPDATE auth_sessions SET token=?,state='EXPIRED',error_code='RESTORE_REAUTH_REQUIRED',version=version+1 WHERE id=?", (uid(), row['id']))
             db.execute("UPDATE studio_accounts SET credential_ref=NULL,state='DISCONNECTED',version=version+1")
+            db.execute("UPDATE schedules SET control_state='PAUSED',version=version+1,pause_reason='RESTORE_GUARD' WHERE control_state='ACTIVE'")
+            db.execute("UPDATE publication_quota_reservations SET state='CONSUMED' WHERE state='RESERVED'")
             return self._operations_status(db)
 
     def _operations_status(self, db):

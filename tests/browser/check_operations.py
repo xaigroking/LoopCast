@@ -29,7 +29,7 @@ async def main():
         await panel.get_by_role('button',name='Read reconciliation report',exact=True).press('Enter')
         await expect(panel.locator('.operations-reconciliation')).to_be_visible()
         report=await (await page.request.get(BASE+'/v1/operations/snapshot')).json()
-        assert report['database']['schema']['value']==7 and report['application']['build_source']['status']=='unavailable'
+        assert report['database']['schema']['value']==8 and report['application']['build_source']['status']=='unavailable'
         assert report['recovery']['guard']['value']==('ACTIVE' if GUARDED else 'CLEAR')
         assert report['runtime']['service_ready']['value'] is True
         encoded=json.dumps(report)

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import re
 import sqlite3
+import threading
 
 from .domain import STAGES, TERMINAL, uid, now, canonical, digest, Problem, actions, validate_input
 
@@ -16,10 +17,16 @@ from .account_storage import AccountMethods
 from .release_storage import ReleaseMethods
 from .feedback_storage import FeedbackMethods
 from .operations_storage import OperationsMethods
+from .schedule_storage import ScheduleMethods
+from .schedule_config import SystemClock, ScheduleSettings
 
 
-class Store(PublicationMethods, StudioMethods, AccountMethods, ReleaseMethods, FeedbackMethods, OperationsMethods):
-    def __init__(self, directory, component=None):
+class Store(PublicationMethods, StudioMethods, AccountMethods, ReleaseMethods, FeedbackMethods, OperationsMethods, ScheduleMethods):
+    def __init__(self, directory, component=None, *, clock=None, schedule_settings=None):
+        self.clock = clock or SystemClock()
+        self.schedule_settings = ScheduleSettings.model_validate(schedule_settings or {})
+        self._schedule_previews = {}
+        self.admission_lock = threading.RLock()
         self.component = component
         self.directory = Path(directory).resolve()
         self.directory.mkdir(parents=True, exist_ok=True)

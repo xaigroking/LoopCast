@@ -103,7 +103,7 @@ DELETE FROM schema_version;
 INSERT INTO schema_version VALUES(5);
 """
 
-CURRENT_VERSION = 7
+CURRENT_VERSION = 8
 
 def statements(db, script):
     for statement in script.split(';'):
@@ -119,7 +119,7 @@ def migrate(db):
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE name='schema_version'").fetchone()
         if exists:
             versions = [r[0] for r in db.execute('SELECT version FROM schema_version')]
-            if versions not in ([1], [2], [3], [4], [5], [6], [7]):
+            if versions not in ([1], [2], [3], [4], [5], [6], [7], [8]):
                 raise RuntimeError('Unsupported state database version')
             version = versions[0]
         else:
@@ -144,6 +144,9 @@ def migrate(db):
             version = 6
         if version == 6:
             statements(db, VERSION_SEVEN)
+            version = 7
+        if version == 7:
+            statements(db, VERSION_EIGHT)
         if db.execute('PRAGMA foreign_key_check').fetchone():
             raise RuntimeError('Invalid state database references')
         db.commit()
@@ -197,3 +200,65 @@ CREATE TABLE restore_fences(
 CREATE TABLE backup_audit(id TEXT PRIMARY KEY,created_at TEXT NOT NULL,manifest_sha256 TEXT NOT NULL,state TEXT NOT NULL);
 UPDATE schema_version SET version=7;
 '''
+
+VERSION_EIGHT = """
+CREATE TABLE schedules(
+ id TEXT PRIMARY KEY,version INTEGER NOT NULL,spec_version INTEGER NOT NULL,
+ control_state TEXT NOT NULL CHECK(control_state IN ('ACTIVE','PAUSED','CANCELLED')),
+ pause_reason TEXT,confirmed_digest TEXT,confirmed_at TEXT,created_at TEXT NOT NULL
+);
+CREATE TABLE schedule_versions(
+ schedule_id TEXT NOT NULL REFERENCES schedules(id),number INTEGER NOT NULL,spec TEXT NOT NULL,
+ tzif BLOB NOT NULL,tzif_sha256 TEXT NOT NULL,frozen TEXT NOT NULL,effective_date TEXT,created_at TEXT NOT NULL,
+ PRIMARY KEY(schedule_id,number)
+);
+CREATE TABLE schedule_slots(
+ schedule_id TEXT NOT NULL REFERENCES schedules(id),slot_key TEXT NOT NULL,position INTEGER NOT NULL,
+ nominal_date TEXT NOT NULL,target_group TEXT NOT NULL,PRIMARY KEY(schedule_id,slot_key),UNIQUE(schedule_id,position)
+);
+CREATE TABLE schedule_occurrences(
+ id TEXT PRIMARY KEY,schedule_id TEXT NOT NULL,slot_key TEXT NOT NULL,spec_version INTEGER NOT NULL,
+ nominal_local TEXT NOT NULL,timezone TEXT NOT NULL,tzif_sha256 TEXT NOT NULL,selected_fold INTEGER,
+ scheduled_at_utc TEXT,eligible_until REAL,state TEXT NOT NULL,reason TEXT NOT NULL,version INTEGER NOT NULL,
+ created_at TEXT NOT NULL,classified_at TEXT NOT NULL,
+ UNIQUE(schedule_id,slot_key),FOREIGN KEY(schedule_id,slot_key) REFERENCES schedule_slots(schedule_id,slot_key)
+);
+CREATE TABLE schedule_occurrence_targets(
+ occurrence_id TEXT NOT NULL REFERENCES schedule_occurrences(id),target_id TEXT NOT NULL REFERENCES release_targets(id),
+ batch_id TEXT NOT NULL REFERENCES release_batches(id),state TEXT NOT NULL,reason TEXT NOT NULL,
+ attempt_id TEXT REFERENCES release_attempts(id),job_id TEXT REFERENCES studio_jobs(id),
+ PRIMARY KEY(occurrence_id,target_id)
+);
+CREATE TABLE schedule_target_owners(
+ target_id TEXT PRIMARY KEY REFERENCES release_targets(id),schedule_id TEXT NOT NULL,slot_key TEXT NOT NULL,
+ active INTEGER NOT NULL CHECK(active IN (0,1)),assignment_version INTEGER NOT NULL,
+ FOREIGN KEY(schedule_id,slot_key) REFERENCES schedule_slots(schedule_id,slot_key)
+);
+CREATE TABLE schedule_events(
+ id TEXT PRIMARY KEY,schedule_id TEXT NOT NULL REFERENCES schedules(id),occurrence_id TEXT REFERENCES schedule_occurrences(id),
+ kind TEXT NOT NULL,reason TEXT NOT NULL,created_at TEXT NOT NULL
+);
+CREATE TABLE schedule_scan_windows(
+ schedule_id TEXT PRIMARY KEY REFERENCES schedules(id),cutoff REAL NOT NULL,watermark REAL NOT NULL,
+ cursor INTEGER NOT NULL,catchup_used INTEGER NOT NULL,complete INTEGER NOT NULL
+);
+CREATE TABLE scheduling_state(id INTEGER PRIMARY KEY CHECK(id=1),high_water REAL NOT NULL);
+INSERT INTO scheduling_state VALUES(1,0);
+CREATE TABLE publication_quota_reservations(
+ attempt_id TEXT PRIMARY KEY REFERENCES release_attempts(id),schedule_id TEXT REFERENCES schedules(id),
+ platform TEXT NOT NULL,stable_subject TEXT NOT NULL,evidence_mode TEXT NOT NULL,budget_day TEXT NOT NULL,
+ state TEXT NOT NULL CHECK(state IN ('RESERVED','CONSUMED','RELEASED')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL
+);
+CREATE INDEX publication_quota_day ON publication_quota_reservations(platform,stable_subject,evidence_mode,budget_day,state);
+CREATE TABLE publication_quota_baselines(
+ platform TEXT NOT NULL,stable_subject TEXT NOT NULL,evidence_mode TEXT NOT NULL,budget_day TEXT NOT NULL,
+ attempt_id TEXT NOT NULL REFERENCES release_attempts(id),source TEXT NOT NULL,
+ PRIMARY KEY(platform,stable_subject,evidence_mode,budget_day,attempt_id)
+);
+CREATE TABLE schedule_job_bindings(
+ job_id TEXT PRIMARY KEY REFERENCES studio_jobs(id),occurrence_id TEXT NOT NULL REFERENCES schedule_occurrences(id),
+ target_id TEXT NOT NULL REFERENCES release_targets(id),schedule_id TEXT NOT NULL REFERENCES schedules(id),
+ grant_version INTEGER NOT NULL,execution_epoch TEXT NOT NULL
+);
+UPDATE schema_version SET version=8;
+"""
