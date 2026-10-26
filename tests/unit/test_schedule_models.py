@@ -43,7 +43,7 @@ class ScheduleModelsTests(ScheduleFixture):
                 self.assertEqual(error.exception.code,'NONEXISTENT_LOCAL_TIME')
                 daily={k:v for k,v in base.items() if k!='local_date'}|{'kind':'DAILY_LOCAL','start_local_date':day,'timezone':zone,'local_time':clock}
                 slot=expand_slots(daily)[2][0];self.assertIsNone(slot['scheduled_at_utc']);self.assertEqual(slot['reason'],'SKIPPED_TIME_GAP')
-        for invalid in ('../UTC','/etc/passwd','Unknown/Place','UTC/../../passwd'):
+        for invalid in ('../UTC','/etc/passwd','Unknown/Place','UTC/../../passwd','localtime','posixrules','posix/UTC','right/UTC'):
             with self.assertRaises(Problem):zone_bytes(invalid)
 
     def test_pinned_tzif_and_slot_identity_survive_time_edit_and_host_change(self):

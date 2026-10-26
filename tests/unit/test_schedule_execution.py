@@ -241,6 +241,37 @@ class ScheduleExecutionTests(ScheduleFixture):
         plan,_=self.due_plan();self.drain();self.assertEqual(len(self.social.uploads),1)
         with self.store.transaction() as db:self.assertEqual(db.execute('SELECT COUNT(*) FROM publication_quota_baselines').fetchone()[0],1)
 
+    def test_expired_account_requires_explicit_recovery_without_implicit_login(self):
+        plan,_=self.due_plan()
+        with self.store.transaction(True) as db:db.execute("UPDATE studio_accounts SET checked_at='2026-10-25T12:00:00+00:00'")
+        profiles=self.social.settings['contract_profiles']['douyin']
+        self.social.settings['contract_profiles']['douyin']=[]
+        self.drain();self.assertEqual(len(self.social.checks),1);self.assertEqual(self.social.uploads,[])
+        self.assertEqual(self.store.studio_accounts()['items'][0]['state'],'EXPIRED')
+        self.social.settings['contract_profiles']['douyin']=profiles
+        self.drain();self.assertEqual(len(self.social.checks),1);self.assertEqual(self.social.uploads,[])
+        account=self.store.studio_accounts()['items'][0]
+        self.store.studio_check_account(account['id'],account['version'],uid())
+        job=self.store.studio_claim_job();self.control.execute_job(job,threading.Event())
+        self.drain();self.assertEqual(len(self.social.uploads),1)
+        self.assertEqual(len(self.store.schedule_occurrences(plan['id'])['items']),1)
+
+    def test_result_write_failure_after_upload_stays_unknown_without_another_call(self):
+        import sqlite3
+        plan,_=self.due_plan();self.tick();job=self.store.studio_claim_job()
+        original=self.store.studio_release_result;failed=False
+        def persist(value,result,source):
+            nonlocal failed
+            if not failed and result.get('outcome')=='PUBLISHED':
+                failed=True;raise sqlite3.OperationalError('private-result-write-canary')
+            return original(value,result,source)
+        with patch.object(self.store,'studio_release_result',side_effect=persist):self.control.execute_job(job,threading.Event())
+        self.assertTrue(failed);self.assertEqual(len(self.social.uploads),1)
+        self.drain();self.assertEqual(len(self.social.uploads),1)
+        state=self.store.schedule_get(plan['id']);self.assertEqual(state['display_state'],'UNRESOLVED')
+        self.assertNotIn('private-result-write-canary',json.dumps(state))
+        with self.store.transaction() as db:self.assertEqual(db.execute('SELECT state FROM publication_quota_reservations').fetchone()[0],'CONSUMED')
+
     def test_atomic_due_failure_rolls_back_slot_job_lock_and_reservation(self):
         plan,_=self.due_plan()
         with patch.object(self.store,'_schedule_event',side_effect=RuntimeError('injected')):

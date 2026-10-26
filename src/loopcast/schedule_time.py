@@ -6,17 +6,23 @@ from importlib import resources
 from io import BytesIO
 from pathlib import Path
 import re
-from zoneinfo import TZPATH, ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import TZPATH, ZoneInfo, ZoneInfoNotFoundError, available_timezones
 from .domain import Problem
 from .schedule_models import SchedulePreviewRequest
 
 RULE_VERSION = 'local-daily-v1'
 
 
+@lru_cache(maxsize=1)
+def installed_zones():
+    return frozenset(available_timezones()) - {'localtime', 'posixrules'}
+
+
 @lru_cache(maxsize=128)
 def zone_bytes(key):
     if not isinstance(key, str) or len(key) > 128 or not re.fullmatch(r'[A-Za-z0-9_+-]+(?:/[A-Za-z0-9_+-]+)*', key):
         raise Problem('INVALID_TIMEZONE', 'Choose an installed IANA time zone.', 422)
+    if key not in installed_zones():raise Problem('INVALID_TIMEZONE', 'Choose an installed IANA time zone.', 422)
     raw = None
     for root in TZPATH:
         path = Path(root).joinpath(*key.split('/'))
