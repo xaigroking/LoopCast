@@ -163,6 +163,12 @@ class InspectionTests(ScheduleFixture):
         with store.transaction()as db:self.assertEqual(db.execute('SELECT version FROM studio_projects').fetchone()[0],3)
 
 
+    def test_submicrosecond_timestamp_rounding_is_not_clock_rollback_or_expiry(self):
+        self.clock.value+=.1234567
+        check=self.begin()['check'];report=self.finish(check)
+        self.assertEqual(report['result'],'CALLABLE')
+        self.assertEqual(self.service.report(report['id'])['freshness'],'FRESH')
+
     def test_late_success_after_monotonic_budget_preserves_previous_account_observation(self):
         import time
         before=self.store.studio_accounts()['items'][0];check=self.begin('ACCOUNT',True)['check'];job=self.store.studio_claim_job()

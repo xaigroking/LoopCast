@@ -86,7 +86,7 @@ class InspectionMethods:
         if descriptor and (descriptor['fingerprint']!=channel['input_digest'] or descriptor['scope']['account_version']!=channel['account_version']):current+=1
         if current!=value['channel_version']:
             value.update(freshness='SUPERSEDED',superseded_by_version=current)
-        elif self.clock.now()<datetime.fromisoformat(value['completed_at']).timestamp() or self.clock.now()>=datetime.fromisoformat(value['valid_until']).timestamp():
+        elif datetime.fromtimestamp(self.clock.now(),timezone.utc)<datetime.fromisoformat(value['completed_at']) or datetime.fromtimestamp(self.clock.now(),timezone.utc)>=datetime.fromisoformat(value['valid_until']):
             value.update(freshness='EXPIRED',superseded_by_version=None)
         else:value.update(freshness='FRESH',superseded_by_version=None)
         return ChannelReport.model_validate(value).model_dump()
@@ -175,7 +175,7 @@ class InspectionMethods:
         if not current and terminal!='INTERRUPTED':terminal='SUPERSEDED'
         elif (self.clock.now()>check['deadline'] or time.monotonic()>json.loads(check['private_input']).get('monotonic_deadline',float('inf'))) and terminal=='COMPLETED':
             terminal='TIMED_OUT';outcome.update(result='UNKNOWN',reason_code='CHECK_TIMEOUT',evidence_status='unverified')
-        if current and terminal!='TIMED_OUT' and self.clock.now()<datetime.fromisoformat(check['started_at'] or check['created_at']).timestamp():
+        if current and terminal!='TIMED_OUT' and datetime.fromtimestamp(self.clock.now(),timezone.utc)<datetime.fromisoformat(check['started_at'] or check['created_at']):
             outcome.update(result='UNKNOWN',reason_code='CHECK_CLOCK_CHANGED',evidence_status='unverified')
         identity=uid();completed=self.clock.iso();value=outcome|{'id':identity,'channel_id':check['channel_id'],'channel_version':check['channel_version'],'check_id':check['id'],
              'observed_at':completed,'started_at':check['started_at'] or check['created_at'],'completed_at':completed,'valid_until':stamp(self.clock.now()+self.inspection_settings.freshness_seconds),
