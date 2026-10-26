@@ -69,7 +69,7 @@ backend_pid=
 python - "$generator_dir" <<'SCHEDULING'
 import json,pathlib,sys
 root=pathlib.Path(sys.argv[1]);path=root/'social.json';social=json.loads(path.read_text())
-social['contract_profiles']['douyin'].extend([{'stable_subject':p,'label':p+' contract account'} for p in ('plan-douyin','plan-second')])
+social['contract_profiles']['douyin'].extend([{'stable_subject':p,'label':p+' contract account'} for p in ('plan-douyin','plan-second','plan-third')])
 path.write_text(json.dumps(social))
 (root/'scheduling.json').write_text(json.dumps({'format':'loopcast.scheduling.v1','enabled':True,'allow_live':False}))
 SCHEDULING
