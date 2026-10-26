@@ -1,10 +1,10 @@
 """Own the single-worker application resources for one data directory."""
-import fcntl
 from pathlib import Path
 import threading
 
 from .storage import Store
 from .worker import Worker
+from .ownership import DirectoryLock
 
 
 class ApplicationRuntime:
@@ -16,14 +16,11 @@ class ApplicationRuntime:
         self.generator_settings, self.media_settings = generator_settings, media_settings
         try: self.generator = Generator(generator_settings) if generator_settings is not None else None
         except (OSError, ValueError, RuntimeError): self.generator = None
-        self.directory = Path(directory).expanduser().resolve()
-        self.directory.mkdir(parents=True, exist_ok=True)
-        self._lock_file = (self.directory / "service.lock").open("a")
         try:
-            fcntl.flock(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            self._lock_file.close()
+            self._directory_lock = DirectoryLock(directory, create=True)
+        except (OSError, ValueError):
             raise RuntimeError("The data directory is already in use") from None
+        self.directory = self._directory_lock.path
 
         self.stopping = threading.Event()
         self.stream_slots = threading.BoundedSemaphore(16)
@@ -66,5 +63,4 @@ class ApplicationRuntime:
             self._release_lock()
 
     def _release_lock(self):
-        if not self._lock_file.closed:
-            self._lock_file.close()
+        self._directory_lock.close()

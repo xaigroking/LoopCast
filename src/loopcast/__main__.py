@@ -6,6 +6,7 @@ from importlib.metadata import version
 import os
 from pathlib import Path
 import socket
+import sqlite3
 
 
 async def _serve(args, settings):
@@ -65,7 +66,26 @@ def main():
     demo = commands.add_parser('demo-feedback', help='Run an explicit fixture-only two-round feedback workflow in a fresh directory')
     demo.add_argument('--data-dir', type=Path, required=True)
     demo.add_argument('--media-config', type=Path, required=True)
+    backup = commands.add_parser('backup', help='Create or verify a private offline consistency backup')
+    backup_actions = backup.add_subparsers(dest='backup_action', required=True)
+    backup_create = backup_actions.add_parser('create', help='Require a stopped owner and create a new private backup directory')
+    backup_create.add_argument('--data-dir', type=Path, required=True)
+    backup_create.add_argument('--output', type=Path, required=True)
+    backup_verify = backup_actions.add_parser('verify', help='Verify a private backup against an independently recorded manifest digest')
+    backup_verify.add_argument('--backup', type=Path, required=True)
+    backup_verify.add_argument('--expected-manifest-sha256', required=True)
     args = parser.parse_args()
+    if args.command == 'backup':
+        from .backup import create_backup, verify_backup
+        try:
+            if args.backup_action == 'create':
+                result = create_backup(args.data_dir, args.output)
+            else:
+                manifest = verify_backup(args.backup, args.expected_manifest_sha256)
+                result = {'state': 'VERIFIED_PRIVATE_BACKUP', 'backup_id': manifest['backup_id'], 'schema_version': manifest['schema_version'], 'files': len(manifest['files'])}
+            print(json.dumps(result, sort_keys=True)); return
+        except (OSError, ValueError, RuntimeError, KeyError, TypeError, AttributeError, sqlite3.Error):
+            parser.exit(1, 'Backup operation failed. Stop the data owner and check the private package, paths, permissions, space and recorded digest.\n')
     if args.command == 'demo-feedback':
         from .feedback_demo import demonstrate
         try:

@@ -10,6 +10,7 @@ domain = {"domain", "contracts", "fixture", "generation", "ledger", "publisher",
 forbidden = {"fastapi", "starlette", "uvicorn", "next", "react"}
 # Store/ledger are the persistence adapter; pure run rules live in domain.py.
 allowed = {
+    "ownership": set(), "backup": {"migrations", "ownership"},
     "domain": set(), "contracts": set(), "fixture": set(), "runner": set(),
     "migrations": set(), "diagnostics": set(), "publisher_cli": set(),
     "storage": {"domain", "ledger", "migrations", "studio_storage", "account_storage", "release_storage", "feedback_storage"}, "ledger": {"domain"},
@@ -29,9 +30,9 @@ allowed = {
     "studio_service": {"domain", "runner", "diagnostics"},
     "generation": {"contracts", "runner", "diagnostics", "network"}, "worker": {"domain", "runner", "diagnostics"},
     "publisher": {"runner", "diagnostics"},
-    "runtime": {"storage", "worker", "generation", "publisher", "media", "creation", "social", "studio_service"},
+    "runtime": {"storage", "worker", "generation", "publisher", "media", "creation", "social", "studio_service", "ownership"},
     "api": {"runtime", "storage", "diagnostics", "studio_api", "feedback_api"}, "openapi": {"api"},
-    "__main__": {"api", "diagnostics", "generator_diagnostics", "mpt_install", "feedback_demo"}, "__init__": set(),
+    "__main__": {"api", "diagnostics", "generator_diagnostics", "mpt_install", "feedback_demo", "backup"}, "__init__": set(),
 }
 graph = {name: set() for name in modules}
 for name, path in modules.items():

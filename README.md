@@ -20,6 +20,8 @@ performance gains.
 
 ## Build and deploy
 
+Offline private backups and verification are described in [OPERATIONS.md](OPERATIONS.md).
+
 ```sh
 python3.12 -m pip install --require-hashes -r requirements-ci.lock
 python3.12 -m pip install --require-hashes -r requirements-runtime.lock
