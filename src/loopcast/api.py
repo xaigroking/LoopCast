@@ -20,6 +20,7 @@ from .studio_api import register_studio_routes
 from .feedback_api import register_feedback_routes
 from .operations_api import register_operations_routes
 from .schedule_api import register_schedule_routes
+from .inspection_api import register_inspection_routes
 from .schedule_models import ScheduleConflictEnvelope
 
 ID = r"[a-f0-9]{32}"
@@ -269,6 +270,7 @@ def create_app(
     media_settings=None,
     social_settings=None,
     schedule_settings=None,
+    inspection_settings=None,
     clock=None,
 ):
     """Create an app factory; resources are acquired only inside ASGI lifespan."""
@@ -283,7 +285,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        runtime = ApplicationRuntime(data_dir, generator_settings, media_settings, social_settings, schedule_settings=schedule_settings, clock=clock)
+        runtime = ApplicationRuntime(data_dir, generator_settings, media_settings, social_settings, schedule_settings=schedule_settings, inspection_settings=inspection_settings, clock=clock)
         app.state.runtime = runtime
         try:
             yield
@@ -555,6 +557,7 @@ def create_app(
     register_studio_routes(app, ERROR_RESPONSES)
     register_feedback_routes(app, ERROR_RESPONSES)
     register_operations_routes(app, ERROR_RESPONSES)
+    register_inspection_routes(app, ERROR_RESPONSES)
     register_schedule_routes(app, ERROR_RESPONSES | {409: {'model': ScheduleConflictEnvelope, 'description': 'Stable error envelope with the current safe plan for a version conflict'}})
 
     @app.api_route("/v1", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], include_in_schema=False)

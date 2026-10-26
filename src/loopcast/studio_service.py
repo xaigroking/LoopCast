@@ -13,6 +13,7 @@ from .diagnostics import child_context, log_event
 class StudioControl:
     def __init__(self, store, library, social, generator=None):
         self.store, self.library, self.social, self.generator = store, library, social, generator
+        self.inspections = None
 
     @property
     def platform_map(self):
@@ -113,11 +114,15 @@ class StudioControl:
                     self.social.remove_credentials(reference)
                     result_state = 'IGNORED'
             elif kind == 'check':
+                if self.inspections:self.store.inspection_running(job)
                 account = self.store.studio_private_account(identity)
                 shutil.copyfile(self.social.credential_path(account['credential_ref']), work / 'credentials.json')
                 (work / 'credentials.json').chmod(0o600)
+                if self.inspections:self.inspections.account_invoked(job)
                 result = self.social.invoke('check', account['platform'], work, {}, cancelled)
-                self.store.studio_check_result(job, result.get('valid') is True, result.get('profile', {}).get('stable_subject'))
+                if self.inspections:self.inspections.before_account_result(job)
+                observation=self.inspections.account_outcome(result,account) if self.inspections else None
+                self.store.studio_check_result(job,result.get('valid')is True,result.get('profile',{}).get('stable_subject'),observation)
                 result_state = 'SUCCEEDED' if result.get('valid') is True else 'EXPIRED'
             else:
                 release = self.store.studio_release_job(job)

@@ -39,6 +39,7 @@ class OperationsMethods:
             db.execute('INSERT INTO restore_events VALUES(?,?,?,?,?,?,?,?)',
                        (identity, manifest['backup_id'], manifest_sha256, manifest['created_at'], restored, manifest['schema_version'], epoch, 'ALL_STUDIO_UPLOADS'))
             db.execute('UPDATE operations_state SET execution_epoch=? WHERE id=1', (epoch,))
+            self._inspection_recover(db)
             db.execute("INSERT INTO restore_guard VALUES(1,?,1,'ACTIVE','EXTERNAL_HISTORY_UNRECONCILED') ON CONFLICT(id) DO UPDATE SET restore_id=excluded.restore_id,version=restore_guard.version+1,state='ACTIVE',reason=excluded.reason", (identity,))
             def fence(kind, item, token):
                 db.execute('INSERT INTO restore_fences VALUES(?,?,?,?)', (identity, kind, item, hashlib.sha256(token.encode()).hexdigest()))

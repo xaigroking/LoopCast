@@ -103,22 +103,23 @@ class AccountMethods:
     def studio_check_account(self, identity, expected_version, key, trace=None):
         scope, request = 'account.check:' + identity, {'expected_version': expected_version}
         with self.transaction(True) as db:
-            account = self._account(db, identity)
-            if self._studio_prior(db, scope, key, request):
-                return account
-            if account['version'] != expected_version:
-                raise Problem('VERSION_CONFLICT', 'Refresh the account.', 409)
-            if account['state'] == 'DISCONNECTED':
-                raise Problem('ACCOUNT_DISCONNECTED', 'Reconnect this account.', 409)
-            db.execute("UPDATE studio_accounts SET state='PENDING',version=version+1 WHERE id=?", (identity,))
-            self._studio_enqueue(db, 'check', identity, self.clock.now() + 60, trace, {'account_version': expected_version + 1})
-            self._studio_remember(db, scope, key, request, {'id': identity})
-            return self._account(db, identity)
+            return self._studio_check_account(db,identity,expected_version,key,trace)
+
+    def _studio_check_account(self, db, identity, expected_version, key, trace=None):
+        scope, request = 'account.check:' + identity, {'expected_version': expected_version}
+        account = self._account(db, identity)
+        if self._studio_prior(db, scope, key, request):return account
+        if account['version'] != expected_version:raise Problem('VERSION_CONFLICT','Refresh the account.',409)
+        if account['state'] == 'DISCONNECTED':raise Problem('ACCOUNT_DISCONNECTED','Reconnect this account.',409)
+        db.execute("UPDATE studio_accounts SET state='PENDING',version=version+1 WHERE id=?",(identity,))
+        self._studio_enqueue(db,'check',identity,self.clock.now()+60,trace,{'account_version':expected_version+1})
+        self._studio_remember(db,scope,key,request,{'id':identity})
+        return self._account(db,identity)
 
     def studio_claim_job(self):
         with self.transaction(True) as db:
             clause = " AND kind!='dispatch'" if self._restore_guard(db) else ''
-            row = db.execute("SELECT * FROM studio_jobs WHERE state='READY'" + clause + " ORDER BY rowid LIMIT 1").fetchone()
+            row = db.execute("SELECT * FROM studio_jobs WHERE state='READY'" + clause + " ORDER BY CASE WHEN kind='inspection' THEN 1 ELSE 0 END,rowid LIMIT 1").fetchone()
             if row is None:
                 return None
             job = dict(row)
@@ -131,7 +132,11 @@ class AccountMethods:
                 if job['kind'] == 'authorize':
                     db.execute("UPDATE auth_sessions SET state='EXPIRED',version=version+1 WHERE id=? AND state IN ('PENDING','WAITING','VERIFYING')", (job['subject_id'],))
                 elif job['kind'] == 'check':
-                    db.execute("UPDATE studio_accounts SET state='EXPIRED',version=version+1 WHERE id=? AND state='PENDING'", (job['subject_id'],))
+                    if not self._inspection_account_failed(db,job,'CHECK_TIMEOUT'):
+                        db.execute("UPDATE studio_accounts SET state='EXPIRED',version=version+1 WHERE id=? AND state='PENDING'", (job['subject_id'],))
+                elif job['kind'] == 'inspection':
+                    check=db.execute('SELECT * FROM inspection_checks WHERE job_id=?',(job['id'],)).fetchone()
+                    if check:self._inspection_finish(db,check,{'result':'UNKNOWN','reason_code':'CHECK_TIMEOUT','evidence_scope':'LOCAL_RUNTIME','checks':[],'actual_operations':{}},terminal='TIMED_OUT')
                 elif job['kind'] == 'dispatch':
                     db.execute("UPDATE release_attempts SET state='NOT_SENT',ended_at=? WHERE token=? AND state='PREPARED'", (self.clock.iso(), job['token']))
                     db.execute("UPDATE release_targets SET state='NOT_SENT',version=version+1 WHERE id=? AND state='PREPARED'", (job['subject_id'],))
@@ -200,18 +205,28 @@ class AccountMethods:
             db.execute("UPDATE studio_jobs SET state='DONE' WHERE id=? AND token=?", (job['id'], job['token']))
             return True
 
-    def studio_check_result(self, job, valid, subject=None):
+    def studio_check_result(self, job, valid, subject=None, observation=None):
         with self.transaction(True) as db:
-            if not self._job_epoch_current(db, job):return False
+            if not self._job_epoch_current(db, job):
+                if observation and job.get('execution_epoch')==self._execution_epoch(db):self._inspection_account_result(db,job,observation,False)
+                return False
             row = db.execute("SELECT 1 FROM studio_jobs WHERE id=? AND token=? AND state='RUNNING'", (job['id'], job['token'])).fetchone()
             if not row:
+                if observation:self._inspection_account_result(db,job,observation,False)
                 return False
             account = self._account(db, job['subject_id'])
             expected = job['payload']['account_version']
-            if account['version'] == expected and account['state'] == 'PENDING':
-                state = 'AVAILABLE' if valid and subject == account['stable_subject'] else 'EXPIRED'
-                db.execute('UPDATE studio_accounts SET state=?,checked_at=?,version=version+1 WHERE id=?', (state, self.clock.iso(), job['subject_id']))
-            db.execute("UPDATE studio_jobs SET state='DONE' WHERE id=? AND token=?", (job['id'], job['token']))
+            applied=account['version']==expected and account['state']=='PENDING'
+            if observation and observation['result']=='UNKNOWN' and self._inspection_account_failed(db,job,observation['reason_code']):
+                db.execute("UPDATE studio_jobs SET state='DONE' WHERE id=? AND token=?",(job['id'],job['token']))
+                return True
+            if applied:
+                state='AVAILABLE' if valid and subject==account['stable_subject'] else 'EXPIRED'
+                db.execute('UPDATE studio_accounts SET state=?,checked_at=?,version=version+1 WHERE id=?',(state,self.clock.iso(),job['subject_id']))
+            if observation:
+                if valid and subject!=account['stable_subject']:observation=observation|{'result':'FAILED','reason_code':'IDENTITY_INVALID','evidence_status':'unverified'}
+                self._inspection_account_result(db,job,observation,applied,expected+1 if applied else None)
+            db.execute("UPDATE studio_jobs SET state='DONE' WHERE id=? AND token=?",(job['id'],job['token']))
             return True
 
     def studio_fail_job(self, job, code):
@@ -220,12 +235,15 @@ class AccountMethods:
             if job['kind'] == 'authorize':
                 db.execute("UPDATE auth_sessions SET state=CASE WHEN expires_at<=? THEN 'EXPIRED' ELSE 'FAILED' END,error_code=?,version=version+1 WHERE id=? AND token=? AND state IN ('PENDING','WAITING','VERIFYING')", (self.clock.now(), code, job['subject_id'], job['token']))
             elif job['kind'] == 'check':
-                db.execute("UPDATE studio_accounts SET state='EXPIRED',version=version+1 WHERE id=? AND version=?", (job['subject_id'], job['payload']['account_version']))
+                if not self._inspection_account_failed(db,job,code):
+                    changed=db.execute("UPDATE studio_accounts SET state='EXPIRED',version=version+1 WHERE id=? AND version=?",(job['subject_id'],job['payload']['account_version'])).rowcount
+                    self._inspection_account_result(db,job,{'result':'UNKNOWN','reason_code':'CHECK_UNAVAILABLE','evidence_scope':'ACCOUNT_IDENTITY','checks':[],'actual_operations':{'check':1}},bool(changed),job['payload']['account_version']+1 if changed else None)
             db.execute("UPDATE studio_jobs SET state='DONE' WHERE id=? AND token=?", (job['id'], job['token']))
             return False
 
     def studio_recover(self):
         with self.transaction(True) as db:
+            self._inspection_recover(db)
             db.execute("UPDATE auth_sessions SET state='FAILED',error_code='INTERRUPTED',version=version+1 WHERE id IN (SELECT subject_id FROM studio_jobs WHERE kind='authorize' AND state='RUNNING') AND state IN ('PENDING','WAITING','VERIFYING')")
             db.execute("UPDATE studio_accounts SET state='EXPIRED',version=version+1 WHERE state='PENDING'")
             for row in db.execute("SELECT * FROM release_attempts WHERE state IN ('PREPARED','SENDING')").fetchall():

@@ -103,7 +103,7 @@ DELETE FROM schema_version;
 INSERT INTO schema_version VALUES(5);
 """
 
-CURRENT_VERSION = 8
+CURRENT_VERSION = 9
 
 def statements(db, script):
     for statement in script.split(';'):
@@ -119,7 +119,7 @@ def migrate(db):
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE name='schema_version'").fetchone()
         if exists:
             versions = [r[0] for r in db.execute('SELECT version FROM schema_version')]
-            if versions not in ([1], [2], [3], [4], [5], [6], [7], [8]):
+            if versions not in ([1], [2], [3], [4], [5], [6], [7], [8], [9]):
                 raise RuntimeError('Unsupported state database version')
             version = versions[0]
         else:
@@ -147,6 +147,9 @@ def migrate(db):
             version = 7
         if version == 7:
             statements(db, VERSION_EIGHT)
+            version = 8
+        if version == 8:
+            statements(db, VERSION_NINE)
         if db.execute('PRAGMA foreign_key_check').fetchone():
             raise RuntimeError('Invalid state database references')
         db.commit()
@@ -261,4 +264,14 @@ CREATE TABLE schedule_job_bindings(
  grant_version INTEGER NOT NULL,execution_epoch TEXT NOT NULL
 );
 UPDATE schema_version SET version=8;
+"""
+
+VERSION_NINE = r"""
+CREATE TABLE inspection_channels(id TEXT PRIMARY KEY,kind TEXT NOT NULL,account_id TEXT REFERENCES studio_accounts(id),version INTEGER NOT NULL,input_digest TEXT NOT NULL,account_version INTEGER,scope TEXT NOT NULL,inventory_at TEXT NOT NULL,latest_report TEXT,next_due REAL NOT NULL DEFAULT 0,not_before REAL NOT NULL DEFAULT 0,failure_count INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE inspection_checks(id TEXT PRIMARY KEY,channel_id TEXT NOT NULL REFERENCES inspection_channels(id),channel_version INTEGER NOT NULL,state TEXT NOT NULL,online INTEGER NOT NULL,created_at TEXT NOT NULL,started_at TEXT,completed_at TEXT,deadline REAL NOT NULL,token TEXT NOT NULL,execution_epoch TEXT NOT NULL,job_id TEXT REFERENCES studio_jobs(id),owns_job INTEGER NOT NULL,scope TEXT NOT NULL,private_input TEXT NOT NULL,report_id TEXT,reason_code TEXT NOT NULL);
+CREATE UNIQUE INDEX inspection_one_active ON inspection_checks(channel_id) WHERE state IN ('QUEUED','RUNNING');
+CREATE INDEX inspection_job ON inspection_checks(job_id);
+CREATE TABLE inspection_reports(id TEXT PRIMARY KEY,channel_id TEXT NOT NULL REFERENCES inspection_channels(id),channel_version INTEGER NOT NULL,check_id TEXT NOT NULL UNIQUE REFERENCES inspection_checks(id),payload TEXT NOT NULL);
+CREATE TABLE inspection_events(id INTEGER PRIMARY KEY AUTOINCREMENT,channel_id TEXT NOT NULL REFERENCES inspection_channels(id),channel_version INTEGER NOT NULL,kind TEXT NOT NULL,previous_report TEXT REFERENCES inspection_reports(id),current_report TEXT NOT NULL REFERENCES inspection_reports(id),created_at TEXT NOT NULL,payload TEXT NOT NULL);
+DELETE FROM schema_version; INSERT INTO schema_version VALUES(9);
 """

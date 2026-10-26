@@ -10,7 +10,7 @@ from .ownership import DirectoryLock
 class ApplicationRuntime:
     """One process-local owner for storage, recovery, worker and publisher."""
 
-    def __init__(self, directory: str | Path, generator_settings=None, media_settings=None, social_settings=None, *, schedule_settings=None, clock=None):
+    def __init__(self, directory: str | Path, generator_settings=None, media_settings=None, social_settings=None, *, schedule_settings=None, inspection_settings=None, clock=None):
         from .generation import Generator
 
         self.generator_settings, self.media_settings = generator_settings, media_settings
@@ -29,7 +29,7 @@ class ApplicationRuntime:
         self.worker = None
         self.publisher = None
         try:
-            self.store = Store(self.directory, self.generator.manifest if self.generator else None, schedule_settings=schedule_settings, clock=clock)
+            self.store = Store(self.directory, self.generator.manifest if self.generator else None, schedule_settings=schedule_settings, inspection_settings=inspection_settings, clock=clock)
             from .media import MediaLibrary
             from .creation import CreationExecutor
             from .social import SocialAdapter
@@ -38,11 +38,14 @@ class ApplicationRuntime:
             except (OSError, ValueError, RuntimeError): self.media = MediaLibrary(self.store, None)
             self.social = SocialAdapter(self.directory, social_settings)
             self.studio = StudioControl(self.store, self.media, self.social, self.generator)
+            from .inspection_service import InspectionService
+            self.inspections=InspectionService(self)
+            self.studio.inspections=self.inspections
             creation = CreationExecutor(self.generator, self.media) if self.generator else None
             self.worker = Worker(self.store, generator=self.generator, creation=creation)
             self.worker.start()
             from .publisher import Publisher
-            self.publisher = Publisher(self.store, studio=self.studio)
+            self.publisher = Publisher(self.store, studio=self.studio, inspections=self.inspections)
         except BaseException:
             if self.worker is not None:
                 self.worker.close()

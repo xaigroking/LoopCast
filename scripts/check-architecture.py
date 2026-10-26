@@ -10,6 +10,12 @@ domain = {"domain", "contracts", "fixture", "generation", "ledger", "publisher",
 forbidden = {"fastapi", "starlette", "uvicorn", "next", "react"}
 # Store/ledger are the persistence adapter; pure run rules live in domain.py.
 allowed = {
+    "inspection_api": {"studio_models", "inspection_models"},
+    "inspection_models": {"studio_models"},
+    "inspection_identity": {"domain"},
+    "inspection_storage": {"domain", "inspection_models"},
+    "inspection_service": {"backup", "domain", "inspection_identity", "inspection_models", "runner"},
+    "inspection_probe": {"generator_diagnostics", "generation", "operations_snapshot", "inspection_models", "runner"},
     "schedule_api": {"schedule_models", "domain"},
     "schedule_execution": {"domain", "schedule_time"},
     "quota_storage": {"domain"},
@@ -21,7 +27,7 @@ allowed = {
     "operations_models": {"studio_models"}, "operations_api": {"operations_models", "operations_snapshot"},
     "domain": set(), "contracts": set(), "fixture": set(), "runner": set(),
     "migrations": set(), "diagnostics": set(), "publisher_cli": set(),
-    "storage": {"domain", "ledger", "migrations", "studio_storage", "account_storage", "release_storage", "feedback_storage", "operations_storage", "schedule_storage", "schedule_config", "quota_storage", "schedule_execution"}, "ledger": {"domain"},
+    "storage": {"domain", "ledger", "migrations", "studio_storage", "account_storage", "release_storage", "feedback_storage", "operations_storage", "schedule_storage", "schedule_config", "quota_storage", "schedule_execution", "inspection_models", "inspection_storage"}, "ledger": {"domain"},
     "feedback_demo": {"domain","runtime","runner"},
     "feedback_models": {"studio_models"}, "feedback_rules": {"domain"},
     "feedback_storage": {"domain","feedback_models","feedback_rules","studio_models"},
@@ -38,9 +44,9 @@ allowed = {
     "studio_service": {"domain", "runner", "diagnostics"},
     "generation": {"contracts", "runner", "diagnostics", "network"}, "worker": {"domain", "runner", "diagnostics"},
     "publisher": {"runner", "diagnostics"},
-    "runtime": {"storage", "worker", "generation", "publisher", "media", "creation", "social", "studio_service", "ownership"},
-    "api": {"runtime", "storage", "diagnostics", "studio_api", "feedback_api", "operations_api", "schedule_api", "schedule_models"}, "openapi": {"api"},
-    "__main__": {"api", "diagnostics", "generator_diagnostics", "mpt_install", "feedback_demo", "backup", "restore", "operations_snapshot", "schedule_config"}, "__init__": set(),
+    "runtime": {"storage", "worker", "generation", "publisher", "media", "creation", "social", "studio_service", "ownership", "inspection_service"},
+    "api": {"runtime", "storage", "diagnostics", "studio_api", "feedback_api", "operations_api", "schedule_api", "schedule_models", "inspection_api"}, "openapi": {"api"},
+    "__main__": {"api", "diagnostics", "generator_diagnostics", "mpt_install", "feedback_demo", "backup", "restore", "operations_snapshot", "schedule_config", "inspection_models"}, "__init__": set(),
 }
 graph = {name: set() for name in modules}
 for name, path in modules.items():

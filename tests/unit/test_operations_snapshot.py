@@ -29,7 +29,7 @@ class OperationsSnapshotTests(unittest.TestCase):
         self.assertEqual(report['generator']['declared_revision']['status'],'unverified')
         self.assertEqual(report['generator']['wheel_sha256']['status'],'unavailable')
         self.assertEqual(report['media']['ffmpeg']['status'],'unavailable')
-        self.assertEqual(report['database']['schema']['value'],8)
+        self.assertEqual(report['database']['schema']['value'],9)
         self.assertEqual(self.store.database.read_bytes(),before); self.assertEqual(self.store.list_runs(),events)
         raw = json.dumps(report)
         for private in ('environment-secret-canary','input-secret-canary','provider-secret-canary','private-wheel-canary','private-config-canary',str(self.root)):

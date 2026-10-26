@@ -10,9 +10,10 @@ from .diagnostics import child_context, log_event
 
 
 class Publisher:
-    def __init__(self, store, studio=None):
+    def __init__(self, store, studio=None, inspections=None):
         self.store = store
         self.studio = studio
+        self.inspections = inspections
         self.stopping = threading.Event()
         self.jobs = queue.Queue(maxsize=32)
         self.thread = threading.Thread(target=self._loop, name='publication-worker', daemon=True)
@@ -42,7 +43,8 @@ class Publisher:
                     self.next_schedule_scan = time.monotonic() + 1
                 durable = self.store.studio_claim_job()
                 if durable:
-                    self.studio.execute_job(durable, self.stopping)
+                    if durable['kind']=='inspection' and self.inspections:self.inspections.execute(durable,self.stopping)
+                    else:self.studio.execute_job(durable,self.stopping)
                     continue
             try: job, scenario = self.jobs.get(timeout=.1)
             except queue.Empty: continue
