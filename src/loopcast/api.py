@@ -17,6 +17,7 @@ from .runtime import ApplicationRuntime
 from .storage import Problem, uid, TERMINAL
 from .diagnostics import new_context, log_event
 from .studio_api import register_studio_routes
+from .feedback_api import register_feedback_routes
 
 ID = r"[a-f0-9]{32}"
 _RUN = re.compile(r"^/v1/runs/([a-f0-9]{32})(?:/(cancel|retry|events))?$")
@@ -332,7 +333,7 @@ def create_app(
 
         if is_write and (request.url.path == "/v1" or request.url.path.startswith("/v1/")):
             uploading = method == 'POST' and request.url.path == '/v1/studio/assets/import'
-            body_limit = 128 * 1024 * 1024 if uploading else 1048576 if request.url.path.startswith('/v1/studio/') else 16384
+            body_limit = 128 * 1024 * 1024 if uploading else 1048576 if request.url.path.startswith(('/v1/studio/', '/v1/feedback/')) else 16384
             expected_origin = public_origin if public_origin else f"{scheme}://{effective_host}"
             if request.headers.get("origin") != expected_origin or request.headers.get("sec-fetch-site") == "cross-site":
                 return reject(Problem("ORIGIN_REJECTED", "Writes require the exact public Origin.", 403))
@@ -536,6 +537,7 @@ def create_app(
         return Response(content, media_type=info["media_type"], headers={"Content-Length": str(len(content)), "Content-Disposition": "inline"})
 
     register_studio_routes(app, ERROR_RESPONSES)
+    register_feedback_routes(app, ERROR_RESPONSES)
 
     @app.api_route("/v1", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], include_in_schema=False)
     @app.api_route("/v1/{unknown:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], include_in_schema=False)

@@ -28,7 +28,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
         <Link className="nav" href="/create" aria-current={pathname.startsWith('/create') ? 'page' : undefined}>{t('studio:create')}</Link>
         <Link className="nav" href="/library" aria-current={pathname === '/library' ? 'page' : undefined}>{t('studio:library')}</Link>
         <Link className="nav" href="/accounts" aria-current={pathname === '/accounts' ? 'page' : undefined}>{t('studio:accounts')}</Link>
-        <Link className="nav" href="/publish" aria-current={pathname === '/publish' ? 'page' : undefined}>{t('studio:publish')}</Link>
+        <Link className="nav" href="/publish" aria-current={pathname === '/publish' || pathname === '/feedback' ? 'page' : undefined}>{t('studio:publish')}</Link>
         <Link className="nav" href="/settings" aria-current={pathname === '/settings' ? 'page' : undefined}>{t('settings')}</Link>
       </nav>
       <div className="aside-foot"><span className="dot" />{t('preferencesHint')}</div>

@@ -29,7 +29,8 @@ class StudioMethods:
                 generations.append({key: g[key] for key in ('id', 'revision_id', 'run_id', 'stage', 'input_digest', 'state', 'created_at')} | {
                     'component_revision': component['revision'], 'component_sha256': component['artifact_sha256'],
                     'asset_ids': [a[0] for a in db.execute('SELECT asset_id FROM generation_assets WHERE generation_id=?', (g['id'],))]})
-            revisions.append({'id': r['id'], 'number': r['number'], 'draft': json.loads(r['draft']),
+            decision = db.execute('SELECT decision_id FROM feedback_revision_links WHERE revision_id=?', (r['id'],)).fetchone()
+            revisions.append({'decision_id': decision[0] if decision else None, 'id': r['id'], 'number': r['number'], 'draft': json.loads(r['draft']),
                               'input_digest': r['input_digest'], 'created_at': r['created_at'], 'generations': generations})
         return {'id': row['id'], 'version': row['version'], 'draft': json.loads(row['draft']),
                 'created_at': row['created_at'], 'updated_at': row['updated_at'], 'revisions': revisions}
@@ -79,6 +80,8 @@ class StudioMethods:
             number = db.execute('SELECT COALESCE(MAX(number),0)+1 FROM studio_revisions WHERE project_id=?', (project_id,)).fetchone()[0]
             identity = uid()
             db.execute('INSERT INTO studio_revisions VALUES(?,?,?,?,?,?)', (identity, project_id, number, canonical(project['draft']), digest(project['draft']), now()))
+            previous = db.execute('SELECT l.decision_id FROM feedback_revision_links l JOIN studio_revisions r ON r.id=l.revision_id WHERE r.project_id=? ORDER BY r.number DESC LIMIT 1', (project_id,)).fetchone()
+            if previous: db.execute('INSERT INTO feedback_revision_links VALUES(?,?,?)', (identity, previous[0], now()))
             db.execute('UPDATE studio_projects SET version=version+1,updated_at=? WHERE id=?', (now(), project_id))
             self._studio_remember(db, scope, key, request, {'id': identity})
             return self._project(db, project_id)

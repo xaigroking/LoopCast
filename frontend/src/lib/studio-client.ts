@@ -33,7 +33,7 @@ export class StudioClient {
       if (!Array.isArray(values)) throw Error('INVALID_CACHE');
       for (const value of values) {
         if (value && typeof value.identity === 'string' && value.identity.length <= 200
-          && typeof value.path === 'string' && /^\/v1\/studio\/[a-z0-9/]+$/.test(value.path) && !value.path.endsWith('/controls')
+          && typeof value.path === 'string' && /^\/v1\/(?:studio|feedback)\/[a-z0-9/]+$/.test(value.path) && !value.path.endsWith('/controls')
           && ['POST', 'PUT'].includes(value.method) && typeof value.key === 'string' && value.key.length <= 128 && value.body && typeof value.body === 'object') {
           this.pending.set(value.identity, { ...value, sensitive: false });
         }
@@ -67,6 +67,18 @@ export class StudioClient {
     const operation = this.pending.values().next().value as Pending | undefined;
     if (!operation) return Promise.resolve(null);
     return this.write<T>(operation.identity, operation.path, operation.body, operation.method, operation.sensitive);
+  }
+
+  async importMetrics(file: File): Promise<ImportReport> {
+    if (file.size > 1048576) throw new ApiError(400, 'INVALID_INPUT');
+    const identity = 'loopcast.feedback.upload.' + JSON.stringify([file.name, file.size, file.lastModified]);
+    let key = requestKey();
+    try { key = this.storage?.getItem(identity) ?? key; this.storage?.setItem(identity, key); } catch { this.storageAvailable = false; }
+    const { response, data } = await requestJSON('/v1/feedback/imports', { method: 'POST', body: file, headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key, 'X-File-Name': encodeURIComponent(file.name) } });
+    if (response.status >= 500 || response.ok && data === null) throw Error('REQUEST_UNRESOLVED');
+    try { this.storage?.removeItem(identity); } catch { this.storageAvailable = false; }
+    if (!response.ok) throw new ApiError(response.status, (data as { error?: { code?: string } })?.error?.code ?? 'INVALID_INPUT');
+    return data as ImportReport;
   }
 
   async upload(file: File, kind: string, source: string, parent: string | null): Promise<Asset> {
@@ -108,3 +120,7 @@ export function draftBuffer(project: Project): { draft: Draft; baseVersion: numb
   } catch { return { draft: project.draft, baseVersion: project.version, available: false }; }
   return { draft: project.draft, baseVersion: project.version, available: true };
 }
+
+export type FeedbackWorkspace = components['schemas']['FeedbackWorkspace'];
+export type EditorialDecision = components['schemas']['EditorialDecision'];
+export type ImportReport = components['schemas']['ImportReport'];
