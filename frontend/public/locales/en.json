@@ -629,6 +629,9 @@
     "state_SKIPPED": "Skipped",
     "state_SKIPPED_MISSED": "Missed and skipped",
     "state_SKIPPED_TIME_GAP": "Nonexistent local time",
-    "state_FINISHED_WITHOUT_PUBLICATION": "Finished without publication"
+    "state_FINISHED_WITHOUT_PUBLICATION": "Finished without publication",
+    "state_SCHEDULED": "Scheduled",
+    "state_WAITING_CHECKS": "Waiting for checks",
+    "schedNoTargets": "No eligible frozen targets. Prepare and freeze content with its accounts in the publishing form above."
   }
 }

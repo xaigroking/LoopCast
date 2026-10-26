@@ -151,6 +151,8 @@ async def main():
         await card.get_by_role('button',name='Preview times and checks',exact=True).click();await expect(card.locator('.schedule-preview')).to_be_visible()
         await card.locator('.schedule-enable-confirm').check();await card.locator('.schedule-enable').click()
         await expect(card.locator('[data-state=ACTIVE]').first).to_be_visible()
+        await expect(card.locator('[data-state=SCHEDULED]').first).to_have_text('Scheduled')
+        assert 'Waiting for login' not in await card.inner_text()
         for locale in ('en','zh-Hans','ar','he'):
             await page.goto(BASE+'/settings');await page.locator('#language-select').select_option(locale)
             await page.locator('#theme-select').select_option('dark' if locale in ('ar','he') else 'light')
@@ -167,8 +169,10 @@ async def main():
             await page.goto(BASE+'/settings');await page.locator('#language-select').select_option('en');await page.locator('#theme-select').select_option('light')
             for width in (390,1440):
                 await page.set_viewport_size({'width':width,'height':1000});await page.goto(BASE+'/publish#schedules')
-                await page.locator('#schedules').scroll_into_view_if_needed()
+                await page.locator('#schedules').evaluate("n=>n.scrollIntoView({block:'start'})")
                 await page.screenshot(path=str(root/f'scheduling-{width}.png'))
+                await page.locator('.schedule-card').first.evaluate("n=>n.scrollIntoView({block:'start'})")
+                await page.screenshot(path=str(root/f'scheduling-card-{width}.png'))
         assert not errors,errors;assert not external,external
         await browser.close()
     print('Installed scheduling browser passed: frozen targets, paused consent, lost-response identity across reload, two-page conflict/draft, version edit, one-time publication/history, future plan, en/zh frozen RTL, 390/1440 and themes; no real platform calls')

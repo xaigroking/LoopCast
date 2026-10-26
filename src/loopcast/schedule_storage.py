@@ -169,7 +169,9 @@ class ScheduleMethods:
         total = db.execute('SELECT COUNT(*) FROM schedule_slots WHERE schedule_id=?', (identity,)).fetchone()[0]
         done = db.execute('SELECT COUNT(*) FROM schedule_occurrences WHERE schedule_id=?', (identity,)).fetchone()[0]
         inflight = [dict(r) for r in db.execute("SELECT t.id target_id,a.id attempt_id,a.state FROM release_attempts a JOIN release_targets t ON t.id=a.target_id JOIN schedule_job_bindings b ON b.target_id=t.id JOIN studio_jobs j ON j.id=b.job_id AND j.token=a.token WHERE b.schedule_id=? AND a.state='SENDING'", (identity,))]
-        state = 'WAITING' if row['control_state'] == 'ACTIVE' else row['control_state']
+        state = 'SCHEDULED' if row['control_state'] == 'ACTIVE' else row['control_state']
+        if row['control_state'] == 'ACTIVE':
+            state = next((key for key in ('BLOCKED_RESTORE','WAITING_CLOCK','WAITING_QUOTA','WAITING_ACCOUNT','WAITING_CAPABILITY','WAITING_CONFIRMATION') if counts.get(key)), state)
         if any(counts.get(s) for s in ('UNKNOWN','SUBMITTED')):state = 'UNRESOLVED'
         elif inflight:state = 'EXECUTING'
         elif counts.get('PUBLISHED'):

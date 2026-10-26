@@ -628,6 +628,9 @@
     "state_SKIPPED": "已跳过",
     "state_SKIPPED_MISSED": "错过并跳过",
     "state_SKIPPED_TIME_GAP": "本地时刻不存在",
-    "state_FINISHED_WITHOUT_PUBLICATION": "已结束但未发布"
+    "state_FINISHED_WITHOUT_PUBLICATION": "已结束但未发布",
+    "state_SCHEDULED": "待执行",
+    "state_WAITING_CHECKS": "等待检查",
+    "schedNoTargets": "暂无可用的冻结目标。请先在上方发布表单中准备内容并冻结账号目标。"
   }
 }

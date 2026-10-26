@@ -90,7 +90,7 @@ class ScheduleModelsTests(ScheduleFixture):
         spec={k:v for k,v in once.items() if k!='local_date'}|{'kind':'DAILY_LOCAL','start_local_date':'2026-10-27','items':groups}
         plan=self.create(spec);pre=self.preview(spec,plan)
         active=self.store.schedule_control(plan['id'],'resume',plan['control_version'],uid(),self.caps,'contract',pre['confirmation_digest'])
-        self.assertEqual(active['control_state'],'ACTIVE')
+        self.assertEqual(active['control_state'],'ACTIVE');self.assertEqual(active['display_state'],'SCHEDULED')
         with self.assertRaises(Problem):self.store.schedule_control(plan['id'],'pause',1,uid(),self.caps,'contract')
         paused=self.store.schedule_control(plan['id'],'pause',active['control_version'],uid(),self.caps,'contract')
         edited=spec|{'local_time':'11:00'};pre=self.preview(edited,paused)
