@@ -13,6 +13,11 @@ not establish real provider or account readiness. See [STUDIO.md](STUDIO.md) and
 the reverse-proxy route behind the test environment's access controls; exact
 Host/Origin checks prevent cross-site writes but do not authenticate users.
 
+Manual metric imports and evidence-linked next-round revisions are described in
+[FEEDBACK.md](FEEDBACK.md). They preserve original exports, quarantined rows and
+versioned decisions; they do not automatically collect platform data or claim
+performance gains.
+
 ## Build and deploy
 
 ```sh
@@ -61,8 +66,8 @@ place. Shutdown drains HTTP requests for at most five seconds, then cancels
 remaining streams before stopping the executor and publisher. Queued work stays
 durable; interrupted active work records an interruption and is recovered at
 restart. For code rollback, stop both services and choose a binary that supports
-the current database schema. Schema v5 adds creation, authorization and per-target release tables while
-retaining prior runs, events and simulated receipts. Pre-v5 binaries reject it. If no compatible prior binary exists, use a forward fix. Keep the
+the current database schema. Schema v6 retains the v5 creation/release tables and prior runs/events/receipts,
+and adds immutable feedback snapshots and revision links. Pre-v6 binaries reject it. If no compatible prior binary exists, use a forward fix. Keep the
 current database and immutable media; do not restore an older snapshot over new
 writes.
 

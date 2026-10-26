@@ -10,6 +10,35 @@ from loopcast.storage import Store
 
 
 class MigrationTests(unittest.TestCase):
+    def test_feedback_upgrade_preserves_v5_records_and_rolls_back_on_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'state.sqlite3'
+            with sqlite3.connect(path) as db:
+                db.executescript(migrations.VERSION_ONE+migrations.VERSION_TWO+migrations.VERSION_THREE+migrations.VERSION_FOUR+migrations.VERSION_FIVE)
+                db.execute("INSERT INTO studio_projects VALUES('project','{}',3,'created','updated')")
+                db.execute("INSERT INTO studio_revisions VALUES('revision','project',1,'{}','digest','created')")
+                db.execute("INSERT INTO studio_accounts VALUES('account','douyin','stable','label','[]','READY',1,NULL,NULL,'contract')")
+                db.execute("INSERT INTO media_families VALUES('family',NULL)")
+                db.execute("INSERT INTO studio_assets VALUES('asset','Video','video','video/mp4',12,'sha','video.mp4','family',NULL,'import','fixture','{}',NULL,'created')")
+                db.execute("INSERT INTO release_batches VALUES('batch','asset','{}','digest','created')")
+                db.execute("INSERT INTO release_targets VALUES('target','batch','account','douyin','stable','family','{}','UNKNOWN',2,'contract')")
+                db.execute("INSERT INTO release_account_locks VALUES('account','token')")
+                db.execute("INSERT INTO release_guards VALUES('douyin','stable','family','contract','target')")
+                db.execute("INSERT INTO release_receipts VALUES('receipt','target',NULL,'created','contract','UNKNOWN',NULL,'UNCERTAIN')")
+                tables=[r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('schema_version','sqlite_sequence')")]
+                before={table:db.execute('SELECT * FROM '+table).fetchall() for table in tables}
+            with patch.object(migrations,'VERSION_SIX',migrations.VERSION_SIX+'; INVALID SQL'):
+                with self.assertRaises(sqlite3.OperationalError):Store(directory)
+            with sqlite3.connect(path) as db:
+                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0],5)
+                self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='feedback_works'").fetchone())
+            store=Store(directory);Store(directory)
+            with store.transaction() as db:
+                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0],6)
+                self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
+                for table,rows in before.items():self.assertEqual([tuple(r) for r in db.execute('SELECT * FROM '+table)],rows)
+            self.assertEqual(store.feedback_workspace(),{'works':[],'imports':[],'snapshots':[]})
+
     def test_previous_database_preserved_and_replayable(self):
         with tempfile.TemporaryDirectory() as directory:
             # Build with the previous release schema, then seed real old-format records.

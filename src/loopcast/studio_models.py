@@ -81,6 +81,7 @@ class Revision(Model):
     number: int
     draft: Draft
     input_digest: str
+    decision_id: Id | None
     created_at: str
     generations: list[Generation]
 

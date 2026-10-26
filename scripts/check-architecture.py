@@ -12,7 +12,11 @@ forbidden = {"fastapi", "starlette", "uvicorn", "next", "react"}
 allowed = {
     "domain": set(), "contracts": set(), "fixture": set(), "runner": set(),
     "migrations": set(), "diagnostics": set(), "publisher_cli": set(),
-    "storage": {"domain", "ledger", "migrations", "studio_storage", "account_storage", "release_storage"}, "ledger": {"domain"},
+    "storage": {"domain", "ledger", "migrations", "studio_storage", "account_storage", "release_storage", "feedback_storage"}, "ledger": {"domain"},
+    "feedback_demo": {"domain","runtime","runner"},
+    "feedback_models": {"studio_models"}, "feedback_rules": {"domain"},
+    "feedback_storage": {"domain","feedback_models","feedback_rules","studio_models"},
+    "feedback_api": {"domain","feedback_models","studio_models"},
     "mpt_bridge": set(), "mpt_install": {"contracts","media","network","runner"},
     "generator_diagnostics": {"contracts","generation","media","runner"},
     "studio_models": set(), "studio_rules": {"domain"},
@@ -26,8 +30,8 @@ allowed = {
     "generation": {"contracts", "runner", "diagnostics", "network"}, "worker": {"domain", "runner", "diagnostics"},
     "publisher": {"runner", "diagnostics"},
     "runtime": {"storage", "worker", "generation", "publisher", "media", "creation", "social", "studio_service"},
-    "api": {"runtime", "storage", "diagnostics", "studio_api"}, "openapi": {"api"},
-    "__main__": {"api", "diagnostics", "generator_diagnostics", "mpt_install"}, "__init__": set(),
+    "api": {"runtime", "storage", "diagnostics", "studio_api", "feedback_api"}, "openapi": {"api"},
+    "__main__": {"api", "diagnostics", "generator_diagnostics", "mpt_install", "feedback_demo"}, "__init__": set(),
 }
 graph = {name: set() for name in modules}
 for name, path in modules.items():

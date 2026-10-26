@@ -59,3 +59,4 @@ LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" LOOPCAST_TEST_MEDIA="$generato
 
 installed_bridge=$("$work_dir/backend/bin/python" -I -c 'import loopcast.social_bridge; print(loopcast.social_bridge.__file__)')
 LOOPCAST_INSTALLED_BRIDGE="$installed_bridge" "$browser_python" -I "$root_dir/tests/browser/check_authorization.py"
+LOOPCAST_BASE_URL="http://127.0.0.1:$public_port" "$browser_python" -I "$root_dir/tests/browser/check_feedback.py"

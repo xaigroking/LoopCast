@@ -103,7 +103,7 @@ DELETE FROM schema_version;
 INSERT INTO schema_version VALUES(5);
 """
 
-CURRENT_VERSION = 5
+CURRENT_VERSION = 6
 
 def statements(db, script):
     for statement in script.split(';'):
@@ -119,7 +119,7 @@ def migrate(db):
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE name='schema_version'").fetchone()
         if exists:
             versions = [r[0] for r in db.execute('SELECT version FROM schema_version')]
-            if versions not in ([1], [2], [3], [4], [5]):
+            if versions not in ([1], [2], [3], [4], [5], [6]):
                 raise RuntimeError('Unsupported state database version')
             version = versions[0]
         else:
@@ -138,6 +138,9 @@ def migrate(db):
             version = 4
         if version == 4:
             statements(db, VERSION_FIVE)
+            version = 5
+        if version == 5:
+            statements(db, VERSION_SIX)
         if db.execute('PRAGMA foreign_key_check').fetchone():
             raise RuntimeError('Invalid state database references')
         db.commit()
@@ -146,3 +149,29 @@ def migrate(db):
         raise
     finally:
         db.execute('PRAGMA foreign_keys=ON')
+
+VERSION_SIX = '''
+CREATE TABLE feedback_works (
+ id TEXT PRIMARY KEY,account_id TEXT NOT NULL REFERENCES studio_accounts(id),asset_id TEXT NOT NULL REFERENCES studio_assets(id),
+ platform TEXT NOT NULL,stable_subject TEXT NOT NULL,work_id TEXT NOT NULL,release_target_id TEXT REFERENCES release_targets(id),
+ published_at TEXT NOT NULL,source TEXT NOT NULL,evidence_mode TEXT NOT NULL,evidence_kind TEXT NOT NULL,created_at TEXT NOT NULL,
+ UNIQUE(platform,stable_subject,work_id,evidence_mode)
+);
+CREATE TABLE feedback_imports (
+ id TEXT PRIMARY KEY,filename TEXT NOT NULL,sha256 TEXT NOT NULL UNIQUE,source TEXT NOT NULL,evidence_mode TEXT NOT NULL,
+ raw BLOB NOT NULL,version INTEGER NOT NULL,report TEXT NOT NULL,created_at TEXT NOT NULL
+);
+CREATE TABLE feedback_snapshots (
+ id TEXT PRIMARY KEY,import_id TEXT NOT NULL REFERENCES feedback_imports(id),work_binding_id TEXT NOT NULL REFERENCES feedback_works(id),
+ observation_key TEXT NOT NULL UNIQUE,observed_at TEXT NOT NULL,original_observed_at TEXT NOT NULL,aggregation TEXT NOT NULL,
+ definition TEXT NOT NULL,window_start TEXT,window_end TEXT,metrics TEXT NOT NULL,sha256 TEXT NOT NULL,created_at TEXT NOT NULL
+);
+CREATE TABLE feedback_resolutions (id TEXT PRIMARY KEY,import_id TEXT NOT NULL REFERENCES feedback_imports(id),version INTEGER NOT NULL,report TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE TABLE feedback_decisions (
+ id TEXT PRIMARY KEY,version INTEGER NOT NULL,state TEXT NOT NULL,strategy_version TEXT NOT NULL,input TEXT NOT NULL,
+ snapshot_digests TEXT NOT NULL,selected_snapshot_id TEXT REFERENCES feedback_snapshots(id),reason TEXT NOT NULL,excluded TEXT NOT NULL,
+ evidence_mode TEXT,created_at TEXT NOT NULL
+);
+CREATE TABLE feedback_revision_links (revision_id TEXT PRIMARY KEY REFERENCES studio_revisions(id),decision_id TEXT NOT NULL REFERENCES feedback_decisions(id),created_at TEXT NOT NULL);
+UPDATE schema_version SET version=6;
+'''

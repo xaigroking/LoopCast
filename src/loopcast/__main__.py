@@ -62,7 +62,15 @@ def main():
     setup.add_argument('--uv-sha256', required=True)
     setup.add_argument('--network-config', type=Path)
     setup.add_argument('--plan', action='store_true', help='Validate inputs and print steps without installing or downloading')
+    demo = commands.add_parser('demo-feedback', help='Run an explicit fixture-only two-round feedback workflow in a fresh directory')
+    demo.add_argument('--data-dir', type=Path, required=True)
+    demo.add_argument('--media-config', type=Path, required=True)
     args = parser.parse_args()
+    if args.command == 'demo-feedback':
+        from .feedback_demo import demonstrate
+        try:
+            print(json.dumps(demonstrate(args.data_dir,json.loads(args.media_config.read_text())),indent=2));return
+        except (OSError,ValueError,RuntimeError): parser.exit(1,'Fixture demonstration failed. Use a fresh directory and verified media tools. No real model or platform was called.\n')
     if args.command == 'diagnose':
         from .generator_diagnostics import inspect_generator
         try:

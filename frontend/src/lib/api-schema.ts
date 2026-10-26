@@ -55,6 +55,160 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Workspace */
+        get: operations["workspace_v1_feedback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/feedback/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Decisions */
+        get: operations["decisions_v1_feedback_decisions_get"];
+        put?: never;
+        /** Propose */
+        post: operations["propose_v1_feedback_decisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/feedback/decisions/{decision_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm */
+        post: operations["confirm_v1_feedback_decisions__decision_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/feedback/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Metrics */
+        post: operations["import_metrics_v1_feedback_imports_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/feedback/imports/{import_id}/original": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Original */
+        get: operations["original_v1_feedback_imports__import_id__original_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/feedback/imports/{import_id}/reprocess": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reprocess */
+        post: operations["reprocess_v1_feedback_imports__import_id__reprocess_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/feedback/schema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Schema */
+        get: operations["schema_v1_feedback_schema_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/feedback/template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Template */
+        get: operations["template_v1_feedback_template_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/feedback/works": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bind */
+        post: operations["bind_v1_feedback_works_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runs": {
         parameters: {
             query?: never;
@@ -966,6 +1120,91 @@ export interface components {
              */
             voice_rate: number;
         };
+        /** DecisionConfirm */
+        DecisionConfirm: {
+            /** Brief */
+            brief: string;
+            /**
+             * Confirmed
+             * @constant
+             */
+            confirmed: true;
+            /** Expected Project Version */
+            expected_project_version?: number | null;
+            /** Expected Version */
+            expected_version: number;
+            /** Project Id */
+            project_id?: string | null;
+            /** Topic */
+            topic: string;
+        };
+        /** DecisionCreate */
+        "DecisionCreate-Input": {
+            /**
+             * Brief
+             * @default
+             */
+            brief: string;
+            /**
+             * Goal
+             * @default views
+             * @constant
+             */
+            goal: "views";
+            /**
+             * Minimum Age Hours
+             * @default 24
+             */
+            minimum_age_hours: number;
+            /**
+             * Minimum Views
+             * @default 100
+             */
+            minimum_views: number;
+            /** Snapshot Ids */
+            snapshot_ids: string[];
+            /** Topic */
+            topic: string;
+        };
+        /** DecisionCreate */
+        "DecisionCreate-Output": {
+            /**
+             * Brief
+             * @default
+             */
+            brief: string;
+            /**
+             * Goal
+             * @default views
+             * @constant
+             */
+            goal: "views";
+            /**
+             * Minimum Age Hours
+             * @default 24
+             */
+            minimum_age_hours: number;
+            /**
+             * Minimum Views
+             * @default 100
+             */
+            minimum_views: number;
+            /** Snapshot Ids */
+            snapshot_ids: string[];
+            /** Topic */
+            topic: string;
+        };
+        /** DecisionRevision */
+        DecisionRevision: {
+            /** Created At */
+            created_at: string;
+            /** Project Id */
+            project_id: string;
+            /** Project Version */
+            project_version: number;
+            /** Revision Id */
+            revision_id: string;
+        };
         /** DiagnosticCheck */
         DiagnosticCheck: {
             /** Code */
@@ -1020,6 +1259,39 @@ export interface components {
             /** Expected Version */
             expected_version: number;
         };
+        /** EditorialDecision */
+        EditorialDecision: {
+            /** Created At */
+            created_at: string;
+            /** Evidence Mode */
+            evidence_mode: ("live" | "contract") | null;
+            /** Excluded */
+            excluded: {
+                [key: string]: string;
+            };
+            /** Id */
+            id: string;
+            input: components["schemas"]["DecisionCreate-Output"];
+            /** Reason */
+            reason: string;
+            /** Revisions */
+            revisions: components["schemas"]["DecisionRevision"][];
+            /** Selected Snapshot Id */
+            selected_snapshot_id: string | null;
+            /** Snapshot Digests */
+            snapshot_digests: {
+                [key: string]: string;
+            };
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "PROPOSED" | "CONFIRMED";
+            /** Strategy Version */
+            strategy_version: string;
+            /** Version */
+            version: number;
+        };
         /** ErrorDetails */
         ErrorDetails: {
             /** Code */
@@ -1040,6 +1312,15 @@ export interface components {
         ExpectedVersion: {
             /** Expected Version */
             expected_version: number;
+        };
+        /** FeedbackWorkspace */
+        FeedbackWorkspace: {
+            /** Imports */
+            imports: components["schemas"]["ImportReport"][];
+            /** Snapshots */
+            snapshots: components["schemas"]["MetricSnapshot"][];
+            /** Works */
+            works: components["schemas"]["WorkBinding"][];
         };
         /** FixtureCreate */
         FixtureCreate: {
@@ -1153,6 +1434,46 @@ export interface components {
             /** Supported Stages */
             supported_stages: string[];
         };
+        /** ImportReport */
+        ImportReport: {
+            /** Created At */
+            created_at: string;
+            /**
+             * Evidence Mode
+             * @enum {string}
+             */
+            evidence_mode: "live" | "contract";
+            /** Filename */
+            filename: string;
+            /** Id */
+            id: string;
+            /** Resolution History */
+            resolution_history: {
+                [key: string]: string | number;
+            }[];
+            /** Rows */
+            rows: components["schemas"]["ImportRowResult"][];
+            /** Sha256 */
+            sha256: string;
+            /** Source */
+            source: string;
+            /** Version */
+            version: number;
+        };
+        /** ImportRowResult */
+        ImportRowResult: {
+            /** Code */
+            code: string;
+            /** Row */
+            row: number;
+            /** Snapshot Id */
+            snapshot_id: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "ACCEPTED" | "DUPLICATE" | "QUARANTINED";
+        };
         /** Interaction */
         Interaction: {
             /**
@@ -1198,6 +1519,122 @@ export interface components {
             height: number | null;
             /** Width */
             width: number | null;
+        };
+        /** MetricRow */
+        MetricRow: {
+            /**
+             * Aggregation
+             * @enum {string}
+             */
+            aggregation: "cumulative" | "delta";
+            /** Asset Id */
+            asset_id: string;
+            /**
+             * Definition
+             * @constant
+             */
+            definition: "platform_reported_v1";
+            metrics: components["schemas"]["Metrics-Input"];
+            /** Observed At */
+            observed_at: string;
+            /**
+             * Platform
+             * @enum {string}
+             */
+            platform: "douyin" | "xiaohongshu" | "bilibili" | "youtube";
+            /** Stable Subject */
+            stable_subject: string;
+            /** Window End */
+            window_end?: string | null;
+            /** Window Start */
+            window_start?: string | null;
+            /** Work Id */
+            work_id: string;
+        };
+        /** MetricSnapshot */
+        MetricSnapshot: {
+            /** Aggregation */
+            aggregation: string;
+            /** Asset Id */
+            asset_id: string;
+            /** Created At */
+            created_at: string;
+            /** Definition */
+            definition: string;
+            /**
+             * Evidence Mode
+             * @enum {string}
+             */
+            evidence_mode: "live" | "contract";
+            /** Id */
+            id: string;
+            /** Import Id */
+            import_id: string;
+            metrics: components["schemas"]["Metrics-Output"];
+            /** Observed At */
+            observed_at: string;
+            /** Original Observed At */
+            original_observed_at: string;
+            /**
+             * Platform
+             * @enum {string}
+             */
+            platform: "douyin" | "xiaohongshu" | "bilibili" | "youtube";
+            /** Sha256 */
+            sha256: string;
+            /** Stable Subject */
+            stable_subject: string;
+            /** Window End */
+            window_end: string | null;
+            /** Window Start */
+            window_start: string | null;
+            /** Work Binding Id */
+            work_binding_id: string;
+            /** Work Id */
+            work_id: string;
+        };
+        /** Metrics */
+        "Metrics-Input": {
+            /** Comments */
+            comments?: (number) | null;
+            /** Likes */
+            likes?: (number) | null;
+            /** Shares */
+            shares?: (number) | null;
+            /** Views */
+            views?: (number) | null;
+            /** Watch Seconds */
+            watch_seconds?: (number) | null;
+        };
+        /** Metrics */
+        "Metrics-Output": {
+            /** Comments */
+            comments: (number) | null;
+            /** Likes */
+            likes: (number) | null;
+            /** Shares */
+            shares: (number) | null;
+            /** Views */
+            views: (number) | null;
+            /** Watch Seconds */
+            watch_seconds: (number) | null;
+        };
+        /** MetricsImport */
+        MetricsImport: {
+            /**
+             * Evidence Mode
+             * @enum {string}
+             */
+            evidence_mode: "live" | "contract";
+            /**
+             * Format
+             * @constant
+             */
+            format: "loopcast.metrics.v1";
+            /** Rows */
+            rows: components["schemas"]["MetricRow"][];
+            /** Source */
+            source: string;
         };
         /** PlatformCapability */
         PlatformCapability: {
@@ -1518,6 +1955,8 @@ export interface components {
         Revision: {
             /** Created At */
             created_at: string;
+            /** Decision Id */
+            decision_id: string | null;
             draft: components["schemas"]["Draft-Output"];
             /** Generations */
             generations: components["schemas"]["Generation"][];
@@ -1650,6 +2089,62 @@ export interface components {
         VersionCommand: {
             /** Expected Version */
             expected_version: number;
+        };
+        /** WorkBinding */
+        WorkBinding: {
+            /** Account Id */
+            account_id: string;
+            /** Asset Id */
+            asset_id: string;
+            /** Created At */
+            created_at: string;
+            /**
+             * Evidence Kind
+             * @enum {string}
+             */
+            evidence_kind: "PLATFORM_RECEIPT" | "MANUAL_ASSOCIATION";
+            /**
+             * Evidence Mode
+             * @enum {string}
+             */
+            evidence_mode: "live" | "contract";
+            /** Id */
+            id: string;
+            /**
+             * Platform
+             * @enum {string}
+             */
+            platform: "douyin" | "xiaohongshu" | "bilibili" | "youtube";
+            /** Published At */
+            published_at: string;
+            /** Release Target Id */
+            release_target_id: string | null;
+            /** Source */
+            source: string;
+            /** Stable Subject */
+            stable_subject: string;
+            /** Work Id */
+            work_id: string;
+        };
+        /** WorkBindingCreate */
+        WorkBindingCreate: {
+            /** Account Id */
+            account_id: string;
+            /** Asset Id */
+            asset_id: string;
+            /**
+             * Confirmed
+             * @constant
+             */
+            confirmed: true;
+            /** Published At */
+            published_at: string;
+            /** Release Target Id */
+            release_target_id?: string | null;
+            /** Source */
+            source: string;
+            /** Work Id */
+            work_id: string;
         };
     };
     responses: never;
@@ -1804,6 +2299,963 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Capabilities"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    workspace_v1_feedback_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackWorkspace"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    decisions_v1_feedback_decisions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditorialDecision"][];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    propose_v1_feedback_decisions_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecisionCreate-Input"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditorialDecision"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    confirm_v1_feedback_decisions__decision_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                decision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecisionConfirm"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditorialDecision"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    import_metrics_v1_feedback_imports_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+                "x-file-name"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetricsImport"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportReport"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    original_v1_feedback_imports__import_id__original_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    reprocess_v1_feedback_imports__import_id__reprocess_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VersionCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportReport"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    schema_v1_feedback_schema_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    template_v1_feedback_template_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    bind_v1_feedback_works_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkBindingCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkBinding"];
                 };
             };
             /** @description Stable LoopCast error envelope */
