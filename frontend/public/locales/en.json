@@ -253,8 +253,8 @@
     "queryAvailable": "Read-only verification available",
     "queryUnavailable": "Read-only verification unavailable",
     "liveUnverified": "Live verification pending",
-    "scheduleAvailable": "Scheduling supported",
-    "scheduleUnavailable": "Scheduling unavailable",
+    "scheduleAvailable": "Platform-native scheduling available",
+    "scheduleUnavailable": "Platform-native scheduling unavailable",
     "authorizations": "Authorization sessions",
     "connectAccount": "Connect account",
     "loginMethod": "Login method",
@@ -632,6 +632,7 @@
     "state_FINISHED_WITHOUT_PUBLICATION": "Finished without publication",
     "state_SCHEDULED": "Scheduled",
     "state_WAITING_CHECKS": "Waiting for checks",
-    "schedNoTargets": "No eligible frozen targets. Prepare and freeze content with its accounts in the publishing form above."
+    "schedNoTargets": "No eligible frozen targets. Prepare and freeze content with its accounts in the publishing form above.",
+    "schedNext": "Next planned time"
   }
 }

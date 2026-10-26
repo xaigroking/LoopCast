@@ -252,8 +252,8 @@
     "queryAvailable": "支持只读查证",
     "queryUnavailable": "不支持只读查证",
     "liveUnverified": "尚待真实环境取证",
-    "scheduleAvailable": "支持排期",
-    "scheduleUnavailable": "不支持排期",
+    "scheduleAvailable": "支持平台原生排期",
+    "scheduleUnavailable": "不支持平台原生排期",
     "authorizations": "授权会话",
     "connectAccount": "连接账号",
     "loginMethod": "登录方式",
@@ -631,6 +631,7 @@
     "state_FINISHED_WITHOUT_PUBLICATION": "已结束但未发布",
     "state_SCHEDULED": "待执行",
     "state_WAITING_CHECKS": "等待检查",
-    "schedNoTargets": "暂无可用的冻结目标。请先在上方发布表单中准备内容并冻结账号目标。"
+    "schedNoTargets": "暂无可用的冻结目标。请先在上方发布表单中准备内容并冻结账号目标。",
+    "schedNext": "下一计划时间"
   }
 }

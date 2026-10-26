@@ -20,6 +20,7 @@ from .studio_api import register_studio_routes
 from .feedback_api import register_feedback_routes
 from .operations_api import register_operations_routes
 from .schedule_api import register_schedule_routes
+from .schedule_models import ScheduleConflictEnvelope
 
 ID = r"[a-f0-9]{32}"
 _RUN = re.compile(r"^/v1/runs/([a-f0-9]{32})(?:/(cancel|retry|events))?$")
@@ -370,7 +371,18 @@ def create_app(
                     payload["snapshot"] = await asyncio.to_thread(request.app.state.runtime.store.snapshot, exc.run_id)
                 except (Problem, AttributeError):
                     pass
-            response = JSONResponse(ErrorEnvelope(error=payload).model_dump(exclude_none=True), status_code=exc.status)
+            envelope = ErrorEnvelope
+            schedule_id = request.path_params.get('schedule_id') or getattr(request.state, 'schedule_identity', None)
+            if exc.code == 'VERSION_CONFLICT' and request.url.path.startswith('/v1/studio/schedules') and schedule_id:
+                try:
+                    payload['current_plan'] = await asyncio.to_thread(request.app.state.runtime.store.schedule_get, schedule_id)
+                    envelope = ScheduleConflictEnvelope
+                except (Problem, AttributeError):pass
+            if envelope is ScheduleConflictEnvelope:
+                content = envelope(error=payload).model_dump()
+                content['error'] = {key: value for key, value in content['error'].items() if value is not None}
+            else:content = envelope(error=payload).model_dump(exclude_none=True)
+            response = JSONResponse(content, status_code=exc.status)
         except Exception:
             response = JSONResponse({"error": {"code": "INTERNAL_ERROR", "message": "The request could not be completed.", "request_id": request.state.request_id, "run_id": None}}, status_code=500)
         response = _instrument_response(request, response, started)
@@ -543,7 +555,7 @@ def create_app(
     register_studio_routes(app, ERROR_RESPONSES)
     register_feedback_routes(app, ERROR_RESPONSES)
     register_operations_routes(app, ERROR_RESPONSES)
-    register_schedule_routes(app, ERROR_RESPONSES)
+    register_schedule_routes(app, ERROR_RESPONSES | {409: {'model': ScheduleConflictEnvelope, 'description': 'Stable error envelope with the current safe plan for a version conflict'}})
 
     @app.api_route("/v1", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], include_in_schema=False)
     @app.api_route("/v1/{unknown:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], include_in_schema=False)

@@ -54,6 +54,9 @@ class ScheduleAPITests(unittest.TestCase):
     def test_strict_api_paused_creation_idempotency_controls_and_versioned_edit(self):
         spec=self.spec();plan,body=self.create(spec,'create-plan')
         path='/v1/studio/schedules/'+plan['id']
+        self.assertEqual(plan['frozen_targets'][0]['asset_sha256'],self.asset['sha256'])
+        self.assertEqual(plan['next_slot']['nominal_local'],spec['local_date']+'T09:00')
+        self.assertEqual(plan['limits']['enabled'],True)
         self.assertEqual(plan['control_state'],'PAUSED');self.assertEqual(self.owner.request('/v1/studio/schedules',body,'create-plan')[1]['id'],plan['id'])
         changed=body|{'confirmed':False};self.assertEqual(self.owner.request('/v1/studio/schedules',changed,'create-plan')[0],400)
         code,cap=self.owner.request('/v1/studio/schedules/capabilities');self.assertEqual(code,200);self.assertFalse(cap['native_scheduling'])
@@ -65,7 +68,12 @@ class ScheduleAPITests(unittest.TestCase):
         update={'spec':edited,'preview_digest':preview['preview_digest'],'expected_version':plan['control_version'],'effective_from_local_date':None}
         code,updated=self.owner.request(path,update,'edit-plan','PUT');self.assertEqual(code,200,updated);self.assertEqual(updated['spec_version'],2)
         self.assertEqual(self.owner.request(path,update,'edit-plan','PUT')[1]['control_version'],updated['control_version'])
-        self.assertEqual(self.owner.request(path,update,'stale-edit','PUT')[0],409)
+        code,conflict=self.owner.request(path,update,'stale-edit','PUT');self.assertEqual(code,409)
+        self.assertEqual(conflict['error']['current_plan']['id'],plan['id'])
+        self.assertEqual(conflict['error']['current_plan']['control_version'],updated['control_version'])
+        self.assertIn('confirmed_digest',conflict['error']['current_plan'])
+        self.assertIsNone(conflict['error']['current_plan']['confirmed_digest'])
+        self.assertNotIn('credential_ref',json.dumps(conflict))
         preview=self.preview(edited,updated);resume={'expected_version':updated['control_version'],'confirmation_digest':preview['confirmation_digest'],'confirmed':True}
         code,active=self.owner.request(path+'/resume',resume,'enable');self.assertEqual(code,200,active);self.assertEqual(active['control_state'],'ACTIVE')
         self.assertEqual(self.owner.request(path+'/pause',{'expected_version':1})[0],409)

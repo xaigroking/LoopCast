@@ -95,6 +95,7 @@ class ScheduleModelsTests(ScheduleFixture):
         paused=self.store.schedule_control(plan['id'],'pause',active['control_version'],uid(),self.caps,'contract')
         edited=spec|{'local_time':'11:00'};pre=self.preview(edited,paused)
         updated=self.store.schedule_update(plan['id'],edited,paused['control_version'],pre['preview_digest'],'2026-10-28',uid(),self.caps,'contract')
+        self.assertEqual(updated['next_slot']['nominal_local'],'2026-10-27T09:00')
         self.assertEqual(updated['spec_version'],2);self.assertEqual(updated['control_state'],'PAUSED')
         with self.store.transaction() as db:
             old=self.store._schedule_version(db,plan['id'],'2026-10-27');new=self.store._schedule_version(db,plan['id'],'2026-10-28')

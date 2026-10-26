@@ -39,7 +39,7 @@ allowed = {
     "generation": {"contracts", "runner", "diagnostics", "network"}, "worker": {"domain", "runner", "diagnostics"},
     "publisher": {"runner", "diagnostics"},
     "runtime": {"storage", "worker", "generation", "publisher", "media", "creation", "social", "studio_service", "ownership"},
-    "api": {"runtime", "storage", "diagnostics", "studio_api", "feedback_api", "operations_api", "schedule_api"}, "openapi": {"api"},
+    "api": {"runtime", "storage", "diagnostics", "studio_api", "feedback_api", "operations_api", "schedule_api", "schedule_models"}, "openapi": {"api"},
     "__main__": {"api", "diagnostics", "generator_diagnostics", "mpt_install", "feedback_demo", "backup", "restore", "operations_snapshot", "schedule_config"}, "__init__": set(),
 }
 graph = {name: set() for name in modules}

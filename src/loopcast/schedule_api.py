@@ -26,6 +26,7 @@ def register_schedule_routes(app, errors):
 
     @app.post('/v1/studio/schedules/preview',response_model=SchedulePreview,responses=errors)
     async def preview(body:SchedulePreviewRequest,request:Request):
+        request.state.schedule_identity=body.schedule_id
         runtime=request.app.state.runtime
         return await asyncio.to_thread(runtime.store.schedule_preview,body.spec.model_dump(),runtime.studio.platform_map,runtime.social.mode,
                                        body.schedule_id,body.expected_version,body.cursor)

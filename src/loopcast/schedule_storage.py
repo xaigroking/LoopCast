@@ -163,6 +163,14 @@ class ScheduleMethods:
             self._studio_remember(db, 'schedule.create', key, request, {'id': identity})
             return self._schedule(db, identity)
 
+    def _schedule_next(self, db, identity):
+        slot=db.execute('''SELECT s.* FROM schedule_slots s WHERE schedule_id=? AND NOT EXISTS(
+            SELECT 1 FROM schedule_occurrences o WHERE o.schedule_id=s.schedule_id AND o.slot_key=s.slot_key)
+            ORDER BY position LIMIT 1''',(identity,)).fetchone()
+        if not slot:return None
+        version=self._schedule_version(db,identity,slot['nominal_date'])
+        return next(item for item in expand_slots(json.loads(version['spec']),bytes(version['tzif']))[2] if item['slot_key']==slot['slot_key'])
+
     def _schedule(self, db, identity):
         row = dict(self._schedule_row(db, identity));version = self._schedule_version(db, identity)
         counts = {r['state']: r['n'] for r in db.execute('SELECT t.state,COUNT(*) n FROM schedule_occurrence_targets t JOIN schedule_occurrences o ON o.id=t.occurrence_id WHERE o.schedule_id=? GROUP BY t.state', (identity,))}
@@ -181,6 +189,9 @@ class ScheduleMethods:
                 'control_state': row['control_state'], 'display_state': state, 'pause_reason': row['pause_reason'],
                 'confirmed_digest': row['confirmed_digest'], 'confirmed_at': row['confirmed_at'], 'created_at': row['created_at'],
                 'spec': json.loads(version['spec']), 'tzif_sha256': version['tzif_sha256'], 'counts': counts,
+                'reasons': sorted({r[0] for r in db.execute("SELECT DISTINCT t.reason FROM schedule_occurrence_targets t JOIN schedule_occurrences o ON o.id=t.occurrence_id WHERE o.schedule_id=? AND t.state NOT IN ('PUBLISHED','CANCELLED','SKIPPED_MISSED','SKIPPED_TIME_GAP')", (identity,))} | ({row['pause_reason']} if row['pause_reason'] else set())),
+                'frozen_targets': json.loads(version['frozen']), 'next_slot': self._schedule_next(db, identity),
+                'limits': self.schedule_settings.model_dump(),
                 'slot_count': total, 'classified_count': done, 'in_flight': inflight}
 
     def schedule_get(self, identity):

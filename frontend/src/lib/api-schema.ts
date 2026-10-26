@@ -2563,6 +2563,22 @@ export interface components {
             /** Expected Version */
             expected_version: number;
         };
+        /** ScheduleConflictDetails */
+        ScheduleConflictDetails: {
+            /** Code */
+            code: string;
+            current_plan?: components["schemas"]["ScheduleRecord"] | null;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /** Run Id */
+            run_id?: string | null;
+        };
+        /** ScheduleConflictEnvelope */
+        ScheduleConflictEnvelope: {
+            error: components["schemas"]["ScheduleConflictDetails"];
+        };
         /** ScheduleCreateRequest */
         ScheduleCreateRequest: {
             /**
@@ -2574,6 +2590,39 @@ export interface components {
             preview_digest: string;
             /** Spec */
             spec: components["schemas"]["OnceSpec"] | components["schemas"]["DailySpec"];
+        };
+        /** ScheduleFrozenTarget */
+        ScheduleFrozenTarget: {
+            /** Account Id */
+            account_id: string;
+            /** Account Version */
+            account_version: number;
+            /** Asset Id */
+            asset_id: string;
+            /** Asset Sha256 */
+            asset_sha256: string;
+            /** Batch Id */
+            batch_id: string;
+            /**
+             * Evidence Mode
+             * @enum {string}
+             */
+            evidence_mode: "live" | "contract";
+            /** Family Id */
+            family_id: string;
+            /** Input Digest */
+            input_digest: string;
+            /**
+             * Platform
+             * @enum {string}
+             */
+            platform: "douyin" | "xiaohongshu" | "bilibili" | "youtube";
+            /** Stable Subject */
+            stable_subject: string;
+            /** Target Id */
+            target_id: string;
+            /** Target Version */
+            target_version: number;
         };
         /** ScheduleInFlight */
         ScheduleInFlight: {
@@ -2710,12 +2759,18 @@ export interface components {
             created_at: string;
             /** Display State */
             display_state: string;
+            /** Frozen Targets */
+            frozen_targets: components["schemas"]["ScheduleFrozenTarget"][];
             /** Id */
             id: string;
             /** In Flight */
             in_flight: components["schemas"]["ScheduleInFlight"][];
+            limits: components["schemas"]["ScheduleSettings"];
+            next_slot: components["schemas"]["ScheduleSlot"] | null;
             /** Pause Reason */
             pause_reason: string | null;
+            /** Reasons */
+            reasons: string[];
             /** Slot Count */
             slot_count: number;
             /** Spec */
@@ -8191,13 +8246,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Stable LoopCast error envelope */
+            /** @description Stable error envelope with the current safe plan for a version conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
+                    "application/json": components["schemas"]["ScheduleConflictEnvelope"];
                 };
             };
             /** @description Stable LoopCast error envelope */
@@ -8289,13 +8344,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Stable LoopCast error envelope */
+            /** @description Stable error envelope with the current safe plan for a version conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
+                    "application/json": components["schemas"]["ScheduleConflictEnvelope"];
                 };
             };
             /** @description Stable LoopCast error envelope */
@@ -8381,13 +8436,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Stable LoopCast error envelope */
+            /** @description Stable error envelope with the current safe plan for a version conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
+                    "application/json": components["schemas"]["ScheduleConflictEnvelope"];
                 };
             };
             /** @description Stable LoopCast error envelope */
@@ -8477,13 +8532,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Stable LoopCast error envelope */
+            /** @description Stable error envelope with the current safe plan for a version conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
+                    "application/json": components["schemas"]["ScheduleConflictEnvelope"];
                 };
             };
             /** @description Stable LoopCast error envelope */
@@ -8571,13 +8626,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Stable LoopCast error envelope */
+            /** @description Stable error envelope with the current safe plan for a version conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
+                    "application/json": components["schemas"]["ScheduleConflictEnvelope"];
                 };
             };
             /** @description Stable LoopCast error envelope */
@@ -8671,13 +8726,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Stable LoopCast error envelope */
+            /** @description Stable error envelope with the current safe plan for a version conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
+                    "application/json": components["schemas"]["ScheduleConflictEnvelope"];
                 };
             };
             /** @description Stable LoopCast error envelope */
@@ -8771,13 +8826,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Stable LoopCast error envelope */
+            /** @description Stable error envelope with the current safe plan for a version conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
+                    "application/json": components["schemas"]["ScheduleConflictEnvelope"];
                 };
             };
             /** @description Stable LoopCast error envelope */
@@ -8868,13 +8923,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Stable LoopCast error envelope */
+            /** @description Stable error envelope with the current safe plan for a version conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
+                    "application/json": components["schemas"]["ScheduleConflictEnvelope"];
                 };
             };
             /** @description Stable LoopCast error envelope */
@@ -8968,13 +9023,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Stable LoopCast error envelope */
+            /** @description Stable error envelope with the current safe plan for a version conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
+                    "application/json": components["schemas"]["ScheduleConflictEnvelope"];
                 };
             };
             /** @description Stable LoopCast error envelope */
@@ -9068,13 +9123,13 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Stable LoopCast error envelope */
+            /** @description Stable error envelope with the current safe plan for a version conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
+                    "application/json": components["schemas"]["ScheduleConflictEnvelope"];
                 };
             };
             /** @description Stable LoopCast error envelope */

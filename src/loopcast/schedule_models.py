@@ -1,8 +1,9 @@
 """Strict finite local-publication schedule contracts."""
 from datetime import date
 from typing import Annotated, Literal
-from pydantic import Field, StrictInt, StrictStr, field_validator, model_validator
-from .studio_models import Model, Id, Number
+from pydantic import ConfigDict, Field, StrictInt, StrictStr, field_validator, model_validator
+from .studio_models import Model, Id, Number, Platform, EvidenceMode
+from .schedule_config import ScheduleSettings
 
 Date = Annotated[StrictStr, Field(pattern=r'^\d{4}-\d{2}-\d{2}$')]
 LocalTime = Annotated[StrictStr, Field(pattern=r'^(?:[01]\d|2[0-3]):[0-5]\d$')]
@@ -160,6 +161,21 @@ class ScheduleInFlight(Model):
     state: StrictStr
 
 
+class ScheduleFrozenTarget(Model):
+    target_id: Id
+    batch_id: Id
+    target_version: Version
+    account_id: Id
+    account_version: Version
+    platform: Platform
+    stable_subject: StrictStr
+    evidence_mode: EvidenceMode
+    asset_id: Id
+    asset_sha256: Hash
+    family_id: Id
+    input_digest: Hash
+
+
 class ScheduleRecord(Model):
     id: Id
     control_version: Version
@@ -173,6 +189,10 @@ class ScheduleRecord(Model):
     spec: Spec
     tzif_sha256: Hash
     counts: dict[str,int]
+    reasons: list[StrictStr]
+    frozen_targets: list[ScheduleFrozenTarget]
+    next_slot: ScheduleSlot | None
+    limits: ScheduleSettings
     slot_count: StrictInt
     classified_count: StrictInt
     in_flight: list[ScheduleInFlight]
@@ -228,8 +248,18 @@ class ScheduleCapability(Model):
     fold_policy: Literal['EARLIER']
     gap_policy: Literal['SKIP']
     clock_state: Literal['STABLE','CLOCK_BACKWARD']
-    limits: 'ScheduleSettings'
+    limits: ScheduleSettings
 
 
-from .schedule_config import ScheduleSettings
-ScheduleCapability.model_rebuild()
+
+class ScheduleConflictDetails(Model):
+    model_config = ConfigDict(json_schema_serialization_defaults_required=False)
+    code: StrictStr
+    message: StrictStr
+    request_id: StrictStr
+    run_id: StrictStr | None = None
+    current_plan: ScheduleRecord | None = None
+
+
+class ScheduleConflictEnvelope(Model):
+    error: ScheduleConflictDetails
