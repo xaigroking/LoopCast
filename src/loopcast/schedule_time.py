@@ -51,9 +51,12 @@ def expand_slots(value, raw=None):
         candidates = {}
         for fold in (0, 1):
             aware = local.replace(tzinfo=zone, fold=fold)
-            utc = aware.astimezone(timezone.utc)
-            if utc.astimezone(zone).replace(tzinfo=None) == local:
-                candidates.setdefault(utc, fold)
+            try:
+                utc = aware.astimezone(timezone.utc)
+                if utc.astimezone(zone).replace(tzinfo=None) == local:
+                    candidates.setdefault(utc, fold)
+            except OverflowError:
+                raise Problem('INVALID_TIME_RULE', 'This local rule exceeds the supported UTC calendar.', 422) from None
         selected = min(candidates) if candidates else None
         if selected is None and spec['kind'] == 'ONCE':
             raise Problem('NONEXISTENT_LOCAL_TIME', 'This local time does not exist in the selected zone.', 422)

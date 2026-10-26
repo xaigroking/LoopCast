@@ -1,6 +1,8 @@
 """Finite schedule identity and immutable revisions in the existing transaction owner."""
 from datetime import datetime, timedelta, timezone
 import hashlib
+import base64
+import hmac
 import json
 from .domain import Problem, canonical, digest, uid
 from .schedule_time import expand_slots
@@ -23,6 +25,20 @@ class ScheduleMethods:
 
     def _schedule_data(self, db, value, capabilities, mode, identity=None, raw=None):
         spec, raw, slots = expand_slots(value, raw)
+        if identity:
+            latest=self._schedule_version(db,identity)
+            same_spec=canonical(spec)==canonical(json.loads(latest['spec']))
+            maps={}
+            for index,slot in enumerate(slots):
+                if same_spec:
+                    version=self._schedule_version(db,identity,slot['nominal_local'][:10])
+                    if version['number'] not in maps:
+                        maps[version['number']]={item['slot_key']:item for item in expand_slots(json.loads(version['spec']),bytes(version['tzif']))[2]}
+                    slots[index]=dict(maps[version['number']][slot['slot_key']])
+                observed=db.execute('SELECT * FROM schedule_occurrences WHERE schedule_id=? AND slot_key=?',(identity,slot['slot_key'])).fetchone()
+                if observed:
+                    for field in ('nominal_local','timezone','tzif_sha256','selected_fold','scheduled_at_utc'):
+                        slots[index][field]=observed[field]
         frozen, blockers = [], []
         for slot in slots:
             group = slot['group']
@@ -121,6 +137,11 @@ class ScheduleMethods:
             pending = db.execute('SELECT COUNT(*) FROM schedule_target_owners o JOIN release_targets t ON t.id=o.target_id WHERE o.active=1 AND t.platform=? AND t.stable_subject=? AND t.evidence_mode=?', key).fetchone()[0]
             if pending + addition > settings.account_pending_targets:raise Problem('SCHEDULE_LIMIT', 'The account pending target limit has been reached.', 429)
 
+    def schedule_replay_create(self, value, checksum, key):
+        with self.transaction() as db:
+            prior=self._studio_prior(db,'schedule.create',key,{'spec':value,'preview_digest':checksum})
+            return self._schedule(db,prior['id']) if prior else None
+
     def schedule_create(self, value, preview_digest, key, capabilities, mode):
         request = {'spec': value, 'preview_digest': preview_digest}
         with self.transaction(True) as db:
@@ -163,10 +184,27 @@ class ScheduleMethods:
     def schedule_get(self, identity):
         with self.transaction() as db:return self._schedule(db, identity)
 
+    def _schedule_cursor(self, db, scope, position):
+        payload=canonical({'scope':scope,'position':position})
+        tag=hmac.new(self._schedule_cursor_key,payload.encode(),'sha256').hexdigest()
+        return base64.urlsafe_b64encode(canonical({'payload':payload,'tag':tag}).encode()).decode().rstrip('=')
+
+    def _schedule_before(self, db, scope, cursor):
+        if cursor is None:return None
+        try:
+            if not isinstance(cursor,str) or len(cursor)>512:raise ValueError()
+            outer=json.loads(base64.b64decode(cursor+'='*(-len(cursor)%4),altchars=b'-_',validate=True))
+            expected=hmac.new(self._schedule_cursor_key,outer['payload'].encode(),'sha256').hexdigest()
+            if not hmac.compare_digest(outer['tag'],expected):raise ValueError()
+            payload=json.loads(outer['payload'])
+            if payload['scope']!=scope or type(payload['position']) is not int or not 1<=payload['position']<=9223372036854775807:raise ValueError()
+            return payload['position']
+        except (TypeError,ValueError,KeyError,AttributeError):raise Problem('INVALID_CURSOR','Reload the list to obtain a current cursor.',400) from None
+
     def schedule_list(self, before=None, limit=30):
         with self.transaction() as db:
-            rows = db.execute('SELECT rowid,id FROM schedules WHERE rowid<COALESCE(?,9223372036854775807) ORDER BY rowid DESC LIMIT ?', (before, limit + 1)).fetchall()
-            return {'items': [self._schedule(db, r['id']) for r in rows[:limit]], 'next_cursor': str(rows[limit-1]['rowid']) if len(rows) > limit else None}
+            rows = db.execute('SELECT rowid,id FROM schedules WHERE rowid<COALESCE(?,9223372036854775807) ORDER BY rowid DESC LIMIT ?', (self._schedule_before(db,'schedules',before), limit + 1)).fetchall()
+            return {'items': [self._schedule(db, r['id']) for r in rows[:limit]], 'next_cursor': self._schedule_cursor(db,'schedules',rows[limit-1]['rowid']) if len(rows) > limit else None}
 
     def schedule_update(self, identity, value, expected_version, checksum, effective, key, capabilities, mode):
         request = {'spec': value, 'expected_version': expected_version, 'preview_digest': checksum, 'effective_from_local_date': effective}
@@ -211,7 +249,7 @@ class ScheduleMethods:
             self._studio_remember(db, 'schedule.update:' + identity, key, request, {'id': identity})
             return self._schedule(db, identity)
 
-    def schedule_control(self, identity, action, expected_version, key, capabilities, mode, checksum=None):
+    def schedule_control(self, identity, action, expected_version, key, capabilities, mode, checksum=None, *, sending_enabled=None):
         request = {'action': action, 'expected_version': expected_version, 'confirmation_digest': checksum}
         with self.admission_lock, self.transaction(True) as db:
             if self._studio_prior(db, 'schedule.control:' + identity, key, request):return self._schedule(db, identity)
@@ -221,6 +259,7 @@ class ScheduleMethods:
             if action not in states:raise Problem('ACTION_UNAVAILABLE', 'Unknown control action.', 400)
             if row['control_state'] == 'CANCELLED' and action != 'cancel':raise Problem('ACTION_UNAVAILABLE', 'A cancelled schedule stays cancelled.', 409)
             if action == 'resume':
+                if sending_enabled is False:raise Problem('SENDING_DISABLED','Publication is disabled by trusted service configuration.',409)
                 self._require_upload(db)
                 if not self.schedule_settings.enabled or mode == 'live' and not self.schedule_settings.allow_live:
                     raise Problem('LOCAL_SCHEDULING_DISABLED', 'Automatic local publication is disabled by trusted configuration.', 409)
@@ -244,10 +283,10 @@ class ScheduleMethods:
     def schedule_occurrences(self, identity, before=None, limit=30):
         with self.transaction() as db:
             self._schedule_row(db, identity)
-            rows = db.execute('SELECT rowid,* FROM schedule_occurrences WHERE schedule_id=? AND rowid<COALESCE(?,9223372036854775807) ORDER BY rowid DESC LIMIT ?', (identity, before, limit + 1)).fetchall()
+            rows = db.execute('SELECT rowid,* FROM schedule_occurrences WHERE schedule_id=? AND rowid<COALESCE(?,9223372036854775807) ORDER BY rowid DESC LIMIT ?', (identity, self._schedule_before(db,'occurrences:'+identity,before), limit + 1)).fetchall()
             items = []
             for r in rows[:limit]:
                 item = {k:r[k] for k in r.keys() if k != 'rowid'}
                 item['targets'] = [dict(t) for t in db.execute('SELECT * FROM schedule_occurrence_targets WHERE occurrence_id=? ORDER BY rowid', (r['id'],))]
                 items.append(item)
-            return {'items': items, 'next_cursor': str(rows[limit-1]['rowid']) if len(rows) > limit else None}
+            return {'items': items, 'next_cursor': self._schedule_cursor(db,'occurrences:'+identity,rows[limit-1]['rowid']) if len(rows) > limit else None}

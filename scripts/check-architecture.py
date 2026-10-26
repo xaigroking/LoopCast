@@ -10,9 +10,10 @@ domain = {"domain", "contracts", "fixture", "generation", "ledger", "publisher",
 forbidden = {"fastapi", "starlette", "uvicorn", "next", "react"}
 # Store/ledger are the persistence adapter; pure run rules live in domain.py.
 allowed = {
+    "schedule_api": {"schedule_models", "domain"},
     "schedule_execution": {"domain", "schedule_time"},
     "quota_storage": {"domain"},
-    "schedule_models": {"studio_models"}, "schedule_config": {"studio_models"},
+    "schedule_models": {"studio_models", "schedule_config"}, "schedule_config": {"studio_models"},
     "schedule_time": {"domain", "schedule_models"}, "schedule_storage": {"domain", "schedule_time"},
     "ownership": set(), "backup": {"migrations", "ownership"},
     "operations_storage": {"domain"}, "restore": {"backup", "ownership", "storage", "operations_storage"},
@@ -38,7 +39,7 @@ allowed = {
     "generation": {"contracts", "runner", "diagnostics", "network"}, "worker": {"domain", "runner", "diagnostics"},
     "publisher": {"runner", "diagnostics"},
     "runtime": {"storage", "worker", "generation", "publisher", "media", "creation", "social", "studio_service", "ownership"},
-    "api": {"runtime", "storage", "diagnostics", "studio_api", "feedback_api", "operations_api"}, "openapi": {"api"},
+    "api": {"runtime", "storage", "diagnostics", "studio_api", "feedback_api", "operations_api", "schedule_api"}, "openapi": {"api"},
     "__main__": {"api", "diagnostics", "generator_diagnostics", "mpt_install", "feedback_demo", "backup", "restore", "operations_snapshot", "schedule_config"}, "__init__": set(),
 }
 graph = {name: set() for name in modules}

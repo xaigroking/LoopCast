@@ -826,6 +826,144 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/studio/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Plans */
+        get: operations["plans_v1_studio_schedules_get"];
+        put?: never;
+        /** Create */
+        post: operations["create_v1_studio_schedules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/studio/schedules/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Capabilities */
+        get: operations["capabilities_v1_studio_schedules_capabilities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/studio/schedules/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview */
+        post: operations["preview_v1_studio_schedules_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/studio/schedules/{schedule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get */
+        get: operations["get_v1_studio_schedules__schedule_id__get"];
+        /** Update */
+        put: operations["update_v1_studio_schedules__schedule_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/studio/schedules/{schedule_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel */
+        post: operations["cancel_v1_studio_schedules__schedule_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/studio/schedules/{schedule_id}/occurrences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Occurrences */
+        get: operations["occurrences_v1_studio_schedules__schedule_id__occurrences_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/studio/schedules/{schedule_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause */
+        post: operations["pause_v1_studio_schedules__schedule_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/studio/schedules/{schedule_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume */
+        post: operations["resume_v1_studio_schedules__schedule_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1023,6 +1161,18 @@ export interface components {
             /** Video Generation */
             video_generation: boolean;
         };
+        /** CatchupMissed */
+        CatchupMissed: {
+            /** Max Age Seconds */
+            max_age_seconds: number;
+            /** Max Slots */
+            max_slots: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            policy: "BOUNDED_CATCHUP";
+        };
         /** ComponentCapabilities */
         ComponentCapabilities: {
             /** Ai Disclosure */
@@ -1184,6 +1334,25 @@ export interface components {
              * @default 1
              */
             voice_rate: number;
+        };
+        /** DailySpec */
+        DailySpec: {
+            /** Items */
+            items: components["schemas"]["ReleaseGroup"][];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "DAILY_LOCAL";
+            /** Local Time */
+            local_time: string;
+            /** Missed */
+            missed: components["schemas"]["SkipMissed"] | components["schemas"]["CatchupMissed"];
+            quota: components["schemas"]["ScheduleQuota"];
+            /** Start Local Date */
+            start_local_date: string;
+            /** Timezone */
+            timezone: string;
         };
         /** DecisionConfirm */
         DecisionConfirm: {
@@ -1715,6 +1884,42 @@ export interface components {
                 [key: string]: number;
             } | null;
         };
+        /** OccurrenceTarget */
+        OccurrenceTarget: {
+            /** Attempt Id */
+            attempt_id: string | null;
+            /** Batch Id */
+            batch_id: string;
+            /** Job Id */
+            job_id: string | null;
+            /** Occurrence Id */
+            occurrence_id: string;
+            /** Reason */
+            reason: string;
+            /** State */
+            state: string;
+            /** Target Id */
+            target_id: string;
+        };
+        /** OnceSpec */
+        OnceSpec: {
+            /** Items */
+            items: components["schemas"]["ReleaseGroup"][];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "ONCE";
+            /** Local Date */
+            local_date: string;
+            /** Local Time */
+            local_time: string;
+            /** Missed */
+            missed: components["schemas"]["SkipMissed"] | components["schemas"]["CatchupMissed"];
+            quota: components["schemas"]["ScheduleQuota"];
+            /** Timezone */
+            timezone: string;
+        };
         /** OperationsSnapshot */
         OperationsSnapshot: {
             /** Application */
@@ -2100,6 +2305,13 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** ReleaseGroup */
+        ReleaseGroup: {
+            /** Batch Id */
+            batch_id: string;
+            /** Target Ids */
+            target_ids: string[];
+        };
         /** ReleaseList */
         ReleaseList: {
             /** Items */
@@ -2293,6 +2505,340 @@ export interface components {
             narration: string;
             /** Visual */
             visual: string;
+        };
+        /** ScheduleBlocker */
+        ScheduleBlocker: {
+            /** Reasons */
+            reasons: string[];
+            /** Target Id */
+            target_id: string;
+        };
+        /** ScheduleCapability */
+        ScheduleCapability: {
+            /** Allow Live */
+            allow_live: boolean;
+            /**
+             * Clock State
+             * @enum {string}
+             */
+            clock_state: "STABLE" | "CLOCK_BACKWARD";
+            /** Effective Sending Enabled */
+            effective_sending_enabled: boolean;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Evidence Mode
+             * @enum {string}
+             */
+            evidence_mode: "contract" | "live";
+            /**
+             * Fold Policy
+             * @constant
+             */
+            fold_policy: "EARLIER";
+            /**
+             * Gap Policy
+             * @constant
+             */
+            gap_policy: "SKIP";
+            limits: components["schemas"]["ScheduleSettings"];
+            /**
+             * Management
+             * @constant
+             */
+            management: true;
+            /**
+             * Native Scheduling
+             * @constant
+             */
+            native_scheduling: false;
+            /**
+             * Time Rule Version
+             * @constant
+             */
+            time_rule_version: "local-daily-v1";
+        };
+        /** ScheduleCommand */
+        ScheduleCommand: {
+            /** Expected Version */
+            expected_version: number;
+        };
+        /** ScheduleCreateRequest */
+        ScheduleCreateRequest: {
+            /**
+             * Confirmed
+             * @constant
+             */
+            confirmed: true;
+            /** Preview Digest */
+            preview_digest: string;
+            /** Spec */
+            spec: components["schemas"]["OnceSpec"] | components["schemas"]["DailySpec"];
+        };
+        /** ScheduleInFlight */
+        ScheduleInFlight: {
+            /** Attempt Id */
+            attempt_id: string;
+            /** State */
+            state: string;
+            /** Target Id */
+            target_id: string;
+        };
+        /** ScheduleList */
+        ScheduleList: {
+            /** Items */
+            items: components["schemas"]["ScheduleRecord"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** ScheduleOccurrence */
+        ScheduleOccurrence: {
+            /** Classified At */
+            classified_at: string;
+            /** Created At */
+            created_at: string;
+            /** Eligible Until */
+            eligible_until: number | null;
+            /** Id */
+            id: string;
+            /** Nominal Local */
+            nominal_local: string;
+            /** Reason */
+            reason: string;
+            /** Schedule Id */
+            schedule_id: string;
+            /** Scheduled At Utc */
+            scheduled_at_utc: string | null;
+            /** Selected Fold */
+            selected_fold: (0 | 1) | null;
+            /** Slot Key */
+            slot_key: string;
+            /** Spec Version */
+            spec_version: number;
+            /** State */
+            state: string;
+            /** Targets */
+            targets: components["schemas"]["OccurrenceTarget"][];
+            /** Timezone */
+            timezone: string;
+            /** Tzif Sha256 */
+            tzif_sha256: string;
+            /** Version */
+            version: number;
+        };
+        /** ScheduleOccurrenceList */
+        ScheduleOccurrenceList: {
+            /** Items */
+            items: components["schemas"]["ScheduleOccurrence"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** SchedulePreview */
+        SchedulePreview: {
+            /** Blockers */
+            blockers: components["schemas"]["ScheduleBlocker"][];
+            /** Confirmation Digest */
+            confirmation_digest: string;
+            /** Expires At */
+            expires_at: string;
+            /**
+             * Fold Policy
+             * @constant
+             */
+            fold_policy: "EARLIER";
+            /**
+             * Gap Policy
+             * @constant
+             */
+            gap_policy: "SKIP";
+            /** Items */
+            items: components["schemas"]["ScheduleSlot"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Preview Digest */
+            preview_digest: string;
+            /**
+             * Time Rule Version
+             * @constant
+             */
+            time_rule_version: "local-daily-v1";
+            /** Total */
+            total: number;
+            /** Tzdb Version */
+            tzdb_version: string | null;
+            /** Tzif Sha256 */
+            tzif_sha256: string;
+        };
+        /** SchedulePreviewRequest */
+        SchedulePreviewRequest: {
+            /** Cursor */
+            cursor?: string | null;
+            /** Expected Version */
+            expected_version?: number | null;
+            /** Schedule Id */
+            schedule_id?: string | null;
+            /** Spec */
+            spec: components["schemas"]["OnceSpec"] | components["schemas"]["DailySpec"];
+        };
+        /** ScheduleQuota */
+        ScheduleQuota: {
+            /** Attempts Per Utc Day */
+            attempts_per_utc_day: number;
+            /** Pending Targets */
+            pending_targets: number;
+        };
+        /** ScheduleRecord */
+        ScheduleRecord: {
+            /** Classified Count */
+            classified_count: number;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /** Confirmed Digest */
+            confirmed_digest: string | null;
+            /**
+             * Control State
+             * @enum {string}
+             */
+            control_state: "ACTIVE" | "PAUSED" | "CANCELLED";
+            /** Control Version */
+            control_version: number;
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Created At */
+            created_at: string;
+            /** Display State */
+            display_state: string;
+            /** Id */
+            id: string;
+            /** In Flight */
+            in_flight: components["schemas"]["ScheduleInFlight"][];
+            /** Pause Reason */
+            pause_reason: string | null;
+            /** Slot Count */
+            slot_count: number;
+            /** Spec */
+            spec: components["schemas"]["OnceSpec"] | components["schemas"]["DailySpec"];
+            /** Spec Version */
+            spec_version: number;
+            /** Tzif Sha256 */
+            tzif_sha256: string;
+        };
+        /** ScheduleResume */
+        ScheduleResume: {
+            /** Confirmation Digest */
+            confirmation_digest: string;
+            /**
+             * Confirmed
+             * @constant
+             */
+            confirmed: true;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /** ScheduleSettings */
+        ScheduleSettings: {
+            /**
+             * Account Attempts Per Utc Day
+             * @default 10
+             */
+            account_attempts_per_utc_day: number;
+            /**
+             * Account Pending Targets
+             * @default 64
+             */
+            account_pending_targets: number;
+            /**
+             * Allow Live
+             * @default false
+             */
+            allow_live: boolean;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Format
+             * @default loopcast.scheduling.v1
+             * @constant
+             */
+            format: "loopcast.scheduling.v1";
+            /**
+             * Max Active Plans
+             * @default 100
+             */
+            max_active_plans: number;
+            /**
+             * Max Catchup Age Seconds
+             * @default 3600
+             */
+            max_catchup_age_seconds: number;
+            /**
+             * Max Catchup Slots
+             * @default 1
+             */
+            max_catchup_slots: number;
+            /**
+             * Max Pending Targets
+             * @default 256
+             */
+            max_pending_targets: number;
+            /**
+             * Max Slots Per Plan
+             * @default 366
+             */
+            max_slots_per_plan: number;
+            /**
+             * Plan Attempts Per Utc Day
+             * @default 10
+             */
+            plan_attempts_per_utc_day: number;
+            /**
+             * Plan Pending Targets
+             * @default 32
+             */
+            plan_pending_targets: number;
+        };
+        /** ScheduleSlot */
+        ScheduleSlot: {
+            group: components["schemas"]["ReleaseGroup"];
+            /** Nominal Local */
+            nominal_local: string;
+            /** Position */
+            position: number;
+            /** Reason */
+            reason: string;
+            /** Scheduled At Utc */
+            scheduled_at_utc: string | null;
+            /** Selected Fold */
+            selected_fold: (0 | 1) | null;
+            /** Slot Key */
+            slot_key: string;
+            /** Timezone */
+            timezone: string;
+            /** Tzif Sha256 */
+            tzif_sha256: string;
+        };
+        /** ScheduleUpdateRequest */
+        ScheduleUpdateRequest: {
+            /** Effective From Local Date */
+            effective_from_local_date: string | null;
+            /** Expected Version */
+            expected_version: number;
+            /** Preview Digest */
+            preview_digest: string;
+            /** Spec */
+            spec: components["schemas"]["OnceSpec"] | components["schemas"]["DailySpec"];
+        };
+        /** SkipMissed */
+        SkipMissed: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            policy: "SKIP";
         };
         /** Stage */
         Stage: {
@@ -7521,6 +8067,978 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReleaseBatch"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    plans_v1_studio_schedules_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleList"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    create_v1_studio_schedules_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleRecord"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    capabilities_v1_studio_schedules_capabilities_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleCapability"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    preview_v1_studio_schedules_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SchedulePreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulePreview"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_v1_studio_schedules__schedule_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleRecord"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    update_v1_studio_schedules__schedule_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleRecord"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    cancel_v1_studio_schedules__schedule_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleRecord"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    occurrences_v1_studio_schedules__schedule_id__occurrences_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleOccurrenceList"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    pause_v1_studio_schedules__schedule_id__pause_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleRecord"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Stable LoopCast error envelope */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    resume_v1_studio_schedules__schedule_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleResume"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleRecord"];
                 };
             };
             /** @description Stable LoopCast error envelope */

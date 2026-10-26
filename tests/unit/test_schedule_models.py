@@ -99,6 +99,9 @@ class ScheduleModelsTests(ScheduleFixture):
         with self.store.transaction() as db:
             old=self.store._schedule_version(db,plan['id'],'2026-10-27');new=self.store._schedule_version(db,plan['id'],'2026-10-28')
             self.assertEqual(json.loads(old['spec'])['local_time'],'09:00');self.assertEqual(json.loads(new['spec'])['local_time'],'11:00')
+        actual_preview=self.preview(edited,updated)
+        self.assertEqual(actual_preview['items'][0]['nominal_local'],'2026-10-27T09:00')
+        self.assertEqual(actual_preview['items'][1]['nominal_local'],'2026-10-28T11:00')
         cancelled=self.store.schedule_control(plan['id'],'cancel',updated['control_version'],uid(),self.caps,'contract')
         with self.assertRaises(Problem):self.store.schedule_control(plan['id'],'resume',cancelled['control_version'],uid(),self.caps,'contract',pre['confirmation_digest'])
         replacement=self.create(once);self.assertNotEqual(replacement['id'],plan['id'])

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import re
 import sqlite3
+import secrets
 import threading
 
 from .domain import STAGES, TERMINAL, uid, now, canonical, digest, Problem, actions, validate_input
@@ -28,6 +29,7 @@ class Store(PublicationMethods, StudioMethods, AccountMethods, ReleaseMethods, F
         self.clock = clock or SystemClock()
         self.schedule_settings = ScheduleSettings.model_validate(schedule_settings or {})
         self._schedule_previews = {}
+        self._schedule_cursor_key = secrets.token_bytes(32)
         self.admission_lock = threading.RLock()
         self.component = component
         self.directory = Path(directory).resolve()
