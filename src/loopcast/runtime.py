@@ -10,7 +10,7 @@ from .ownership import DirectoryLock
 class ApplicationRuntime:
     """One process-local owner for storage, recovery, worker and publisher."""
 
-    def __init__(self, directory: str | Path, generator_settings=None, media_settings=None, social_settings=None):
+    def __init__(self, directory: str | Path, generator_settings=None, media_settings=None, social_settings=None, *, schedule_settings=None, clock=None):
         from .generation import Generator
 
         self.generator_settings, self.media_settings = generator_settings, media_settings
@@ -29,7 +29,7 @@ class ApplicationRuntime:
         self.worker = None
         self.publisher = None
         try:
-            self.store = Store(self.directory, self.generator.manifest if self.generator else None)
+            self.store = Store(self.directory, self.generator.manifest if self.generator else None, schedule_settings=schedule_settings, clock=clock)
             from .media import MediaLibrary
             from .creation import CreationExecutor
             from .social import SocialAdapter

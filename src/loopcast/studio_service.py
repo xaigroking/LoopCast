@@ -1,5 +1,6 @@
 """Coordinate public storage ports and isolated adapters, with one job owner."""
 import json
+import hashlib
 from pathlib import Path
 import shutil
 import tempfile
@@ -129,17 +130,33 @@ class StudioControl:
                     if not self.social.sending_enabled: raise Problem('SENDING_DISABLED', 'Sending is disabled.', 409)
                     asset = self.library.path(batch['asset_id'])
                     video = work / asset.name; shutil.copyfile(asset, video)
+                    with video.open('rb') as stream:
+                        if hashlib.file_digest(stream,'sha256').hexdigest() != json.loads(release['frozen'])['asset_sha256']:
+                            raise Problem('FROZEN_INPUT_CHANGED', 'The copied video differs from the confirmed input.', 409)
                     payload.update({'video_file': str(video), 'title': batch['title'], 'description': batch['description'], 'fields': release['fields']})
                     if batch.get('cover_id'):
                         cover = self.library.path(batch['cover_id']); destination = work / cover.name; shutil.copyfile(cover, destination)
+                        with destination.open('rb') as stream:
+                            if hashlib.file_digest(stream,'sha256').hexdigest() != self.store.studio_asset_file(batch['cover_id'])['sha256']:
+                                raise Problem('FROZEN_INPUT_CHANGED', 'The copied cover differs from its registered identity.', 409)
                         payload['cover_file'] = str(destination)
                     self.social.verify()
-                    if cancelled() or not self.store.studio_sending(job):
-                        self.store.studio_release_result(job, {'outcome': 'NOT_SENT', 'boundary_crossed': False}, 'control-preflight')
-                        return
-                    crossed = True
-                    self.store.studio_require_upload(job)
-                    result = self.social.invoke('upload', release['platform'], work, payload, cancelled)
+                    held = True
+                    self.store.admission_lock.acquire()
+                    def started_upload():
+                        nonlocal held, crossed
+                        crossed = True
+                        held = False
+                        self.store.admission_lock.release()
+                    try:
+                        self.store.studio_validate_dispatch(job, self.platform_map, self.social.mode)
+                        if cancelled() or not self.store.studio_sending(job):
+                            self.store.studio_release_result(job, {'outcome': 'NOT_SENT', 'boundary_crossed': False}, 'control-preflight')
+                            return
+                        self.store.studio_require_upload(job)
+                        result = self.social.invoke('upload', release['platform'], work, payload, cancelled, on_started=started_upload)
+                    finally:
+                        if held:self.store.admission_lock.release()
                     self.store.studio_release_result(job, result, self.social.mode + ':sau')
                 else:
                     result = self.social.invoke('query', release['platform'], work, payload, cancelled)

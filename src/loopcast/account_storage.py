@@ -47,7 +47,7 @@ class AccountMethods:
         if row is None:
             raise Problem('NOT_FOUND', 'Authorization session does not exist.', 404)
         value = {key: row[key] for key in ('id', 'platform', 'account_id', 'method', 'state', 'expires_at', 'error_code', 'version')}
-        if value['state'] in ACTIVE_AUTH and value['expires_at'] <= time.time():
+        if value['state'] in ACTIVE_AUTH and value['expires_at'] <= self.clock.now():
             value['state'] = 'EXPIRED'
         return value
 
@@ -64,7 +64,7 @@ class AccountMethods:
             raise Problem('QUEUE_FULL', 'The execution queue is full.', 429)
         identity, token = uid(), token or uid()
         db.execute('INSERT INTO studio_jobs VALUES(?,?,?,?,?,?,?,?)',
-                   (identity, kind, subject_id, 'READY', token, deadline, canonical({'trace': trace or {}, 'payload': payload or {}, 'execution_epoch': self._execution_epoch(db)}), now()))
+                   (identity, kind, subject_id, 'READY', token, deadline, canonical({'trace': trace or {}, 'payload': payload or {}, 'execution_epoch': self._execution_epoch(db)}), self.clock.iso()))
         return token
 
     def studio_authorize(self, platform, account_id, method, owner_hash, key, trace=None, ttl=300):
@@ -78,13 +78,13 @@ class AccountMethods:
                 account = self._account(db, account_id)
                 if account['platform'] != platform:
                     raise Problem('INVALID_INPUT', 'Account platform does not match.', 400)
-            active = db.execute("SELECT id FROM auth_sessions WHERE owner_hash=? AND platform=? AND COALESCE(account_id,'')=COALESCE(?,'') AND state IN ('PENDING','WAITING','VERIFYING') AND expires_at>?", (owner_hash, platform, account_id, time.time())).fetchone()
+            active = db.execute("SELECT id FROM auth_sessions WHERE owner_hash=? AND platform=? AND COALESCE(account_id,'')=COALESCE(?,'') AND state IN ('PENDING','WAITING','VERIFYING') AND expires_at>?", (owner_hash, platform, account_id, self.clock.now())).fetchone()
             if active:
                 raise Problem('AUTHORIZATION_ACTIVE', 'Finish or cancel the existing session.', 409)
             identity, token = uid(), uid()
-            expires = time.time() + ttl
+            expires = self.clock.now() + ttl
             db.execute('INSERT INTO auth_sessions VALUES(?,?,?,?,?,?,?,?,?,?,?)',
-                       (identity, owner_hash, platform, account_id, method, 'PENDING', expires, None, 1, token, now()))
+                       (identity, owner_hash, platform, account_id, method, 'PENDING', expires, None, 1, token, self.clock.iso()))
             self._studio_enqueue(db, 'authorize', identity, expires, trace, token=token)
             self._studio_remember(db, scope, key, request, {'id': identity})
             return self._authorization(db, identity, owner_hash)
@@ -111,7 +111,7 @@ class AccountMethods:
             if account['state'] == 'DISCONNECTED':
                 raise Problem('ACCOUNT_DISCONNECTED', 'Reconnect this account.', 409)
             db.execute("UPDATE studio_accounts SET state='PENDING',version=version+1 WHERE id=?", (identity,))
-            self._studio_enqueue(db, 'check', identity, time.time() + 60, trace, {'account_version': expected_version + 1})
+            self._studio_enqueue(db, 'check', identity, self.clock.now() + 60, trace, {'account_version': expected_version + 1})
             self._studio_remember(db, scope, key, request, {'id': identity})
             return self._account(db, identity)
 
@@ -126,14 +126,14 @@ class AccountMethods:
             if epoch is not None and epoch != self._execution_epoch(db):
                 db.execute("UPDATE studio_jobs SET state='CANCELLED' WHERE id=?", (job['id'],))
                 return None
-            if job['deadline'] <= time.time():
+            if job['deadline'] <= self.clock.now():
                 db.execute("UPDATE studio_jobs SET state='CANCELLED' WHERE id=?", (job['id'],))
                 if job['kind'] == 'authorize':
                     db.execute("UPDATE auth_sessions SET state='EXPIRED',version=version+1 WHERE id=? AND state IN ('PENDING','WAITING','VERIFYING')", (job['subject_id'],))
                 elif job['kind'] == 'check':
                     db.execute("UPDATE studio_accounts SET state='EXPIRED',version=version+1 WHERE id=? AND state='PENDING'", (job['subject_id'],))
                 elif job['kind'] == 'dispatch':
-                    db.execute("UPDATE release_attempts SET state='NOT_SENT',ended_at=? WHERE token=? AND state='PREPARED'", (now(), job['token']))
+                    db.execute("UPDATE release_attempts SET state='NOT_SENT',ended_at=? WHERE token=? AND state='PREPARED'", (self.clock.iso(), job['token']))
                     db.execute("UPDATE release_targets SET state='NOT_SENT',version=version+1 WHERE id=? AND state='PREPARED'", (job['subject_id'],))
                     db.execute('DELETE FROM release_account_locks WHERE token=?', (job['token'],))
                 return None
@@ -151,12 +151,12 @@ class AccountMethods:
         with self.transaction() as db:
             if not self._job_epoch_current(db, job) or job['kind'] == 'dispatch' and self._restore_guard(db):
                 return False
-            row = db.execute("SELECT 1 FROM studio_jobs WHERE id=? AND token=? AND state='RUNNING' AND deadline>?", (job['id'], job['token'], time.time())).fetchone()
+            row = db.execute("SELECT 1 FROM studio_jobs WHERE id=? AND token=? AND state='RUNNING' AND deadline>?", (job['id'], job['token'], self.clock.now())).fetchone()
             if not row:
                 return False
             if job['kind'] == 'authorize':
                 row = db.execute('SELECT state,expires_at FROM auth_sessions WHERE id=? AND token=?', (job['subject_id'], job['token'])).fetchone()
-                return bool(row and row['state'] in ACTIVE_AUTH and row['expires_at'] > time.time())
+                return bool(row and row['state'] in ACTIVE_AUTH and row['expires_at'] > self.clock.now())
             return True
 
     def studio_authorization_job(self, identity):
@@ -168,7 +168,7 @@ class AccountMethods:
         if state not in {'WAITING', 'VERIFYING'}: return
         with self.transaction(True) as db:
             db.execute("UPDATE auth_sessions SET state=?,version=version+1 WHERE id=? AND token=? AND state IN ('PENDING','WAITING','VERIFYING') AND state!=? AND expires_at>?",
-                       (state, job['subject_id'], job['token'], state, time.time()))
+                       (state, job['subject_id'], job['token'], state, self.clock.now()))
 
     def studio_complete_job(self, job):
         with self.transaction(True) as db:
@@ -181,7 +181,7 @@ class AccountMethods:
         with self.transaction(True) as db:
             if not self._job_epoch_current(db, job):return False
             session = db.execute('SELECT * FROM auth_sessions WHERE id=? AND token=?', (job['subject_id'], job['token'])).fetchone()
-            if session is None or session['state'] not in ACTIVE_AUTH or session['expires_at'] <= time.time():
+            if session is None or session['state'] not in ACTIVE_AUTH or session['expires_at'] <= self.clock.now():
                 return False
             if session['account_id']:
                 expected = self._account(db, session['account_id'])
@@ -193,9 +193,9 @@ class AccountMethods:
             identity = existing[0] if existing else uid()
             label = str(profile.get('label') or subject)[:120]
             if existing:
-                db.execute("UPDATE studio_accounts SET credential_ref=?,state='AVAILABLE',checked_at=?,version=version+1 WHERE id=?", (credential_ref, now(), identity))
+                db.execute("UPDATE studio_accounts SET credential_ref=?,state='AVAILABLE',checked_at=?,version=version+1 WHERE id=?", (credential_ref, self.clock.iso(), identity))
             else:
-                db.execute('INSERT INTO studio_accounts VALUES(?,?,?,?,?,?,?,?,?,?)', (identity, session['platform'], subject, label, '[]', 'AVAILABLE', 1, credential_ref, now(), evidence_mode))
+                db.execute('INSERT INTO studio_accounts VALUES(?,?,?,?,?,?,?,?,?,?)', (identity, session['platform'], subject, label, '[]', 'AVAILABLE', 1, credential_ref, self.clock.iso(), evidence_mode))
             db.execute("UPDATE auth_sessions SET state='SUCCEEDED',account_id=?,version=version+1 WHERE id=?", (identity, session['id']))
             db.execute("UPDATE studio_jobs SET state='DONE' WHERE id=? AND token=?", (job['id'], job['token']))
             return True
@@ -210,7 +210,7 @@ class AccountMethods:
             expected = job['payload']['account_version']
             if account['version'] == expected and account['state'] == 'PENDING':
                 state = 'AVAILABLE' if valid and subject == account['stable_subject'] else 'EXPIRED'
-                db.execute('UPDATE studio_accounts SET state=?,checked_at=?,version=version+1 WHERE id=?', (state, now(), job['subject_id']))
+                db.execute('UPDATE studio_accounts SET state=?,checked_at=?,version=version+1 WHERE id=?', (state, self.clock.iso(), job['subject_id']))
             db.execute("UPDATE studio_jobs SET state='DONE' WHERE id=? AND token=?", (job['id'], job['token']))
             return True
 
@@ -218,7 +218,7 @@ class AccountMethods:
         with self.transaction(True) as db:
             if not self._job_epoch_current(db, job):return False
             if job['kind'] == 'authorize':
-                db.execute("UPDATE auth_sessions SET state=CASE WHEN expires_at<=? THEN 'EXPIRED' ELSE 'FAILED' END,error_code=?,version=version+1 WHERE id=? AND token=? AND state IN ('PENDING','WAITING','VERIFYING')", (time.time(), code, job['subject_id'], job['token']))
+                db.execute("UPDATE auth_sessions SET state=CASE WHEN expires_at<=? THEN 'EXPIRED' ELSE 'FAILED' END,error_code=?,version=version+1 WHERE id=? AND token=? AND state IN ('PENDING','WAITING','VERIFYING')", (self.clock.now(), code, job['subject_id'], job['token']))
             elif job['kind'] == 'check':
                 db.execute("UPDATE studio_accounts SET state='EXPIRED',version=version+1 WHERE id=? AND version=?", (job['subject_id'], job['payload']['account_version']))
             db.execute("UPDATE studio_jobs SET state='DONE' WHERE id=? AND token=?", (job['id'], job['token']))
@@ -235,3 +235,4 @@ class AccountMethods:
                 if outcome == 'NOT_SENT':
                     db.execute('DELETE FROM release_account_locks WHERE token=?', (row['token'],))
             db.execute("UPDATE studio_jobs SET state='CANCELLED' WHERE state='RUNNING' OR (state='READY' AND kind IN ('dispatch','verify'))")
+            self._schedule_sync(db)

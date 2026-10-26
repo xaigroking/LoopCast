@@ -266,6 +266,8 @@ def create_app(
     trusted_proxies: tuple[str, ...] = (),
     media_settings=None,
     social_settings=None,
+    schedule_settings=None,
+    clock=None,
 ):
     """Create an app factory; resources are acquired only inside ASGI lifespan."""
     proxy_networks = tuple(ipaddress.ip_network(item, strict=False) for item in trusted_proxies)
@@ -279,7 +281,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        runtime = ApplicationRuntime(data_dir, generator_settings, media_settings, social_settings)
+        runtime = ApplicationRuntime(data_dir, generator_settings, media_settings, social_settings, schedule_settings=schedule_settings, clock=clock)
         app.state.runtime = runtime
         try:
             yield

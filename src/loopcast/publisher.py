@@ -20,6 +20,7 @@ class Publisher:
         self.directory.mkdir(exist_ok=True)
         self.store.publication_recover()
         if self.studio: self.store.studio_recover()
+        self.next_schedule_scan = 0
         self.thread.start()
 
     def close(self):
@@ -36,6 +37,9 @@ class Publisher:
     def _loop(self):
         while not self.stopping.is_set():
             if self.studio:
+                if time.monotonic() >= self.next_schedule_scan:
+                    self.store.schedule_tick(self.studio.platform_map, self.studio.social.mode, self.studio.social.sending_enabled)
+                    self.next_schedule_scan = time.monotonic() + 1
                 durable = self.store.studio_claim_job()
                 if durable:
                     self.studio.execute_job(durable, self.stopping)

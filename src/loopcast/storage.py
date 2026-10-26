@@ -18,10 +18,12 @@ from .release_storage import ReleaseMethods
 from .feedback_storage import FeedbackMethods
 from .operations_storage import OperationsMethods
 from .schedule_storage import ScheduleMethods
+from .quota_storage import QuotaMethods
+from .schedule_execution import ScheduleExecutionMethods
 from .schedule_config import SystemClock, ScheduleSettings
 
 
-class Store(PublicationMethods, StudioMethods, AccountMethods, ReleaseMethods, FeedbackMethods, OperationsMethods, ScheduleMethods):
+class Store(PublicationMethods, StudioMethods, AccountMethods, ReleaseMethods, FeedbackMethods, OperationsMethods, ScheduleMethods, QuotaMethods, ScheduleExecutionMethods):
     def __init__(self, directory, component=None, *, clock=None, schedule_settings=None):
         self.clock = clock or SystemClock()
         self.schedule_settings = ScheduleSettings.model_validate(schedule_settings or {})
