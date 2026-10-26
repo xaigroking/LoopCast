@@ -44,7 +44,7 @@ class InspectionMethods:
         db.execute("UPDATE studio_accounts SET state=?,checked_at=?,version=version+1 WHERE id=? AND version=? AND state='PENDING'",
                    (previous['state'],previous['checked_at'],previous['id'],private['expected_account_version']))
 
-    def _inspection_sync(self, db, descriptor):
+    def _inspection_descriptor(self, db, descriptor, *, strict=False):
         if descriptor['account_id']:
             actual=db.execute('SELECT version FROM studio_accounts WHERE id=?',(descriptor['account_id'],)).fetchone()
             if actual and actual[0]!=descriptor['scope']['account_version']:
@@ -53,7 +53,11 @@ class InspectionMethods:
                 previous=private.get('previous_account',{})
                 if private.get('expected_account_version')==actual[0] and previous.get('version')==descriptor['scope']['account_version']:
                     descriptor=descriptor|{'scope':descriptor['scope']|{'account_version':actual[0]}}
-                else:raise Problem('VERSION_CONFLICT','Refresh the account channel.',409)
+                elif strict:raise Problem('VERSION_CONFLICT','Refresh the account channel.',409)
+        return descriptor
+
+    def _inspection_sync(self, db, descriptor):
+        descriptor=self._inspection_descriptor(db,descriptor,strict=True)
         row=db.execute('SELECT * FROM inspection_channels WHERE id=?',(descriptor['id'],)).fetchone()
         account_version=descriptor['scope']['account_version']
         if row is None:
@@ -81,6 +85,7 @@ class InspectionMethods:
     def _inspection_report(self, db, identity, descriptor=None):
         row=db.execute('SELECT * FROM inspection_reports WHERE id=?',(identity,)).fetchone()
         if row is None:raise Problem('HISTORY_RETIRED','This report is no longer retained.',410)
+        if descriptor:descriptor=self._inspection_descriptor(db,descriptor)
         value=json.loads(row['payload']);channel=db.execute('SELECT * FROM inspection_channels WHERE id=?',(row['channel_id'],)).fetchone()
         current=channel['version']
         if descriptor and (descriptor['fingerprint']!=channel['input_digest'] or descriptor['scope']['account_version']!=channel['account_version']):current+=1
@@ -98,6 +103,7 @@ class InspectionMethods:
         with self.transaction() as db:return self._inspection_channel(db,descriptor,online_allowed)
 
     def _inspection_channel(self, db, descriptor, online_allowed):
+        descriptor=self._inspection_descriptor(db,descriptor)
         row=db.execute('SELECT * FROM inspection_channels WHERE id=?',(descriptor['id'],)).fetchone()
         version=(descriptor['scope']['account_version'] or 1) if not row else row['version']+int(row['input_digest']!=descriptor['fingerprint'] or row['account_version']!=descriptor['scope']['account_version'])
         active=db.execute("SELECT id FROM inspection_checks WHERE channel_id=? AND state IN ('QUEUED','RUNNING')",(descriptor['id'],)).fetchone()

@@ -80,6 +80,20 @@ class InspectionTests(ScheduleFixture):
         self.assertEqual(report['scope']['account_version'],self.store.studio_accounts()['items'][0]['version'])
         self.assertEqual(report['actual_operations']['check'],1);self.assertEqual(report['actual_operations']['upload'],0)
 
+    def test_inventory_snapshot_before_owned_account_transition_keeps_channel_version(self):
+        before=self.channel('ACCOUNT');original=self.service.channel(before['id'])['channel_version']
+        first=self.begin('ACCOUNT',True)
+        stale_view=self.store.inspection_channel(before,True)
+        self.assertEqual(stale_view['channel_version'],original)
+        self.assertEqual(stale_view['scope']['account_version'],self.store.studio_accounts()['items'][0]['version'])
+        joined=self.service.start(before['id'],ChannelCheckRequest(expected_version=stale_view['channel_version'],online=True,confirmed_online=True),uid())
+        self.assertEqual(joined['check']['id'],first['check']['id']);self.assertTrue(joined['joined'])
+        # A separate edit is still a new generation, even if its reader was delayed.
+        current=self.store.studio_accounts()['items'][0]
+        self.store.studio_account_update(current['id'],'Externally changed',[],current['version'],uid())
+        with self.assertRaises(Problem):
+            self.service.start(before['id'],ChannelCheckRequest(expected_version=original,online=True,confirmed_online=True),uid())
+
     def test_timeout_keeps_previous_account_observation_and_no_new_verification(self):
         before=self.store.studio_accounts()['items'][0];check=self.begin('ACCOUNT',True)['check'];job=self.store.studio_claim_job()
         with patch.object(self.social,'invoke',side_effect=RunnerError('TIMEOUT')):self.control.execute_job(job,threading.Event())
