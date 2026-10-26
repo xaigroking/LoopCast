@@ -81,3 +81,27 @@ class InspectionAPITests(unittest.TestCase):
         self.assertEqual(report['evidence_status'],'fixture_verified');self.assertEqual(report['actual_operations']['check'],1)
         self.assertFalse(self.owner.request('/v1/operations/status')[1]['upload_allowed_by_recovery'])
         self.assertFalse(next(c for c in report['declarations']if c['operation']=='native_schedule')['supported'])
+
+    def test_total_probe_timeout_reaps_nested_cli_process(self):
+        import os
+        import signal
+        import generation_support
+        marker=self.root/'diagnostic-child.pid'
+        launcher=generation_support.LAUNCHER.replace('def main():',"def main():\n import time\n Path("+repr(str(marker))+").write_text(str(os.getpid()))\n time.sleep(20)")
+        with patch.object(generation_support,'LAUNCHER',launcher):paths=configurations(self.root/'slow-components')
+        self.server.runtime.generator_settings=json.loads(paths[0].read_text())
+        self.server.runtime.store.inspection_settings=InspectionSettings(timeout_seconds=5)
+        pid=None
+        try:
+            _,report=self.check(self.channel('GENERATOR'))
+            self.assertEqual(report['result'],'UNKNOWN');self.assertEqual(report['reason_code'],'CHECK_TIMEOUT')
+            self.assertTrue(marker.exists());pid=int(marker.read_text())
+            proc=Path('/proc')/str(pid)/'stat'
+            if proc.exists():self.assertEqual(proc.read_text().rsplit(')',1)[1].split()[0],'Z','Diagnostic descendant remains running')
+            else:
+                with self.assertRaises(ProcessLookupError):os.kill(pid,0)
+        finally:
+            if pid is None and marker.exists():pid=int(marker.read_text())
+            if pid is not None:
+                try:os.kill(pid,signal.SIGKILL)
+                except ProcessLookupError:pass
