@@ -759,6 +759,7 @@
     "inspectReason_COMPONENT_ENVIRONMENT_INVALID": "组件解释器不可用。",
     "inspectReason_COMPONENT_CLI_UNSUPPORTED": "尚未核验所需命令行契约。",
     "inspectReason_MEDIA_TOOLS_INVALID": "媒体依赖未通过校验。",
-    "inspectReason_COMPONENT_RESOURCES_UNVERIFIED": "组件可选资源尚未验证。"
+    "inspectReason_COMPONENT_RESOURCES_UNVERIFIED": "组件可选资源尚未验证。",
+    "inspectCheck_CONFIGURATION": "生成器配置"
   }
 }

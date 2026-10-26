@@ -42,7 +42,8 @@ async def main():
             card=panel.locator('[data-kind=GENERATOR]');await card.get_by_role('button',name='Run read-only check',exact=True).click()
             channel=next(c for c in inventory['items']if c['kind']=='GENERATOR');report=await wait_report(page,channel['id'])
             assert report['result']=='NOT_CONFIGURED'
-            await expect(card.get_by_text('No generator is configured.',exact=True)).to_be_visible(timeout=12000)
+            assert report['checks'][0]['result']=='NOT_CONFIGURED'
+            await expect(card.get_by_text('No generator is configured.',exact=False)).to_be_visible(timeout=12000)
         elif RESTORED:
             assert status['restore_guard']and not status['upload_allowed_by_recovery']
             historical=[c for c in inventory['items']if c['latest_report']]

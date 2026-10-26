@@ -760,6 +760,7 @@
     "inspectReason_COMPONENT_ENVIRONMENT_INVALID": "The component interpreter is unavailable.",
     "inspectReason_COMPONENT_CLI_UNSUPPORTED": "The required CLI contract was not verified.",
     "inspectReason_MEDIA_TOOLS_INVALID": "The media dependencies failed validation.",
-    "inspectReason_COMPONENT_RESOURCES_UNVERIFIED": "Optional component resources are unverified."
+    "inspectReason_COMPONENT_RESOURCES_UNVERIFIED": "Optional component resources are unverified.",
+    "inspectCheck_CONFIGURATION": "Generator configuration"
   }
 }

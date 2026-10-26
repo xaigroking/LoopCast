@@ -163,6 +163,14 @@ class InspectionTests(ScheduleFixture):
         with store.transaction()as db:self.assertEqual(db.execute('SELECT version FROM studio_projects').fetchone()[0],3)
 
 
+    def test_missing_generator_configuration_is_not_a_damaged_component(self):
+        from loopcast.inspection_probe import inspect
+        report=inspect({'kind':'GENERATOR','generator':None,'media':None,'directory':'unused','ready':True})
+        self.assertEqual(report['result'],'NOT_CONFIGURED')
+        self.assertEqual(report['checks'][0]['result'],'NOT_CONFIGURED')
+        self.assertEqual(report['checks'][0]['check_type'],'CONFIGURATION')
+        self.assertTrue(all(value==0 for value in report['actual_operations'].values()))
+
     def test_first_account_inventory_version_detects_a_change_before_registration(self):
         value=self.channel('ACCOUNT');old=self.service.channel(value['id'])
         account=self.store.studio_accounts()['items'][0]
