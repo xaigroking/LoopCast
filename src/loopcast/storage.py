@@ -22,11 +22,14 @@ from .schedule_storage import ScheduleMethods
 from .quota_storage import QuotaMethods
 from .schedule_execution import ScheduleExecutionMethods
 from .schedule_config import SystemClock, ScheduleSettings
+from .inspection_models import InspectionSettings
+from .inspection_storage import InspectionMethods
 
 
-class Store(PublicationMethods, StudioMethods, AccountMethods, ReleaseMethods, FeedbackMethods, OperationsMethods, ScheduleMethods, QuotaMethods, ScheduleExecutionMethods):
-    def __init__(self, directory, component=None, *, clock=None, schedule_settings=None):
+class Store(PublicationMethods, StudioMethods, AccountMethods, ReleaseMethods, FeedbackMethods, OperationsMethods, ScheduleMethods, QuotaMethods, ScheduleExecutionMethods, InspectionMethods):
+    def __init__(self, directory, component=None, *, clock=None, schedule_settings=None, inspection_settings=None):
         self.clock = clock or SystemClock()
+        self.inspection_settings = InspectionSettings.model_validate(inspection_settings or {})
         self.schedule_settings = ScheduleSettings.model_validate(schedule_settings or {})
         self._schedule_previews = {}
         self._schedule_cursor_key = secrets.token_bytes(32)

@@ -27,7 +27,10 @@ async def _serve(args, settings):
     schedule_settings = json.loads(args.schedule_config.read_text()) if args.schedule_config else None
     from .schedule_config import ScheduleSettings
     schedule_settings = ScheduleSettings.model_validate(schedule_settings or {})
-    app = create_app(args.data_dir, settings, schedule_settings=schedule_settings, public_origin=args.public_origin, trusted_proxies=tuple(args.trusted_proxy), media_settings=media_settings, social_settings=social_settings)
+    inspection_settings=json.loads(args.inspection_config.read_text()) if args.inspection_config else None
+    from .inspection_models import InspectionSettings
+    inspection_settings=InspectionSettings.model_validate(inspection_settings or {})
+    app = create_app(args.data_dir, settings, schedule_settings=schedule_settings, inspection_settings=inspection_settings, public_origin=args.public_origin, trusted_proxies=tuple(args.trusted_proxy), media_settings=media_settings, social_settings=social_settings)
     config = uvicorn.Config(app, host=args.host, port=port, workers=1, reload=False, access_log=False, proxy_headers=False, lifespan="on", timeout_graceful_shutdown=5)
     server = uvicorn.Server(config)
     task = asyncio.create_task(server.serve(sockets=[sock]))
@@ -55,6 +58,7 @@ def main():
     serve.add_argument('--data-dir', type=Path, default=Path.home() / '.local/share/loopcast')
     serve.add_argument('--generator-config', type=Path, help='Trusted local generator settings JSON')
     serve.add_argument('--media-config', type=Path, help='Pinned local media tools JSON')
+    serve.add_argument('--inspection-config',type=Path,help='Trusted read-only inspection policy JSON; periodic and live checks default off')
     serve.add_argument('--schedule-config', type=Path, help='Trusted finite local-publication policy JSON; automatic sending defaults off')
     serve.add_argument('--social-config', type=Path, help='Isolated social adapter settings JSON; live sending defaults off')
     serve.add_argument('--public-origin', default=os.environ.get('LOOPCAST_PUBLIC_ORIGIN'), help='Exact public origin served by the configured reverse proxy')

@@ -219,8 +219,8 @@ class SocialAdapter:
         credential = json.loads((work / 'credentials.json').read_text())
         profile = next((p for p in choices if p['stable_subject'] == credential.get('stable_subject')), None)
         if profile is None:
-            return {'valid': False}
-        if operation == 'check': return {'valid': True, 'profile': profile}
+            return {'valid':False,'observation':{'result':'FAILED','reason_code':'IDENTITY_INVALID'}} if operation=='check' else {'valid':False}
+        if operation=='check':return {'valid':True,'profile':profile,'observation':{'result':'CALLABLE','reason_code':'OK'}}
         scenario = self.settings.get('contract_results', {}).get(profile['stable_subject'], 'published')
         receipts = self.root / 'contract-receipts'; receipts.mkdir(mode=0o700, exist_ok=True)
         receipt_path = receipts / (payload.get('attempt_id', 'absent') + '.json')

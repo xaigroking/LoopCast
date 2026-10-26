@@ -12,9 +12,9 @@ class RunnerError(RuntimeError):
         super().__init__(code)
 
 
-def run(argv, cwd, env, timeout=30, cancelled=lambda: False, limit=1048576):
+def run(argv, cwd, env, timeout=30, cancelled=lambda: False, limit=1048576, *, new_session=True):
     process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=new_session)
     outputs = [bytearray(), bytearray()]
     deadline = time.monotonic() + timeout
     try:
@@ -41,7 +41,8 @@ def run(argv, cwd, env, timeout=30, cancelled=lambda: False, limit=1048576):
     finally:
         # Kill the group even if the leader exited but left descendants alive.
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            if new_session:os.killpg(process.pid, signal.SIGKILL)
+            else:process.kill()
         except ProcessLookupError:
             pass
         process.wait(timeout=5)

@@ -64,7 +64,7 @@ def snapshot(path, media_settings=None, generator_settings=None, service_ready=N
         with closing(readonly(handle)) as db:
             db.execute('BEGIN')
             versions = [r[0] for r in db.execute('SELECT version FROM schema_version')]
-            if len(versions) != 1 or versions[0] not in {6, 7, CURRENT_VERSION}:
+            if len(versions) != 1 or versions[0] not in {6, 7, 8, CURRENT_VERSION}:
                 raise ValueError('SCHEMA_UNSUPPORTED')
             schema = versions[0]
             counts = {name: db.execute('SELECT COUNT(*) FROM ' + name).fetchone()[0]

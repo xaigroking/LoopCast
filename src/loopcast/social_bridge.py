@@ -221,8 +221,12 @@ async def execute(request, work):
         if operation == 'check':
             try:
                 profile = await verified_profile(platform, work / 'credentials.json', settings)
-                return {'valid': True, 'profile': profile}
-            except Exception: return {'valid': False}
+                return {'valid': True, 'profile': profile, 'observation': {'result':'CALLABLE','reason_code':'OK'}}
+            except TimeoutError:return {'valid':False,'observation':{'result':'UNKNOWN','reason_code':'CHECK_TIMEOUT'}}
+            except Exception as error:
+                # Keep legacy validity while retaining safe uncertainty for observers.
+                timeout=type(error).__module__.startswith('playwright.') and type(error).__name__=='TimeoutError'
+                return {'valid':False,'observation':{'result':'UNKNOWN','reason_code':'CHECK_TIMEOUT' if timeout else 'IDENTITY_UNVERIFIED'}}
         return await upload(platform, request['payload'], settings)
     finally:
         if controls:
