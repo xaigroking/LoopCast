@@ -74,7 +74,20 @@ def main():
     backup_verify = backup_actions.add_parser('verify', help='Verify a private backup against an independently recorded manifest digest')
     backup_verify.add_argument('--backup', type=Path, required=True)
     backup_verify.add_argument('--expected-manifest-sha256', required=True)
+    restore = commands.add_parser('restore', help='Restore a verified package to a new directory with uploads durably blocked')
+    restore.add_argument('--backup', type=Path, required=True)
+    restore.add_argument('--expected-manifest-sha256', required=True)
+    restore.add_argument('--data-dir', type=Path, required=True)
+    reconcile = commands.add_parser('reconcile', help='Read the controlled-restore publication boundary without calling a platform')
+    reconcile.add_argument('--data-dir', type=Path, required=True)
     args = parser.parse_args()
+    if args.command in {'restore', 'reconcile'}:
+        from .restore import restore_backup, reconciliation_report
+        try:
+            report = restore_backup(args.backup, args.expected_manifest_sha256, args.data_dir) if args.command == 'restore' else reconciliation_report(args.data_dir)
+            print(json.dumps(report, sort_keys=True)); return
+        except (OSError, ValueError, RuntimeError, KeyError, TypeError, AttributeError, sqlite3.Error):
+            parser.exit(1, 'Recovery operation failed. Check the pinned package, compatible schema, fresh private destination and operator permissions.\n')
     if args.command == 'backup':
         from .backup import create_backup, verify_backup
         try:

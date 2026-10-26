@@ -103,7 +103,7 @@ DELETE FROM schema_version;
 INSERT INTO schema_version VALUES(5);
 """
 
-CURRENT_VERSION = 6
+CURRENT_VERSION = 7
 
 def statements(db, script):
     for statement in script.split(';'):
@@ -119,7 +119,7 @@ def migrate(db):
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE name='schema_version'").fetchone()
         if exists:
             versions = [r[0] for r in db.execute('SELECT version FROM schema_version')]
-            if versions not in ([1], [2], [3], [4], [5], [6]):
+            if versions not in ([1], [2], [3], [4], [5], [6], [7]):
                 raise RuntimeError('Unsupported state database version')
             version = versions[0]
         else:
@@ -141,6 +141,9 @@ def migrate(db):
             version = 5
         if version == 5:
             statements(db, VERSION_SIX)
+            version = 6
+        if version == 6:
+            statements(db, VERSION_SEVEN)
         if db.execute('PRAGMA foreign_key_check').fetchone():
             raise RuntimeError('Invalid state database references')
         db.commit()
@@ -174,4 +177,23 @@ CREATE TABLE feedback_decisions (
 );
 CREATE TABLE feedback_revision_links (revision_id TEXT PRIMARY KEY REFERENCES studio_revisions(id),decision_id TEXT NOT NULL REFERENCES feedback_decisions(id),created_at TEXT NOT NULL);
 UPDATE schema_version SET version=6;
+'''
+
+VERSION_SEVEN = '''
+CREATE TABLE operations_state(id INTEGER PRIMARY KEY CHECK(id=1),execution_epoch TEXT NOT NULL);
+INSERT INTO operations_state VALUES(1,lower(hex(randomblob(16))));
+CREATE TABLE restore_events(
+ id TEXT PRIMARY KEY,backup_id TEXT NOT NULL,manifest_sha256 TEXT NOT NULL,backup_created_at TEXT NOT NULL,
+ restored_at TEXT NOT NULL,source_schema INTEGER NOT NULL,execution_epoch TEXT NOT NULL,scope TEXT NOT NULL
+);
+CREATE TABLE restore_guard(
+ id INTEGER PRIMARY KEY CHECK(id=1),restore_id TEXT NOT NULL REFERENCES restore_events(id),version INTEGER NOT NULL,
+ state TEXT NOT NULL CHECK(state='ACTIVE'),reason TEXT NOT NULL
+);
+CREATE TABLE restore_fences(
+ restore_id TEXT NOT NULL REFERENCES restore_events(id),kind TEXT NOT NULL,identity TEXT NOT NULL,old_token_sha256 TEXT NOT NULL,
+ PRIMARY KEY(restore_id,kind,identity)
+);
+CREATE TABLE backup_audit(id TEXT PRIMARY KEY,created_at TEXT NOT NULL,manifest_sha256 TEXT NOT NULL,state TEXT NOT NULL);
+UPDATE schema_version SET version=7;
 '''

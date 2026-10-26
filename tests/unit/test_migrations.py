@@ -34,7 +34,7 @@ class MigrationTests(unittest.TestCase):
                 self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='feedback_works'").fetchone())
             store=Store(directory);Store(directory)
             with store.transaction() as db:
-                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0],6)
+                self.assertEqual(db.execute('SELECT version FROM schema_version').fetchone()[0],migrations.CURRENT_VERSION)
                 self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
                 for table,rows in before.items():self.assertEqual([tuple(r) for r in db.execute('SELECT * FROM '+table)],rows)
             self.assertEqual(store.feedback_workspace(),{'works':[],'imports':[],'snapshots':[]})

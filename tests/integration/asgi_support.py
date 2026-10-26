@@ -8,8 +8,8 @@ from loopcast.api import create_app
 
 
 class ASGIThread:
-    def __init__(self, directory):
-        self.app = create_app(directory)
+    def __init__(self, directory, **settings):
+        self.app = create_app(directory, **settings)
         self.server = uvicorn.Server(uvicorn.Config(
             self.app,
             host="127.0.0.1",

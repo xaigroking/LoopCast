@@ -30,6 +30,7 @@ class ReleaseMethods:
             account = self._account(db, target['account_id'])
             capability = capabilities[account['platform']]
             reasons = []
+            if self._restore_guard(db): reasons.append('RESTORE_GUARD_ACTIVE')
             if asset['kind'] != 'video': reasons.append('VIDEO_REQUIRED')
             if not capability['configured'] or not capability['video']: reasons.append('CAPABILITY_UNAVAILABLE')
             if account['state'] != 'AVAILABLE': reasons.append('ACCOUNT_UNAVAILABLE')
@@ -64,7 +65,7 @@ class ReleaseMethods:
         frozen = json.loads(row['frozen'])
         value.update({'fields': frozen['fields'], 'asset_sha256': frozen['asset_sha256']})
         value.update({
-            'can_dispatch': row['state'] in {'READY', 'NOT_SENT'} and not blocked and account['state'] == 'AVAILABLE',
+            'can_dispatch': row['state'] in {'READY', 'NOT_SENT'} and not blocked and account['state'] == 'AVAILABLE' and not self._restore_guard(db),
             'can_verify': row['state'] in {'UNKNOWN', 'SUBMITTED'} and row['platform'] in query_platforms,
             'can_cancel': row['state'] in {'READY', 'PREPARED', 'NOT_SENT'},
             'attempts': [dict(a) for a in db.execute('SELECT id,state,started_at,ended_at FROM release_attempts WHERE target_id=? ORDER BY rowid', (identity,))],
@@ -120,6 +121,7 @@ class ReleaseMethods:
     def studio_dispatch(self, batch_id, target_id, expected_version, key, capabilities, sending_enabled, trace=None, timeout=300):
         scope, request = 'release.dispatch:' + target_id, {'expected_version': expected_version}
         with self.transaction(True) as db:
+            self._require_upload(db)
             old = self._studio_prior(db, scope, key, request)
             if old:
                 return self._release(db, batch_id, [p for p, c in capabilities.items() if c['query']])
@@ -150,6 +152,8 @@ class ReleaseMethods:
 
     def studio_release_job(self, job):
         with self.transaction() as db:
+            if not self._job_epoch_current(db, job):raise Problem('EXECUTOR_UNRESOLVED', 'The execution identity is no longer current.', 409)
+            if job['kind'] == 'dispatch':self._require_upload(db)
             target = db.execute('SELECT * FROM release_targets WHERE id=?', (job['subject_id'],)).fetchone()
             if target is None:
                 raise Problem('NOT_FOUND', 'Release target does not exist.', 404)
@@ -159,6 +163,7 @@ class ReleaseMethods:
 
     def studio_sending(self, job):
         with self.transaction(True) as db:
+            if self._restore_guard(db) or not self._job_epoch_current(db, job):return False
             row = db.execute("SELECT a.*,t.account_id,t.family_id FROM release_attempts a JOIN release_targets t ON t.id=a.target_id WHERE a.token=? AND a.state='PREPARED' AND a.lease_until>?", (job['token'], time.time())).fetchone()
             if row is None:
                 return False
@@ -172,6 +177,7 @@ class ReleaseMethods:
     def studio_release_result(self, job, result, source):
         outcome, work_id, evidence_code = classify_result(result)
         with self.transaction(True) as db:
+            if self._restore_guard(db) or not self._job_epoch_current(db, job):return False
             row = db.execute("SELECT * FROM release_attempts WHERE token=? AND state IN ('PREPARED','SENDING') AND lease_until>?", (job['token'], time.time())).fetchone()
             if row is None:
                 return False
@@ -205,6 +211,7 @@ class ReleaseMethods:
     def studio_verification_result(self, job, result, source):
         outcome, work_id, evidence_code = classify_result(result)
         with self.transaction(True) as db:
+            if not self._job_epoch_current(db, job):return False
             queued = db.execute("SELECT 1 FROM studio_jobs WHERE id=? AND token=? AND state='RUNNING'", (job['id'], job['token'])).fetchone()
             if queued is None: return False
             attempt = db.execute('SELECT * FROM release_attempts WHERE id=? AND target_id=?', (job['payload']['attempt_id'], job['subject_id'])).fetchone()

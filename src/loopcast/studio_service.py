@@ -23,7 +23,7 @@ class StudioControl:
 
     def capabilities(self):
         return {'generation': self.generator is not None, 'media': self.library.settings is not None,
-                'sending_enabled': self.social.sending_enabled, 'evidence_mode': self.social.mode,
+                'sending_enabled': self.social.sending_enabled and self.store.operations_status()['upload_allowed_by_recovery'], 'evidence_mode': self.social.mode,
                 'platforms': self.social.capabilities(), 'voices': self.generator.voices if self.generator else [],
                 'sources': self.generator.sources if self.generator else ['local'], 'script_generation': bool(self.generator and self.generator.script_generation)}
 
@@ -125,6 +125,7 @@ class StudioControl:
                 credential = work / 'credentials.json'; shutil.copyfile(source, credential); credential.chmod(0o600)
                 payload = {'credential_file': str(credential), 'attempt_id': job['payload']['attempt_id']}
                 if kind == 'dispatch':
+                    self.store.studio_require_upload(job)
                     if not self.social.sending_enabled: raise Problem('SENDING_DISABLED', 'Sending is disabled.', 409)
                     asset = self.library.path(batch['asset_id'])
                     video = work / asset.name; shutil.copyfile(asset, video)
@@ -137,6 +138,7 @@ class StudioControl:
                         self.store.studio_release_result(job, {'outcome': 'NOT_SENT', 'boundary_crossed': False}, 'control-preflight')
                         return
                     crossed = True
+                    self.store.studio_require_upload(job)
                     result = self.social.invoke('upload', release['platform'], work, payload, cancelled)
                     self.store.studio_release_result(job, result, self.social.mode + ':sau')
                 else:
