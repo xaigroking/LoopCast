@@ -36,7 +36,11 @@ class RunnerTests(unittest.TestCase):
             pid = int(pidfile.read_text())
             for _ in range(100):
                 status = Path(f'/proc/{pid}/stat')
-                if not status.exists() or status.read_text().split()[2] == 'Z': break
+                try:
+                    state = status.read_text().split()[2]
+                except (FileNotFoundError, ProcessLookupError):
+                    break
+                if state == 'Z': break
                 time.sleep(.01)
             else:
                 self.fail('Grandchild remained alive')
