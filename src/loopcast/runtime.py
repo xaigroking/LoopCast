@@ -54,13 +54,17 @@ class ApplicationRuntime:
 
     def close(self):
         self.stopping.set()
-        try:
-            if self.worker is not None:
-                self.worker.close()
-            if self.publisher is not None:
-                self.publisher.close()
-        finally:
+        errors = []
+        resources = [resource for resource in (self.worker, self.publisher) if resource is not None]
+        for resource in resources:
+            try:resource.close()
+            except BaseException as error:errors.append(error)
+        stopped = all(resource.thread is None or not resource.thread.is_alive() for resource in resources)
+        if stopped:
             self._release_lock()
+        if errors and not isinstance(errors[0],Exception):raise errors[0]
+        if errors or not stopped:
+            raise RuntimeError('Background shutdown did not complete; the directory remains owned while work is active') from None
 
     def _release_lock(self):
         self._directory_lock.close()
