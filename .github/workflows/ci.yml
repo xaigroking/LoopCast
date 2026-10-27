@@ -103,9 +103,6 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - run: scripts/install-media-tools.sh
       - run: scripts/build-release.sh
-      - run: scripts/check-web.sh
-      - name: Verify real managed backend and standalone desktop composition
-        run: bash scripts/check-desktop.sh
       - name: Prepare verified Electron test runtime and a sandbox-capable display
         run: |
           npm --prefix desktop ci --ignore-scripts --no-audit --no-fund
@@ -117,6 +114,9 @@ jobs:
         env:
           LOOPCAST_ELECTRON_BINARY: /tmp/loopcast-electron-test/electron
         run: xvfb-run -a bash scripts/check-electron.sh
+      - run: scripts/check-web.sh
+      - name: Verify real managed backend and standalone desktop composition
+        run: bash scripts/check-desktop.sh
       - name: Upload verified application candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
