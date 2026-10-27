@@ -117,10 +117,43 @@ jobs:
           retention-days: 14
           compression-level: 0
 
+  desktop:
+    name: desktop
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24.22.1'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Record source and execution context
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_ID: ${{ github.run_id }}
+          ATTEMPT: ${{ github.run_attempt }}
+          TEST_SHA: ${{ github.sha }}
+          TEST_REF: ${{ github.ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          printf 'event=%s run=%s attempt=%s\n' "$EVENT" "$RUN_ID" "$ATTEMPT"
+          printf 'test_sha=%s test_ref=%s pr_head_sha=%s\n' "$TEST_SHA" "$TEST_REF" "$PR_HEAD_SHA"
+          test "$(git rev-parse HEAD)" = "$TEST_SHA"
+      - name: Check desktop source without downloading desktop binaries
+        working-directory: desktop
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run check
+          npm run typecheck
+          npm test
+
   merge-gate:
     name: merge-gate
     if: ${{ always() }}
-    needs: [package, tests, browser]
+    needs: [package, tests, browser, desktop]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
@@ -134,6 +167,6 @@ jobs:
 
           results = json.loads(os.environ['RESULTS'])
           print(json.dumps(results, indent=2))
-          if set(results) != {'package', 'tests', 'browser'} or any(job['result'] != 'success' for job in results.values()):
+          if set(results) != {'package', 'tests', 'browser', 'desktop'} or any(job['result'] != 'success' for job in results.values()):
               raise SystemExit('Required checks did not all run successfully')
           PY
