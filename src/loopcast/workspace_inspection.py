@@ -69,9 +69,13 @@ def directory_identity(fd):
     if not re.fullmatch('[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}', boot):
         raise files.DiagnosticError('ENTITY_IDENTITY_UNAVAILABLE')
     boot_hash = hashlib.sha256(b'loopcast-kernel-boot\0' + boot.encode()).hexdigest()
-    raw = b'loopcast-directory-object\0' + boot_hash.encode() + b'\0' + str(unique_mount).encode() + b'\0' + str(handle.kind).encode() + b'\0' + bytes(handle.value[:handle.length])
+    # The family fingerprint detects another mount alias of the same object.
+    # Filesystem clones can collide here; they are refused, never rebound.
+    family = b'loopcast-directory-family\0' + boot_hash.encode() + b'\0' + bytes(buffer[56:64]) + b'\0' + str(handle.kind).encode() + b'\0' + bytes(handle.value[:handle.length])
+    family_hash = hashlib.sha256(family).hexdigest()
+    raw = b'loopcast-directory-object\0' + family_hash.encode() + b'\0' + str(unique_mount).encode()
     return {'identity_scope':'KERNEL_BOOT', 'filesystem':filesystem[1], 'boot_sha256':boot_hash,
-            'object_sha256':hashlib.sha256(raw).hexdigest()}
+            'object_sha256':hashlib.sha256(raw).hexdigest(), 'object_family_sha256':family_hash}
 
 def absent(fd, name, code):
     try: os.stat(name, dir_fd=fd, follow_symlinks=False)

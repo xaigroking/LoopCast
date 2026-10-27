@@ -4,11 +4,11 @@ import assert from 'node:assert/strict';
 import { bindingCandidate, restoredObservation, reviewRestoredOpen } from '../src/workspace-model.mjs';
 const h = char => char.repeat(64), id = char => char.repeat(32);
 function setup() {
-  const source={format:'loopcast.workspace-binding.candidate.v1',id:h('1'),role:'ORIGINAL',boot_sha256:h('a'),object_sha256:h('2'),profile_sha256:h('3'),origin_port:28786,restore_id:null};
-  const target={...source,id:h('4'),role:'RESTORED',object_sha256:h('5'),profile_sha256:h('6'),origin_port:28787,restore_id:id('7')};
+  const source={format:'loopcast.workspace-binding.candidate.v1',id:h('1'),role:'ORIGINAL',boot_sha256:h('a'),object_sha256:h('2'),object_family_sha256:h('b'),profile_sha256:h('3'),origin_port:28786,restore_id:null};
+  const target={...source,id:h('4'),role:'RESTORED',object_sha256:h('5'),object_family_sha256:h('c'),profile_sha256:h('6'),origin_port:28787,restore_id:id('7')};
   const observation={format:'loopcast.restored-observation.candidate.v1',observation_scope:'NON_ATOMIC_OBSERVATIONS',state:'OBSERVED_GUARDED',start_authorized:false,upload_allowed:false,
     backup_id:id('8'),manifest_sha256:h('9'),restore_id:id('7'),execution_epoch:id('b'),guard_version:1,scope:'ALL_STUDIO_UPLOADS',schema_version:9,
-    identity_scope:'KERNEL_BOOT',filesystem:'EXT4',boot_sha256:h('a'),object_sha256:h('5')};
+    identity_scope:'KERNEL_BOOT',filesystem:'EXT4',boot_sha256:h('a'),object_sha256:h('5'),object_family_sha256:h('c')};
   return {operationId:id('c'),source,target,observation,bindings:[source,target],currentBoot:h('a'),sourceProfile:h('3'),targetProfile:h('6'),resourcesRevalidated:true};
 }
 const code = name => error => error.code === name;
@@ -38,6 +38,15 @@ test('unknown execution globally blocks review, even when a different entity is 
   for(const executionState of ['STOPPING','UNKNOWN_TREE','PENDING','COMPLETE_WITHOUT_PROOF'])
     assert.throws(()=>reviewRestoredOpen({...input,executionState}),code('HANDOFF_UNCONFIRMED'));
   assert.throws(()=>reviewRestoredOpen({...input,resourcesRevalidated:false}),code('RESOURCE_REVALIDATION_REQUIRED'));
+});
+test('mount aliases and an already bound restore cannot be registered again as a fresh workspace',()=>{
+  const input=setup();input.target=null;input.targetProfile=null;input.newBindingId=h('d');input.newOriginPort=28788;
+  input.observation={...input.observation,object_sha256:h('e')};
+  assert.throws(()=>reviewRestoredOpen(input),code('BINDING_CONFLICT'));
+  input.observation={...input.observation,restore_id:id('e')};
+  assert.throws(()=>reviewRestoredOpen(input),code('BINDING_CONFLICT'));
+  input.observation={...input.observation,object_family_sha256:input.source.object_family_sha256};
+  assert.throws(()=>reviewRestoredOpen(input),code('WORKSPACE_ALIAS'));
 });
 test('conflicting bindings, forged source facts and extra capability or path fields are rejected',()=>{
   const input=setup();

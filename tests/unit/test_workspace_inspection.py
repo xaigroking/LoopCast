@@ -40,7 +40,7 @@ class WorkspaceInspectionTests(unittest.TestCase):
         self.assertEqual(value['identity_scope'],'KERNEL_BOOT')
         self.assertEqual(before,self.unchanged())
         self.assertNotIn(str(self.root),json.dumps(value))
-        self.assertEqual(set(value),{'format','observation_scope','state','start_authorized','upload_allowed','backup_id','manifest_sha256','restore_id','execution_epoch','guard_version','scope','schema_version','identity_scope','filesystem','boot_sha256','object_sha256'})
+        self.assertEqual(set(value),{'format','observation_scope','state','start_authorized','upload_allowed','backup_id','manifest_sha256','restore_id','execution_epoch','guard_version','scope','schema_version','identity_scope','filesystem','boot_sha256','object_sha256','object_family_sha256'})
 
     def test_missing_sources_wrong_proof_guard_and_epoch_refuse_without_repairs(self):
         for key,value in [('expected_digest',None),('expected_backup_id','invalid'),('expected_restore_id','0'*32)]:

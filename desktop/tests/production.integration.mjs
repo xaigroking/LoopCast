@@ -227,7 +227,7 @@ print(json.dumps({'observation':result,'identities':identities}))`;
   const value=JSON.parse(await command(['-c',script,restoredPath,created.manifest_sha256,created.backup_id,restored.restore_id,item.dataDir,item.sessionDir]));
   const observation=restoredObservation(value.observation);
   const source={format:'loopcast.workspace-binding.candidate.v1',id:'1'.repeat(64),role:'ORIGINAL',boot_sha256:value.identities[0].boot_sha256,
-    object_sha256:value.identities[0].object_sha256,profile_sha256:value.identities[1].object_sha256,origin_port:28786,restore_id:null};
+    object_sha256:value.identities[0].object_sha256,object_family_sha256:value.identities[0].object_family_sha256,profile_sha256:value.identities[1].object_sha256,origin_port:28786,restore_id:null};
   const plan=reviewRestoredOpen({operationId:'2'.repeat(32),source,observation,bindings:[source],currentBoot:source.boot_sha256,
     sourceProfile:source.profile_sha256,newBindingId:'3'.repeat(64),newOriginPort:28787,resourcesRevalidated:true});
   assert.equal(plan.start_authorized,false);assert.equal(plan.upload_allowed,false);assert.equal(plan.profile_action,'CREATE_PRIVATE_PROFILE_AFTER_COMMIT');
