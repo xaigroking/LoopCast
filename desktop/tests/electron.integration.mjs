@@ -7,7 +7,8 @@ import { promisify } from 'node:util';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
 import { prepare } from '../scripts/prepare.mjs';
 import { launchElectron } from './electron-driver.mjs';
 import { Budget } from '../src/errors.mjs';
@@ -154,7 +155,38 @@ test('unpaused executable startup also uses the configured profile and exits thr
 
 test('real native requests, navigation, media, resources and hostile contexts use only the production policy', { timeout: 90000 }, async t => {
   const item = await fixture(t), app = await item.start(), page = await app.firstPage();
-  await page.locator('.heading .primary').focus(); await page.keyboard.press('Enter');
+  const create = page.locator('.heading .primary');
+  await create.waitFor({ state: 'visible' });
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].focus());
+  await until(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isFocused()));
+  await create.focus();
+  await until(() => create.evaluate(element => document.hasFocus() && document.activeElement === element));
+  await create.evaluate(element => {
+    window.nativeKeyboardAudit = [];
+    window.nativeKeyboardListeners = ['keydown','keypress','keyup','click'].map(type => {
+      const listener = event => {
+        if (window.nativeKeyboardAudit.length < 20) window.nativeKeyboardAudit.push({ type, enter: event.key === 'Enter', button: event.target === element, trusted: event.isTrusted });
+      };
+      document.addEventListener(type, listener, true); return [type, listener];
+    });
+  });
+  // Exercise Electron's native input path, independently of CDP key dispatch.
+  await app.evaluate(({ BrowserWindow }) => {
+    const contents = BrowserWindow.getAllWindows()[0].webContents;
+    for (const type of ['keyDown','char','keyUp']) contents.sendInputEvent({ type, keyCode: 'Return' });
+  });
+  try { await page.locator('#create-dialog[open]').waitFor({ state: 'visible', timeout: 5000 }); }
+  catch {
+    const evidence = await create.evaluate(element => ({ events: window.nativeKeyboardAudit, focused: document.hasFocus(), activeButton: document.activeElement === element, disabled: element.disabled, dialogOpen: Boolean(document.querySelector('#create-dialog')?.open) }));
+    throw new Error('NATIVE_KEYBOARD_ACTIVATION_FAILED '+JSON.stringify(evidence));
+  }
+  const keys = await page.evaluate(() => {
+    for (const [type, listener] of window.nativeKeyboardListeners) document.removeEventListener(type, listener, true);
+    return window.nativeKeyboardAudit;
+  });
+  assert.ok(keys.some(event => event.type === 'keydown' && event.enter && event.button && event.trusted));
+  assert.equal(keys.filter(event => event.type === 'click' && event.button && event.trusted).length, 1);
+  console.log('Native keyboard activation PASS', JSON.stringify(keys));
   await page.locator('input[name=title]').fill('Native Electron request ownership');
   await page.locator('#create-form button[type=submit]').click(); await page.waitForURL('**/runs/*');
   const id = new URL(page.url()).pathname.split('/').at(-1), origin = new URL(page.url()).origin;
@@ -329,14 +361,16 @@ test('native renderer crash and host death preserve the STOP/guard boundary with
 });
 
 test('actual native error dialogs are localized and quit cancels them within the bound', { timeout: 70000 }, async t => {
-  for (const [locale, code] of [['en', 'CONFIG_INVALID'], ['zh-Hans', 'CONFIG_INVALID'], ['en', 'VERSION_MISMATCH']]) {
+  for (const [locale, code] of [['en', 'RESOURCE_DIGEST_MISMATCH'], ['zh-Hans', 'RESOURCE_DIGEST_MISMATCH'], ['en', 'VERSION_MISMATCH']]) {
     const item = await fixture(t, { locale });
-    if (code === 'CONFIG_INVALID') item.config.node.sha256 = '0'.repeat(64);
+    if (code === 'RESOURCE_DIGEST_MISMATCH') item.config.node.sha256 = '0'.repeat(64);
     else item.config.webRevision = 'f'.repeat(40);
     await writeFile(item.filename, JSON.stringify(item.config), { mode: 0o600 });
     const app = await item.start(); await until(() => app.evaluate(() => globalThis.windowAudit.dialogs.length > 0));
     const dialogs = await app.evaluate(() => globalThis.windowAudit.dialogs);
     assert.equal(dialogs[0].message, message(code, locale));
+    assert.ok(dialogs[0].detail.includes(code) && dialogs[0].detail.includes('desktop-diagnostics'));
+    assert.equal(dialogs[0].detail.includes(item.root), false);
     assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 0);
     await until(async () => (await promisify(execFile)('xwininfo', ['-root', '-tree'])).stdout.includes('"LoopCast"'));
     assert.equal((await app.quit()).code, 1);
@@ -357,6 +391,9 @@ test('an existing managed CLI owner and an occupied entry port are never attache
     try {
       await until(async () => app.status || app.debuggerWaiting || await app.evaluate(() => globalThis.windowAudit.dialogs.length > 0).catch(() => false), item.config.startTimeoutMs + item.config.stopTimeoutMs + 1000);
     } catch { throw new Error('NATIVE_OWNER_REJECTION_FAILED '+await readFile(app.lifecycleTrace, 'utf8')); }
+    const ownerDialogs = await app.evaluate(() => globalThis.windowAudit.dialogs);
+    assert.equal(ownerDialogs[0].message, message('OWNER_HELD'));
+    assert.ok(ownerDialogs[0].detail.includes('OWNER_HELD'));
     if (!app.status) assert.equal((await app.quit()).code, 1);
     else assert.equal(app.status.code, 1);
     assert.equal((await fetch(cliOrigin+'/healthz')).status, 200);
@@ -372,6 +409,8 @@ test('an existing managed CLI owner and an occupied entry port are never attache
     const refused = await second.start();
     try { await until(() => refused.evaluate(() => globalThis.windowAudit.dialogs.length > 0), second.config.startTimeoutMs + second.config.stopTimeoutMs + 1000); }
     catch { throw new Error('NATIVE_PORT_REJECTION_FAILED '+await readFile(refused.lifecycleTrace, 'utf8')); }
+    const portDialogs = await refused.evaluate(() => globalThis.windowAudit.dialogs);
+    assert.equal(portDialogs[0].message, message('ENTRY_PORT_BUSY'));
     assert.equal((await refused.quit()).code, 1); assert.equal(requests, 0);
     await assert.rejects(stat(join(second.data, 'state.sqlite3')));
   } finally { await new Promise(resolve => stranger.close(resolve)); }
@@ -388,4 +427,59 @@ test('missing configuration and startup-time exit create no fallback profile or 
   await app.evaluate(({ app }) => { app.quit(); app.quit(); });
   await app.detach(); assert.equal((await new Budget(20000).run(app.exited)).code, 0);
   await assert.rejects(stat(join(item.data, 'desktop-runtime.guard.v1')));
+});
+
+
+test('native cleanup diagnostics distinguish existing and damaged markers without starting an owner', { timeout: 70000 }, async t => {
+  for (const [locale, damaged] of [['en', false], ['zh-Hans', true]]) {
+    const item = await fixture(t, { locale }), marker = join(item.data, 'desktop-runtime.guard.v1');
+    const content = damaged ? 'private-guard-secret-canary' : JSON.stringify({ format: 'loopcast.desktop-guard.v1', identity: '1'.repeat(32) });
+    await writeFile(marker, content, { mode: 0o600 });
+    const app = await item.start(); await until(() => app.evaluate(() => globalThis.windowAudit.dialogs.length > 0));
+    const code = damaged ? 'GUARD_UNSAFE' : 'DESKTOP_CLEANUP_UNCONFIRMED';
+    const dialogs = await app.evaluate(() => globalThis.windowAudit.dialogs);
+    assert.equal(dialogs[0].message, message(code, locale));
+    assert.ok(dialogs[0].detail.includes(code) && dialogs[0].detail.includes('desktop-diagnostics'));
+    assert.equal(dialogs[0].detail.includes(item.root), false);
+    assert.equal(dialogs[0].detail.includes('private-guard-secret-canary'), false);
+    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 0);
+    assert.equal((await app.quit()).code, 1);
+    assert.equal(await readFile(marker, 'utf8'), content);
+    await assert.rejects(stat(join(item.data, 'state.sqlite3')));
+  }
+});
+
+test('native diagnostic failure has safe guidance and bounded repeated exit without a second owner', { timeout: 60000 }, async t => {
+  const item = await fixture(t), path = join(item.root, 'diagnostic-fixture.mjs');
+  const source = `import { createTreePort as original } from ${JSON.stringify(pathToFileURL(join(directory,'src/linux-tree.mjs')).href)};
+import { HostError } from ${JSON.stringify(pathToFileURL(join(directory,'src/errors.mjs')).href)};
+export function createTreePort(config) { const port=original(config);return {...port,async environment(value) { await port.environment(value);throw new HostError('DIAGNOSTICS_UNAVAILABLE'); }}; }`;
+  await writeFile(path, source, { mode: 0o600 });
+  item.config.treeModule = { path, sha256: createHash('sha256').update(source).digest('hex') };
+  await writeFile(item.filename, JSON.stringify(item.config), { mode: 0o600 });
+  const app = await item.start(); await until(() => app.evaluate(() => globalThis.windowAudit.dialogs.length > 0));
+  const dialogs = await app.evaluate(() => globalThis.windowAudit.dialogs);
+  assert.equal(dialogs[0].message, message('DIAGNOSTICS_UNAVAILABLE'));
+  assert.ok(dialogs[0].detail.includes('DIAGNOSTICS_UNAVAILABLE'));
+  assert.equal(dialogs[0].detail.includes(item.root), false);
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 0);
+  await app.evaluate(({ app }) => { app.quit(); app.quit(); });
+  await app.detach(); assert.equal((await new Budget(20000).run(app.exited)).code, 1);
+  await assert.rejects(stat(join(item.data, 'state.sqlite3')));
+  await assert.rejects(stat(join(item.data, 'desktop-runtime.guard.v1')));
+});
+
+test('real pre-ready failure gives safe offline instructions without initializing a fallback profile', { timeout: 40000 }, async t => {
+  const item = await fixture(t);
+  item.config.sessionDir = join(item.root, 'absent-session');
+  await writeFile(item.filename, JSON.stringify(item.config), { mode: 0o600 });
+  const child = spawn(executable, [directory, '--desktop-config', item.filename], { env: item.env, stdio: ['ignore','ignore','pipe'] });
+  let output = ''; child.stderr.on('data', chunk => { if (output.length < 65536) output += chunk.toString(); });
+  try {
+    assert.equal(await new Budget(15000).run(new Promise(resolve => child.once('exit', resolve))), 1);
+    assert.ok(output.includes('DIRECTORY_MISSING') && output.includes('desktop-diagnostics'));
+    assert.equal(output.includes(item.root), false);
+    assert.equal((await readdir(item.session)).length, 0);
+    await assert.rejects(stat(join(item.data, 'state.sqlite3')));
+  } finally { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); }
 });

@@ -182,7 +182,8 @@ Crash handling never replays a generation or publication operation.
 The production integration test executes the actual installed backend, Next,
 coordinator and Linux port; the browser restart test uses real Chromium with a
 persistent private profile. Chromium driver capability headers do not validate
-Electron frame/initiator behavior. Real Electron windows, Windows/macOS ports,
+Electron frame/initiator behavior. The native CI also runs the actual verified Electron executable with default
+renderer isolation on a sandbox-capable Xvfb display. Windows/macOS ports,
 target runtime distribution, native builds, installers, signing, upgrades and
 clean-machine acceptance remain separate, unverified work. Existing Python ownership, permanent
 publication ledger, UNKNOWN, recovery guard/epoch and plan facts remain owned by
@@ -241,3 +242,71 @@ window/host restart. Existing sessionStorage records migrate without replay.
 Sensitive authorization/control payloads are excluded. A new window restores
 the frozen creation payload and key for explicit retry; it never sends it on
 reload automatically. HTTP cache clearing does not remove these identities.
+
+## Offline desktop diagnostics
+
+Use a trusted installed interpreter, independently of the manifest's tools:
+
+```
+python -I -m loopcast desktop-diagnostics --manifest /trusted/config/desktop.json
+python -I -m loopcast desktop-diagnostics --data-dir /existing/private-data --format text
+```
+
+This command never executes the manifest's Python, Node or tree module, starts
+services, contacts a provider, or opens a Store. Missing directories, locks and
+DBs stay missing. It reports existing lock contention, the desktop cleanup
+marker, the database restore publication guard and UNKNOWN publication counts
+as separate observations. A free lock or absent PID proves nothing about full
+process-tree cleanup. The report cannot authorize recovery or sending.
+
+Reports use `loopcast.desktop-diagnostics.v1` with fixed fields, reason codes,
+sources, observation times and explicit verified/unverified/unavailable states.
+`verified` describes one observation, including observed faults; it never means
+that startup or sending is safe. Platform implementation metadata does not
+prove default sandbox or real provider compatibility. Multiple observations
+are not a global atomic snapshot. Stable bounded private DB/WAL copies feed a
+query-only SQLite transaction; source files and sidecars are not changed.
+Continuously changing or unsafe input produces unavailable facts.
+
+The default total budget is 2000 ms and 256 MiB of reads. `--timeout-ms` accepts
+1–10000 and `--max-bytes` accepts up to 512 MiB. Cancellation and exhausted
+budgets leave unfinished checks unavailable. Exit zero means a report was
+constructed, including any reported faults; it is not permission to start.
+Exit one means incomplete collection or failed export; two means invalid CLI
+arguments. Reports contain no paths, credentials, business content, raw errors
+or cleanup identities. JSON is the default; `--format text` adds brief guidance.
+
+`--output /private/reports/new-report.json` requires an existing private report
+directory separate from data, session, installation, manifest and credential
+configuration directories and their ancestors. Only a new file is published,
+with mode 0600 and atomic no-replace semantics. Existing targets, links,
+replacement parents and protected destinations are refused. A failed export
+does not change application state or leave a completed report at the target.
+
+For resource mismatches, check trusted resources built from the same source,
+then run diagnostics again. For contention, close the original application
+normally. For unavailable platform/runtime evidence, obtain the relevant OS
+and runtime evidence. For an unresolved cleanup/publication barrier, retain
+the existing data and execution evidence for operator investigation. No command
+or button clears a barrier, repairs data, unlocks an owner, replays UNKNOWN work
+or resumes sending. Do not downgrade an unresolved directory to an older sender.
+
+桌面离线诊断只读现有状态，不启动第二 owner。报告中的 `verified` 只表示单项观察有证据，
+不表示可以安全恢复。桌面清理屏障、数据库恢复发布屏障和锁占用分别列出；无法读取就报告未知。
+资源错配应核对同源码可信资源；占用应正常关闭原实例；未确认清理和发布屏障应保留原目录、
+业务事实与进程证据，交运行环境维护者核查。本命令不提供清屏障、强制解锁或恢复发送功能。
+
+
+Startup failures use the same bounded native error mechanism, with explicit
+English/Simplified Chinese causes and static offline instructions. An early
+failure keeps the no-fallback-profile exit path. No diagnostic subprocess is
+added while showing an error, and diagnostic failure cannot replace the
+original startup cause or extend its budget. The production directory preflight
+returns one bounded canonical allowlisted result; malformed output and missing
+tree evidence never become a successful observation. No clipboard or renderer
+bridge is introduced.
+
+The required Windows diagnostic smoke check verifies an actual unsupported OS:
+it emits `PLATFORM_UNSUPPORTED` without touching the requested directories.
+This verifies truthful reporting, not a Windows file/process-tree port or
+Electron compatibility. Linux provides the offline file/SQLite observations.

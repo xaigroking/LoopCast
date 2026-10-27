@@ -37,7 +37,7 @@ test('PATH tools, unfixed origins, missing hashes and arbitrary config shapes fa
   for (const change of [{ node: { path: 'node', sha256: '0'.repeat(64) } }, { gatewayPort: 0 }, { nodeVersion: 'latest' }, { treeModule: { path: '/port.mjs' } }, { startTimeoutMs: Infinity }, { locale: 'ar' }]) {
     assert.throws(() => validateConfig({ ...value, ...change }), /CONFIG_INVALID/);
   }
-  assert.throws(() => configPath(['--desktop-config', 'relative.json'], { packaged: false }), /CONFIG_INVALID/);
+  assert.throws(() => configPath(['--desktop-config', 'relative.json'], { packaged: false }), /PATH_UNSAFE/);
 });
 test('changed resources, wrong build IDs and release/development mismatch are rejected', async t => {
   const { value, filename } = await resources(t);
@@ -46,7 +46,7 @@ test('changed resources, wrong build IDs and release/development mismatch are re
   await assert.rejects(readConfig(filename), /VERSION_MISMATCH/);
   await writeFile(join(value.nextRoot, '.next/BUILD_ID'), value.webRevision);
   await writeFile(value.node.path, 'tampered');
-  await assert.rejects(readConfig(filename), /CONFIG_INVALID/);
+  await assert.rejects(readConfig(filename), /RESOURCE_DIGEST_MISMATCH/);
 });
 test('window cache/session storage cannot overlap business data or Next resources', async t => {
   const { value, filename, save } = await resources(t);
@@ -57,5 +57,5 @@ test('window cache/session storage cannot overlap business data or Next resource
 test('missing production components fail before any process is started', async t => {
   const { value, filename } = await resources(t);
   await rm(join(value.nextRoot, 'server.js'));
-  await assert.rejects(readConfig(filename), /CONFIG_INVALID/);
+  await assert.rejects(readConfig(filename), /RESOURCE_MISSING/);
 });

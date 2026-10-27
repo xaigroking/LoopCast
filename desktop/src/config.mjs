@@ -30,7 +30,7 @@ export async function readConfig(filename, { packaged = false, expectedDigest } 
   try {
     if (!absolute(filename) || (await stat(filename)).size > 65536) throw new Error();
     const raw = await readFile(filename);
-    if (expectedDigest && createHash('sha256').update(raw).digest('hex') !== expectedDigest) throw new Error();
+    if (expectedDigest && createHash('sha256').update(raw).digest('hex') !== expectedDigest) throw new HostError('MANIFEST_CHANGED');
     const config = validateConfig(JSON.parse(raw.toString('utf8')));
     if (packaged !== (config.mode === 'release')) throw new Error();
     // The manifest is trusted main-process input, never renderer input. Resolve
@@ -45,7 +45,7 @@ export async function readConfig(filename, { packaged = false, expectedDigest } 
       const hash = createHash('sha256');
       const { createReadStream } = await import('node:fs');
       for await (const chunk of createReadStream(actual)) hash.update(chunk);
-      if (hash.digest('hex') !== item.sha256) throw new Error();
+      if (hash.digest('hex') !== item.sha256) throw new HostError('RESOURCE_DIGEST_MISMATCH');
     }
     for (const key of ['nextRoot', 'dataDir', 'sessionDir']) {
       config[key] = await realpath(config[key]);
@@ -62,6 +62,8 @@ export async function readConfig(filename, { packaged = false, expectedDigest } 
     return config;
   } catch (error) {
     if (error instanceof HostError) throw error;
+    if (error?.code === 'ENOENT') throw new HostError('RESOURCE_MISSING');
+    if (['EACCES','EPERM'].includes(error?.code)) throw new HostError('PERMISSION_DENIED');
     throw new HostError('CONFIG_INVALID');
   }
 }
@@ -73,12 +75,13 @@ export async function loadTreePort(config) {
     if (treePort?.format !== 'loopcast.process-tree.v1' ||
         typeof treePort.launch !== 'function' || typeof treePort.environment !== 'function') throw new Error();
     return treePort;
-  } catch { throw new HostError('PLATFORM_UNAVAILABLE'); }
+  } catch (error) { if (error instanceof HostError) throw error; throw new HostError('PLATFORM_UNAVAILABLE'); }
 }
 
 export function configPath(argv, { packaged, resourcesPath }) {
   if (packaged) return join(resourcesPath, 'loopcast', 'desktop.json');
   const offset = argv.indexOf('--desktop-config');
-  if (offset < 0 || !absolute(argv[offset + 1])) throw new HostError('CONFIG_INVALID');
+  if (offset < 0) throw new HostError('MANIFEST_MISSING');
+  if (!absolute(argv[offset + 1])) throw new HostError('PATH_UNSAFE');
   return resolve(argv[offset + 1]);
 }

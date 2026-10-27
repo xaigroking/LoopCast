@@ -33,6 +33,11 @@ def validate(paths):
         finally: os.close(fd)
 
 if __name__ == '__main__':
+    if sys.argv[1:2] == ['validate-result']:
+        from .desktop_diagnostics import preflight
+        code = preflight(sys.argv[2:]) if len(sys.argv) == 4 else 'DIAGNOSTICS_UNAVAILABLE'
+        print(json.dumps({'format':'loopcast.desktop-preflight.v1','code':code},separators=(',',':')))
+        sys.exit(0 if code == 'OK' else 1)
     try:
         if sys.argv[1] == 'validate': validate(sys.argv[2:])
         elif sys.argv[1] == 'finalize' and len(sys.argv) == 4: finalize(sys.argv[2], sys.argv[3])

@@ -163,10 +163,29 @@ jobs:
           npm run typecheck
           npm test
 
+  diagnostics-unsupported:
+    name: diagnostics-unsupported
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --require-hashes -r requirements-ci.lock
+      - run: python -m build --wheel --no-isolation
+      - shell: pwsh
+        run: |
+          $candidateWheel = Get-ChildItem dist/loopcast-*.whl | Select-Object -First 1
+          python -m pip install --no-deps $candidateWheel.FullName
+          python desktop/scripts/check-unsupported.py
+
   merge-gate:
     name: merge-gate
     if: ${{ always() }}
-    needs: [package, tests, browser, desktop]
+    needs: [package, tests, browser, desktop, diagnostics-unsupported]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
@@ -180,6 +199,6 @@ jobs:
 
           results = json.loads(os.environ['RESULTS'])
           print(json.dumps(results, indent=2))
-          if set(results) != {'package', 'tests', 'browser', 'desktop'} or any(job['result'] != 'success' for job in results.values()):
+          if set(results) != {'package', 'tests', 'browser', 'desktop', 'diagnostics-unsupported'} or any(job['result'] != 'success' for job in results.values()):
               raise SystemExit('Required checks did not all run successfully')
           PY

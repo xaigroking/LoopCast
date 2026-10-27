@@ -53,15 +53,16 @@ export class DesktopHost extends EventEmitter {
     if (this.state === 'READY') return Promise.resolve(this.gateway.origin);
     if (this.startPromise && this.state === 'STARTING') return this.startPromise;
     if (this.state !== 'STOPPED') return Promise.reject(new HostError('STOP_UNCONFIRMED'));
-    this.error = null; this.stopPromise = null; this.handles = []; this.api = null; this.gateway = null;
+    this.error = null; this.primaryError = null; this.stopPromise = null; this.handles = []; this.api = null; this.gateway = null;
     this.gatewayToken = randomBytes(32).toString('hex'); this.apiToken = randomBytes(32).toString('hex');
     this.controller = new AbortController(); this.transition('STARTING');
     this.startPending = true;
     this.startPromise = this.startInternal().catch(async error => {
-      this.error ??= safeError(error);
+      this.primaryError = error?.code === 'EADDRINUSE' ? new HostError('ENTRY_PORT_BUSY') : safeError(error);
+      this.error ??= this.primaryError;
       this.controller.abort();
       await this.cleanup();
-      throw this.error;
+      throw this.primaryError;
     }).finally(() => { this.startPending = false; });
     return this.startPromise;
   }
@@ -115,7 +116,7 @@ export class DesktopHost extends EventEmitter {
     catch (error) { if (error instanceof HostError) throw error; throw new HostError('PROTOCOL_INVALID'); }
     if (info.format !== 'loopcast.platform.v1' || info.source_revision !== config.apiRevision) throw new HostError('VERSION_MISMATCH');
     for (const capability of ['file_access', 'owner_lock', 'sqlite_access', 'process_tree', 'managed_stop', 'desktop_session']) {
-      if (info.capabilities?.[capability] !== 'implemented') throw new HostError('PLATFORM_UNAVAILABLE');
+      if (info.capabilities?.[capability] !== 'implemented') throw new HostError('CAPABILITY_UNAVAILABLE');
     }
     await budget.run(this.gatewayFactory({ gatewayToken: this.gatewayToken, apiToken: this.apiToken, port: config.gatewayPort }).then(async gateway => {
       if (this.controller.signal.aborted || this.state !== 'STARTING') { await gateway.close(); throw new HostError('START_FAILED'); }

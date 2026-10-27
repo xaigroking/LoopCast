@@ -116,7 +116,7 @@ export async function launchElectron({ executable, directory, manifest, env, obs
         const nativeDialog = dialog.showMessageBox.bind(dialog);
         dialog.showMessageBox = options => {
           record('native-error-dialog');
-          globalThis.windowAudit.dialogs.push({ type: options.type, message: options.message, buttons: options.buttons });
+          globalThis.windowAudit.dialogs.push({ type: options.type, message: options.message, detail: options.detail, buttons: options.buttons });
           return nativeDialog(options); // Show the actual bounded native dialog.
         };
         });

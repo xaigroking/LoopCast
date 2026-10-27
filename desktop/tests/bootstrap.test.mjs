@@ -20,7 +20,7 @@ test('synchronous private session snapshot is bound to subsequent full validatio
   const snapshot = readBootstrap(file);
   assert.equal(snapshot.sessionDir, value.sessionDir);
   await writeFile(file, JSON.stringify({ ...value, locale: 'zh-Hans' }));
-  await assert.rejects(readConfig(file, { expectedDigest: snapshot.digest }), /CONFIG_INVALID/);
-  await chmod(value.sessionDir, 0o755); assert.throws(() => readBootstrap(file), /CONFIG_INVALID/);
+  await assert.rejects(readConfig(file, { expectedDigest: snapshot.digest }), /MANIFEST_CHANGED/);
+  await chmod(value.sessionDir, 0o755); assert.throws(() => readBootstrap(file), /DIRECTORY_UNSAFE/);
   assert.equal(instanceDirectory(root), join(root, 'LoopCast-instance'));
 });
