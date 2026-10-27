@@ -303,7 +303,12 @@ test('real response loss, reload, cache-only clear and native restart preserve t
 test('native renderer crash and host death preserve the STOP/guard boundary without replacement', { timeout: 100000 }, async t => {
   const item = await fixture(t); let app = await stage('RENDERER_BOOT', () => item.start()), page = await app.firstPage(); await page.locator('.heading .primary').waitFor();
   const normal = await managed(app);
-  await stage('RENDERER_TRIGGER', () => app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer(); }));
+  const rendererPid = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getOSProcessId());
+  assert.ok(Number.isInteger(rendererPid) && rendererPid > 1 && rendererPid !== process.pid && rendererPid !== app.child.pid);
+  // Inject a real OS process failure. Electron's Linux crash-request API may
+  // return without terminating its renderer; that does not exercise shutdown.
+  process.kill(rendererPid, 'SIGKILL');
+  await stage('RENDERER_SIGNAL', () => until(async () => JSON.parse(await readFile(app.lifecycleTrace, 'utf8')).some(value => value.startsWith('renderer-gone-'))));
   await stage('RENDERER_DETACH', () => app.detach());
   let crashedExit;
   try { crashedExit = await new Budget(20000).run(app.exited); }
@@ -349,7 +354,9 @@ test('an existing managed CLI owner and an occupied entry port are never attache
   const cliOrigin = await budget.run(protocol.ready);
   try {
     const app = await item.start();
-    await until(async () => app.status || await app.evaluate(() => globalThis.windowAudit.dialogs.length > 0).catch(() => false));
+    try {
+      await until(async () => app.status || await app.evaluate(() => globalThis.windowAudit.dialogs.length > 0).catch(() => false), item.config.startTimeoutMs + item.config.stopTimeoutMs + 1000);
+    } catch { throw new Error('NATIVE_OWNER_REJECTION_FAILED '+await readFile(app.lifecycleTrace, 'utf8')); }
     if (!app.status) assert.equal((await app.quit()).code, 1);
     else assert.equal(app.status.code, 1);
     assert.equal((await fetch(cliOrigin+'/healthz')).status, 200);
@@ -362,7 +369,9 @@ test('an existing managed CLI owner and an occupied entry port are never attache
   const stranger = http.createServer((_request, response) => { requests++; response.end('not the application'); });
   await new Promise(resolve => stranger.listen(second.config.gatewayPort, '127.0.0.1', resolve));
   try {
-    const refused = await second.start(); await until(() => refused.evaluate(() => globalThis.windowAudit.dialogs.length > 0));
+    const refused = await second.start();
+    try { await until(() => refused.evaluate(() => globalThis.windowAudit.dialogs.length > 0), second.config.startTimeoutMs + second.config.stopTimeoutMs + 1000); }
+    catch { throw new Error('NATIVE_PORT_REJECTION_FAILED '+await readFile(refused.lifecycleTrace, 'utf8')); }
     assert.equal((await refused.quit()).code, 1); assert.equal(requests, 0);
     await assert.rejects(stat(join(second.data, 'state.sqlite3')));
   } finally { await new Promise(resolve => stranger.close(resolve)); }
