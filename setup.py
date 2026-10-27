@@ -17,18 +17,20 @@ def source():
         except (OSError, ValueError, KeyError): value = 'unavailable'
     return {'revision': value if re.fullmatch('[a-f0-9]{40}', value) else 'unavailable'}
 
+SOURCE = source()  # Capture before sdist creates its temporary release directory.
+
 class Build(build_py):
     def run(self):
         super().run()
         target = Path(self.build_lib)/'loopcast/resources/source.json'
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(source()) + '\n')
+        target.write_text(json.dumps(SOURCE) + '\n')
 
 class Source(sdist):
     def make_release_tree(self, base_dir, files):
         super().make_release_tree(base_dir, files)
         target = Path(base_dir)/'src/loopcast/resources/source.json'
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(source()) + '\n')
+        target.write_text(json.dumps(SOURCE) + '\n')
 
 setup(cmdclass={'build_py': Build, 'sdist': Source})

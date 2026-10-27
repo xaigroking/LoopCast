@@ -47,12 +47,14 @@ export class StudioClient {
   }
 
   async write<T>(identity: string, path: string, body: unknown, method: 'POST' | 'PUT' = 'POST', sensitive = false): Promise<T> {
+    if (!this.storageAvailable) throw Error('REQUEST_UNRESOLVED');
     const previous = this.pending.get(identity);
     if (previous && (previous.path !== path || previous.method !== method || JSON.stringify(previous.body) !== JSON.stringify(body))) throw Error('REQUEST_UNRESOLVED');
     const running = this.running.get(identity);
     if (running) return running as Promise<T>;
     const operation: Pending = previous ?? { identity, path, method, body, key: requestKey(), sensitive: sensitive || path.endsWith('/controls') };
     this.pending.set(identity, operation); this.persist();
+    if (!this.storageAvailable) throw Error('REQUEST_UNRESOLVED');
     const promise = apiRequest<T>(path, { method, headers: { 'Content-Type': 'application/json', 'Idempotency-Key': operation.key }, body: JSON.stringify(body) })
       .then((data) => { this.pending.delete(identity); this.persist(); return data; })
       .catch((error: unknown) => {

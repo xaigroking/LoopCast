@@ -18,7 +18,9 @@ try {
   host.on('fault', () => { void stop(); });
   const origin = await host.start();
   // Private test/developer pipe, never a URL token or public error log.
-  writeSync(3, JSON.stringify({ origin, gatewayToken: host.gatewayToken }) + '\n');
+  const descriptor = Number(process.argv[3] ?? 3);
+  if (!Number.isInteger(descriptor) || descriptor < 3) throw new Error();
+  writeSync(descriptor, JSON.stringify({ origin, gatewayToken: host.gatewayToken }) + '\n');
   process.stdout.write(`READY ${origin}\n`);
 } catch (error) {
   process.stderr.write(safeError(error).code + '\n'); await stop(); process.exitCode = 1;

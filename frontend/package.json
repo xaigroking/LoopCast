@@ -14,7 +14,7 @@
     "types:api": "openapi-typescript ../dist/openapi.json -o src/lib/api-schema.ts",
     "typecheck": "tsc --noEmit",
     "check:architecture": "node scripts/check-architecture.mjs",
-    "test:network": "node --test tests/network.test.mjs"
+    "test:network": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "i18next": "26.5.10",

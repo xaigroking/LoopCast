@@ -20,9 +20,10 @@ performance gains.
 
 ## Build and deploy
 
-The [desktop host source candidate](desktop/README.md) provides lifecycle and
-same-origin contracts with controlled subprocess tests. Real backend platform
-integration, desktop binaries and installers are still pending.
+The [Linux development desktop host](desktop/README.md) connects the real managed
+backend and production Next through a subreaper process port and authenticated
+same-origin entry. Desktop binaries, actual Electron window acceptance and
+Windows/macOS ports remain pending.
 
 Offline private backups and verification are described in [OPERATIONS.md](OPERATIONS.md).
 
