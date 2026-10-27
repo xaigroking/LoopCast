@@ -142,3 +142,60 @@ test('killing a real host leaves a durable barrier that rejects the next host an
   assert.notEqual(code, 0); assert.equal(output.includes('READY'), false);
   assert.ok(await stat(join(item.dataDir, 'desktop-runtime.guard.v1')));
 });
+
+test('real stopped workspace backup uses the production tree and independent digest without changing business facts', { timeout: 70000 }, async t => {
+  const item = await manifest(t);
+  const { parseCreatedBackup, parseVerifiedBackup } = await import('../src/maintenance-model.mjs');
+  const { mkdir: makeDirectory } = await import('node:fs/promises');
+  const packagePath = join(item.root, 'independent-package'), rejected = join(item.root, 'must-not-create');
+  let host = new DesktopHost(item.config, await loadTreePort(item.config)); t.after(() => host.stop());
+  await host.start();
+  const origin = host.gateway.origin;
+  const auth = () => ({ 'X-LoopCast-Desktop-Session':host.gatewayToken });
+  const media = await readFile(process.env.LOOPCAST_DESKTOP_SAMPLE);
+  const imported = await fetch(origin+'/v1/studio/assets/import?kind=video', { method:'POST',
+    headers:{...auth(),Origin:origin,'Content-Type':'application/octet-stream','Idempotency-Key':'backup-registered-media','X-File-Name':'sample.mp4','X-Source':'Owned maintenance fixture'},body:media });
+  assert.equal(imported.status,200);
+  await makeDirectory(join(item.dataDir,'social','credentials'),{recursive:true,mode:0o700});
+  await writeFile(join(item.dataDir,'social','credentials','excluded.json'),'credential-fixture-canary',{mode:0o600});
+  const created = await fetch(origin+'/v1/runs', { method:'POST', headers:{...auth(),Origin:origin,'Content-Type':'application/json','Idempotency-Key':'backup-active-task'},
+    body:JSON.stringify({title:'Active maintenance fixture',mode:'fixture',scenario:'slow',delay_ms:3000}) });
+  assert.equal(created.status,202);const run=await created.json();
+  const events=await fetch(origin+`/v1/runs/${run.run_id}/events?after=0`,{headers:auth()});
+  const stream=events.body.getReader();await stream.read();
+  const env={PATH:'/usr/bin:/bin',LANG:'C.UTF-8',HOME:item.sessionDir,TMPDIR:item.sessionDir};
+  async function command(argv) {
+    const port=createTreePort(item.config),budget=new Budget(12000);
+    const owned=port.launch({executable:item.config.python.path,argv:['-I',...argv],cwd:item.sessionDir,env,stdio:['pipe','pipe','pipe'],deadline:budget.end});
+    try { return await capture(owned,budget,32768); }
+    finally { assert.equal((await owned.closeTree(budget.end)).confirmed,true); }
+  }
+  await assert.rejects(command(['-m','loopcast','backup','create','--data-dir',item.dataDir,'--output',rejected]));
+  await assert.rejects(stat(rejected));
+  const streamClosed=(async()=>{while(!(await stream.read()).done){} })().catch(()=>{});
+  assert.equal((await host.stop()).confirmed,true);await new Budget(3000).run(streamClosed);
+  await assert.rejects(stat(join(item.dataDir,'desktop-runtime.guard.v1')));
+  const digestScript = `import hashlib,json,sqlite3,sys
+from contextlib import closing
+with closing(sqlite3.connect('file:'+sys.argv[1]+'/state.sqlite3?mode=ro',uri=True)) as db:
+ db.execute('BEGIN')
+ rows={name:db.execute('SELECT * FROM "'+name.replace('"','""')+'"').fetchall() for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name!='backup_audit' ORDER BY name")}
+ encoded=json.dumps(rows,sort_keys=True,default=lambda value:hashlib.sha256(value).hexdigest() if isinstance(value,bytes) else None).encode()
+ print(json.dumps({'facts':hashlib.sha256(encoded).hexdigest(),'audit':db.execute('SELECT COUNT(*) FROM backup_audit').fetchone()[0]}))`;
+  const before=JSON.parse(await command(['-c',digestScript,item.dataDir]));
+  const result=parseCreatedBackup(Buffer.from(await command(['-m','loopcast','backup','create','--data-dir',item.dataDir,'--output',packagePath])));
+  const after=JSON.parse(await command(['-c',digestScript,item.dataDir]));
+  assert.equal(after.facts,before.facts);
+  if(result.audit==='recorded')assert.equal(after.audit,before.audit+1);
+  else assert.ok(after.audit===before.audit || after.audit===before.audit+1);
+  await assert.rejects(stat(join(packagePath,'social')));
+  await assert.rejects(stat(join(packagePath,'service.lock')));
+  const packageManifest=JSON.parse(await readFile(join(packagePath,'manifest.json'),'utf8'));
+  assert.ok(packageManifest.files.some(value=>value.path.startsWith('library/')));
+  // The expected digest is the authoritative create result, never the package's own hash.
+  host=new DesktopHost(item.config,await loadTreePort(item.config));await host.start();
+  const verified=parseVerifiedBackup(Buffer.from(await command(['-m','loopcast','backup','verify','--backup',packagePath,'--expected-manifest-sha256',result.manifest_sha256])),result.backup_id);
+  assert.equal(verified.backup_id,result.backup_id);
+  assert.equal((await fetch(origin+'/healthz',{headers:auth()})).status,200);
+  assert.equal((await host.stop()).confirmed,true);
+});

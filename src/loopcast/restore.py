@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import tempfile
-from .backup import verify_backup, new_target, regular, copy_reference, sync_directory, publish_directory, readonly
+from .backup import verify_backup, new_target, regular, copy_reference, sync_directory, publish_directory, readonly, staging_identity, discard_staging
 from .ownership import DirectoryLock, directory
 from .storage import Store
 from .operations_storage import ReadOnlyOperations
@@ -14,9 +14,11 @@ def restore_backup(backup, expected_digest, destination):
     manifest = verify_backup(backup, expected_digest)
     source, source_fd = directory(backup)
     staging = None
+    staging_owner = None
     try:
         target = new_target(destination, source)
         staging = Path(tempfile.mkdtemp(prefix='.loopcast-restore-', dir=target.parent))
+        staging_owner = staging_identity(staging)
         entries = {entry['path']: (entry['size'], entry['sha256']) for entry in manifest['files']}
         with os.fdopen(regular(source_fd, 'state.sqlite3'), 'rb') as origin:
             with os.fdopen(os.open(staging / 'state.sqlite3', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as copied:
@@ -49,7 +51,7 @@ def restore_backup(backup, expected_digest, destination):
                 'backup_id': manifest['backup_id'], 'upload_allowed': False, 'credentials_policy': 'excluded_reauthorize'}
     finally:
         os.close(source_fd)
-        if staging is not None and staging.exists():shutil.rmtree(staging)
+        if staging is not None and staging_owner is not None:discard_staging(staging, staging_owner)
 
 
 def reconciliation_report(path):
