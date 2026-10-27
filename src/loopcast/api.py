@@ -272,6 +272,8 @@ def create_app(
     schedule_settings=None,
     inspection_settings=None,
     clock=None,
+    desktop_session=None,
+    desktop_identity=None,
 ):
     """Create an app factory; resources are acquired only inside ASGI lifespan."""
     proxy_networks = tuple(ipaddress.ip_network(item, strict=False) for item in trusted_proxies)
@@ -285,12 +287,14 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        runtime = ApplicationRuntime(data_dir, generator_settings, media_settings, social_settings, schedule_settings=schedule_settings, inspection_settings=inspection_settings, clock=clock)
+        runtime = ApplicationRuntime(data_dir, generator_settings, media_settings, social_settings, schedule_settings=schedule_settings, inspection_settings=inspection_settings, clock=clock, desktop_identity=desktop_identity)
         app.state.runtime = runtime
+        app.state.shutdown_complete = False
         try:
             yield
         finally:
             runtime.close()
+            app.state.shutdown_complete = True
 
     app = FastAPI(title="LoopCast API", version="1.0.0", lifespan=lifespan, docs_url=None, redoc_url=None)
 
@@ -337,6 +341,15 @@ def create_app(
             host_ok = host in allowed_hosts and client_ip is not None and client_ip.is_loopback
         if not host_ok:
             return reject(Problem("INVALID_HOST", "Use the local listening address.", 403))
+
+        desktop_proof = None
+        if desktop_session is not None:
+            allowed, desktop_proof = desktop_session.authorize(request.url.path, method, request.headers)
+            if not allowed:
+                return reject(Problem('DESKTOP_SESSION_REQUIRED', 'Use the trusted desktop session.', 403))
+        request.state.desktop_proof = desktop_proof
+        if request.app.state.runtime.stopping.is_set():
+            return reject(Problem('SERVICE_STOPPING', 'The local service is stopping.', 503))
 
         if is_write and (request.url.path == "/v1" or request.url.path.startswith("/v1/")):
             uploading = method == 'POST' and request.url.path == '/v1/studio/assets/import'
@@ -410,7 +423,8 @@ def create_app(
         runtime: ApplicationRuntime = request.app.state.runtime
         await asyncio.to_thread(_check_store, runtime)
         ready = runtime.ready()
-        return JSONResponse({"ready": ready}, status_code=200 if ready else 503)
+        headers = {'X-LoopCast-Desktop-Proof': request.state.desktop_proof} if request.state.desktop_proof else None
+        return JSONResponse({"ready": ready}, status_code=200 if ready else 503, headers=headers)
 
     @app.get("/v1/capabilities", response_model=Capabilities, responses=ERROR_RESPONSES)
     async def capabilities(request: Request):

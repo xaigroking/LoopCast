@@ -10,14 +10,14 @@ from .ownership import DirectoryLock
 class ApplicationRuntime:
     """One process-local owner for storage, recovery, worker and publisher."""
 
-    def __init__(self, directory: str | Path, generator_settings=None, media_settings=None, social_settings=None, *, schedule_settings=None, inspection_settings=None, clock=None):
+    def __init__(self, directory: str | Path, generator_settings=None, media_settings=None, social_settings=None, *, schedule_settings=None, inspection_settings=None, clock=None, desktop_identity=None):
         from .generation import Generator
 
         self.generator_settings, self.media_settings = generator_settings, media_settings
         try: self.generator = Generator(generator_settings) if generator_settings is not None else None
         except (OSError, ValueError, RuntimeError): self.generator = None
         try:
-            self._directory_lock = DirectoryLock(directory, create=True)
+            self._directory_lock = DirectoryLock(directory, create=True, desktop_identity=desktop_identity)
         except (OSError, ValueError):
             raise RuntimeError("The data directory is already in use") from None
         self.directory = self._directory_lock.path

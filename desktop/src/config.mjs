@@ -34,11 +34,15 @@ export async function readConfig(filename, { packaged = false } = {}) {
     // The manifest is trusted main-process input, never renderer input. Resolve
     // resource identities before hashing; the platform port validates data ACLs.
     for (const key of ['python', 'node', 'treeModule']) {
-      const item = config[key]; item.path = await realpath(item.path);
-      if (!(await stat(item.path)).isFile()) throw new Error();
+      const item = config[key];
+      const actual = await realpath(item.path);
+      // Preserve a venv interpreter's launch path: dereferencing its symlink
+      // would silently select the base Python without the installed wheel.
+      item.path = resolve(item.path);
+      if (!(await stat(actual)).isFile()) throw new Error();
       const hash = createHash('sha256');
       const { createReadStream } = await import('node:fs');
-      for await (const chunk of createReadStream(item.path)) hash.update(chunk);
+      for await (const chunk of createReadStream(actual)) hash.update(chunk);
       if (hash.digest('hex') !== item.sha256) throw new Error();
     }
     for (const key of ['nextRoot', 'dataDir', 'sessionDir']) {
@@ -62,7 +66,8 @@ export async function readConfig(filename, { packaged = false } = {}) {
 
 export async function loadTreePort(config) {
   try {
-    const { treePort } = await import(pathToFileURL(config.treeModule.path).href);
+    const module = await import(pathToFileURL(config.treeModule.path).href);
+    const treePort = module.createTreePort ? module.createTreePort(config) : module.treePort;
     if (treePort?.format !== 'loopcast.process-tree.v1' ||
         typeof treePort.launch !== 'function' || typeof treePort.environment !== 'function') throw new Error();
     return treePort;

@@ -188,6 +188,12 @@ export class DesktopHost extends EventEmitter {
       } catch { return false; }
     }));
     if (outcomes.some(value => !value)) confirmed = false;
+    if (this.tree.finish) {
+      try {
+        const result = await new Budget(Math.max(1, budget.end - performance.now())).run(this.tree.finish({ confirmed, deadline: budget.end }));
+        if (!result?.confirmed) confirmed = false;
+      } catch { confirmed = false; }
+    }
     try { await this.gateway?.close(); } catch { confirmed = false; }
     if (confirmed) this.transition('STOPPED');
     else { this.error = new HostError('STOP_UNCONFIRMED'); this.emit('fault', this.error); }

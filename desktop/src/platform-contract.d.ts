@@ -39,4 +39,6 @@ export interface TreePort {
    * Parent death/pipe EOF handling belongs to the platform port.
    */
   launch(spec: LaunchSpec): OwnedTree;
+  /** Clear only this launch's runtime guard after every tree and API shutdown. */
+  finish?(result: { confirmed: boolean; deadline: number }): Promise<{ confirmed: boolean }>;
 }
