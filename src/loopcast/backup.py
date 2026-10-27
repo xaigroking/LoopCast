@@ -147,10 +147,39 @@ def new_target(path, source=None):
     return target
 
 
+def staging_identity(path):
+    """Remember only the parent and directory objects created by this call."""
+    _, parent = directory(path.parent)
+    try:
+        entry = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        parent_info = os.fstat(parent)
+        if not stat.S_ISDIR(entry.st_mode): raise ValueError('STAGING_CHANGED')
+        return (parent_info.st_dev, parent_info.st_ino), (entry.st_dev, entry.st_ino)
+    finally: os.close(parent)
+
+
+def discard_staging(path, expected):
+    """An unknown/replaced name is retained, never treated as our temporary."""
+    parent = None
+    try:
+        _, parent = directory(path.parent)
+        info = os.fstat(parent)
+        if (info.st_dev, info.st_ino) != expected[0]: return False
+        try: entry = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError: return True
+        if not stat.S_ISDIR(entry.st_mode) or (entry.st_dev, entry.st_ino) != expected[1]: return False
+        shutil.rmtree(path.name, dir_fd=parent)
+        return True
+    except OSError: return False
+    finally:
+        if parent is not None: os.close(parent)
+
+
 def create_backup(source, output):
     with DirectoryLock(source) as owner:
         target = new_target(output, owner.path)
         staging = Path(tempfile.mkdtemp(prefix='.loopcast-backup-', dir=target.parent))
+        staging_owner = staging_identity(staging)
         try:
             with closing(readonly(owner.directory_fd)) as origin:
                 check_database(origin)
@@ -195,8 +224,7 @@ def create_backup(source, output):
                     'schema_version': schema, 'files': len(paths), 'state': 'VERIFIED_PRIVATE_BACKUP',
                     'credentials_policy': 'excluded_reauthorize', 'audit': audit}
         finally:
-            if staging.exists():
-                shutil.rmtree(staging)
+            discard_staging(staging, staging_owner)
 
 
 def verify_backup(backup, expected_digest):
