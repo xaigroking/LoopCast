@@ -7,7 +7,7 @@ import { Budget, HostError, message, safeError } from './errors.mjs';
 import { secureWindow, webPreferences } from './window-policy.mjs';
 
 const entryStarted = performance.now();
-let window, host, config, quitting = false, exiting = false, exitCode = 0, errorDialog;
+let window, host, config, browserSession, quitting = false, exiting = false, exitCode = 0, errorDialog;
 
 async function report(error) {
   exitCode = 1;
@@ -49,9 +49,13 @@ function initialize() {
     quitting = true;
     if (window && !window.isDestroyed()) window.destroy();
     void (async () => {
+      browserSession?.flushStorageData();
+      try { await browserSession?.cookies.flushStore(); } catch { exitCode = 1; }
       const result = await host?.stop();
       if (result?.confirmed === false) { exitCode = 1; await report(new HostError('STOP_UNCONFIRMED')); }
-      exiting = true; app.exit(exitCode);
+      exiting = true;
+      if (exitCode) app.exit(exitCode);
+      else app.quit(); // Let Chromium finish its normal persistent-profile shutdown.
     })();
   });
   void (async () => {
@@ -67,7 +71,7 @@ function initialize() {
       host.on('fault', () => { if (!quitting) app.quit(); });
       const origin = await host.start();
       if (quitting) throw new Error();
-      const browserSession = session.fromPartition('persist:loopcast-desktop');
+      browserSession = session.fromPartition('persist:loopcast-desktop');
       window = new BrowserWindow({ show: false, width: 1280, height: 860, webPreferences: { ...webPreferences, session: browserSession } });
       window.removeMenu();
       secureWindow(window, browserSession, origin, host.gatewayToken);

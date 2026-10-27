@@ -40,11 +40,16 @@ export async function launchElectron({ executable, directory, manifest, env, obs
   try {
     await until(() => inspectorURL);
     socket = new WebSocket(inspectorURL); await budget.run(once(socket, 'open'));
-    let serial = 0; const requests = new Map();
+    let serial = 0, entryBreakpoint, entryPaused;
+    const entry = new Promise(resolve => { entryPaused = resolve; });
+    const requests = new Map();
     socket.addEventListener('message', event => {
       const result = JSON.parse(event.data);
       if (result.id) { const task = requests.get(result.id); requests.delete(result.id); task?.resolve(result); }
-      if (result.method === 'Debugger.paused') socket.send(JSON.stringify({ id: ++serial, method: 'Debugger.resume' }));
+      if (result.method === 'Debugger.paused') {
+        if (entryBreakpoint && result.params.hitBreakpoints?.includes(entryBreakpoint)) entryPaused();
+        else socket.send(JSON.stringify({ id: ++serial, method: 'Debugger.resume' }));
+      }
     });
     async function send(method, params = {}) {
       const id = ++serial;
@@ -52,19 +57,24 @@ export async function launchElectron({ executable, directory, manifest, env, obs
       if (result.error) throw new Error('NODE_INSPECTOR_COMMAND_FAILED');
       return result.result;
     }
-    async function evaluate(fn, argument) {
-      const expression = `(async()=>{const electron=process.getBuiltinModule('module').createRequire(process.execPath)('electron');return (${fn.toString()})(electron,${JSON.stringify(argument) ?? 'undefined'});})()`;
-      const result = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, includeCommandLineAPI: true });
+    async function evaluate(fn, argument, awaitPromise = true) {
+      const expression = `(()=>{const electron=require('electron');return (${fn.toString()})(electron,${JSON.stringify(argument) ?? 'undefined'});})()`;
+      const result = await send('Runtime.evaluate', { expression, awaitPromise, returnByValue: true, includeCommandLineAPI: true });
       if (result.exceptionDetails) throw new Error('NATIVE_ELECTRON_EVALUATION_FAILED');
       return result.result.value;
     }
     if (observe) {
       await send('Runtime.enable');
       await send('Debugger.enable');
-      await send('Debugger.setSkipAllPauses', { skip: true });
-      await evaluate(({ app, session, dialog }) => {
+      entryBreakpoint = (await send('Debugger.setBreakpointByUrl', { lineNumber: 0, urlRegex: '/src/main\\.mjs$' })).breakpointId;
+      await send('Runtime.runIfWaitingForDebugger');
+      await budget.run(entry);
+      await evaluate(electron => {
+        const { app } = electron;
         globalThis.windowAudit = { ready: null, decisions: [], dialogs: [], failures: [] };
-        app.once('ready', () => { globalThis.windowAudit.ready = { userData: app.getPath('userData'), sessionData: app.getPath('sessionData') }; });
+        app.once('ready', () => {
+        globalThis.windowAudit.ready = { userData: app.getPath('userData'), sessionData: app.getPath('sessionData') };
+        const { session, dialog } = electron;
         const partition = session.fromPartition.bind(session);
         session.fromPartition = (...args) => {
           const current = partition(...args);
@@ -72,12 +82,14 @@ export async function launchElectron({ executable, directory, manifest, env, obs
             current.windowAuditInstalled = true;
             const original = current.webRequest.onBeforeSendHeaders.bind(current.webRequest);
             current.webRequest.onBeforeSendHeaders = (filter, policy) => original(filter, (details, callback) => policy(details, result => {
-              const audit = globalThis.windowAudit;
-              if (audit.decisions.length < 1000) audit.decisions.push({ type: details.resourceType,
-                path: new URL(details.url).pathname, frame: Boolean(details.frame), top: details.frame?.parent === null,
-                initiator: details.initiatorOrigin ?? null, cancel: Boolean(result.cancel),
-                capability: Object.keys(result.requestHeaders ?? {}).some(key => key.toLowerCase() === 'x-loopcast-desktop-session') });
-              callback(result); // Exactly the production policy's decision.
+              try {
+                const audit = globalThis.windowAudit;
+                let top = null; try { top = details.frame?.parent === null; } catch {}
+                if (audit.decisions.length < 1000) audit.decisions.push({ type: details.resourceType,
+                  path: new URL(details.url).pathname, frame: Boolean(details.frame), top,
+                  initiator: details.initiatorOrigin ?? null, cancel: Boolean(result.cancel),
+                  capability: Object.keys(result.requestHeaders ?? {}).some(key => key.toLowerCase() === 'x-loopcast-desktop-session') });
+              } finally { callback(result); } // Exactly the production policy's decision.
             }));
           }
           return current;
@@ -87,11 +99,14 @@ export async function launchElectron({ executable, directory, manifest, env, obs
           globalThis.windowAudit.dialogs.push({ type: options.type, message: options.message, buttons: options.buttons });
           return nativeDialog(options); // Show the actual bounded native dialog.
         };
+        });
         app.on('web-contents-created', (_event, contents) => contents.on('did-fail-load', (_event, code, _description, _url, isMainFrame) => {
           globalThis.windowAudit.failures.push({ code, isMainFrame });
         }));
-      });
-      await send('Runtime.runIfWaitingForDebugger');
+      }, undefined, false);
+      await send('Debugger.removeBreakpoint', { breakpointId: entryBreakpoint });
+      entryBreakpoint = undefined;
+      await send('Debugger.resume');
     }
     await until(() => browserURL);
     browser = await chromium.connectOverCDP(browserURL, { timeout: 15000 });

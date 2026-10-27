@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm, stat, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, stat, readFile, readdir } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepare } from '../scripts/prepare.mjs';
 import { launchElectron } from './electron-driver.mjs';
+import { Budget } from '../src/errors.mjs';
+import { message } from '../src/errors.mjs';
 
 const directory = fileURLToPath(new URL('../', import.meta.url));
 const executable = process.env.LOOPCAST_ELECTRON_BINARY;
@@ -18,6 +22,7 @@ async function fixture(t, { locale = 'en' } = {}) {
   for (const path of [data, session, home, appData]) await mkdir(path, { mode: 0o700 });
   const config = await prepare({ python: process.env.LOOPCAST_DESKTOP_PYTHON, node: process.execPath,
     next: process.env.LOOPCAST_DESKTOP_NEXT, data, session, port: '28788', revision: process.env.LOOPCAST_DESKTOP_REVISION, locale });
+  config.stopTimeoutMs = 6000;
   if (process.env.LOOPCAST_DESKTOP_MEDIA_CONFIG) config.configs.media = process.env.LOOPCAST_DESKTOP_MEDIA_CONFIG;
   const filename = join(root, 'desktop.json');
   await writeFile(filename, JSON.stringify(config), { mode: 0o600 });
@@ -33,6 +38,50 @@ async function fixture(t, { locale = 'en' } = {}) {
     await rm(root, { recursive: true, force: true });
   });
   return { root, data, session, home, appData, filename, env, config, start };
+}
+
+async function until(fn, timeout = 15000) {
+  const budget = new Budget(timeout);
+  while (true) {
+    const value = await budget.run(Promise.resolve().then(fn)); if (value) return value;
+    await budget.run(new Promise(resolve => setTimeout(resolve, 25)));
+  }
+}
+
+async function managed(app) {
+  return app.evaluate(() => {
+    const fs = process.getBuiltinModule('fs'), pending = [process.pid], result = [];
+    while (pending.length) {
+      const parent = pending.pop(); let children = [];
+      try { children = fs.readFileSync(`/proc/${parent}/task/${parent}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number); } catch {}
+      for (const pid of children) {
+        pending.push(pid);
+        try {
+          const argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
+          if (argv.includes('loopcast.process_tree') || argv.includes('loopcast') && argv.includes('serve') || argv.some(arg => arg.endsWith('/next-child.cjs'))) {
+            result.push({ pid, guardian: argv.includes('loopcast.process_tree'), api: argv.includes('loopcast') && argv.includes('serve'),
+              start: fs.readFileSync(`/proc/${pid}/stat`, 'utf8').slice(fs.readFileSync(`/proc/${pid}/stat`, 'utf8').lastIndexOf(')') + 2).split(' ')[19] });
+          }
+        } catch {}
+      }
+    }
+    return result;
+  });
+}
+
+async function treesGone(records) {
+  await until(async () => {
+    for (const { pid, start } of records) {
+      try { const raw = await readFile(`/proc/${pid}/stat`, 'utf8'); if (raw.slice(raw.lastIndexOf(')') + 2).split(' ')[19] === start) return false; } catch {}
+    }
+    return true;
+  });
+}
+
+async function secondary(item, manifest = item.filename, args = []) {
+  const child = spawn(executable, [directory, '--desktop-config', manifest, ...args], { env: item.env, stdio: 'ignore' });
+  try { return await new Budget(10000).run(new Promise(resolve => child.once('exit', resolve))); }
+  finally { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); }
 }
 
 async function runtime(app, page) {
@@ -85,5 +134,160 @@ test('unpaused executable startup also uses the configured profile and exits thr
   assert.equal(values.paths.sessionData, item.session);
   await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].close(); });
   await app.detach(); assert.equal((await app.exited).code, 0);
+  await assert.rejects(stat(join(item.data, 'desktop-runtime.guard.v1')));
+});
+
+test('real native requests, navigation, media, resources and hostile contexts use only the production policy', { timeout: 90000 }, async t => {
+  const item = await fixture(t), app = await item.start(), page = await app.firstPage();
+  await page.locator('.heading .primary').click();
+  await page.locator('input[name=title]').fill('Native Electron request ownership');
+  await page.locator('#create-form button[type=submit]').click(); await page.waitForURL('**/runs/*');
+  const id = new URL(page.url()).pathname.split('/').at(-1), origin = new URL(page.url()).origin;
+  assert.equal(await page.evaluate(async id => {
+    const response = await fetch(`/v1/runs/${id}/events?after=0`); const reader = response.body.getReader();
+    const first = await reader.read(); await reader.cancel(); return response.status === 200 && first.value.length > 0;
+  }, id), true);
+  await page.locator('aside nav a[href="/library"]').click();
+  await page.locator('#media-file').setInputFiles(process.env.LOOPCAST_DESKTOP_SAMPLE);
+  await page.locator('#media-source').fill('Owned native Electron contract clip');
+  await page.getByRole('button', { name: 'Import media', exact: true }).click(); await page.locator('.asset-card').waitFor();
+  assert.equal(await page.evaluate(async () => {
+    const assets = await (await fetch('/v1/studio/assets')).json();
+    const asset = assets.items[0];
+    const response = await fetch(`/v1/studio/assets/${asset.id}/content`, { headers: { Range: 'bytes=0-15' } });
+    return response.status === 206 && (await response.arrayBuffer()).byteLength === 16;
+  }), true);
+  await page.locator('aside nav a[href="/settings"]').click();
+  await page.locator('#language-select').selectOption('zh-Hans'); await page.locator('#theme-select').selectOption('dark');
+  await until(() => page.locator('html').getAttribute('lang').then(value => value === 'zh-Hans'));
+  await page.locator('#language-select').selectOption('ar'); await until(() => page.locator('html').getAttribute('dir').then(value => value === 'rtl'));
+  await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setSize(390, 844); });
+  assert.ok(await page.evaluate(() => document.fonts.ready.then(() => document.fonts.status === 'loaded')));
+  await page.locator('#language-select').selectOption('en');
+  await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setSize(1280, 860); });
+  await page.locator('aside nav a[href="/create"]').click(); await page.locator('#project-title').fill('Native client navigation');
+  await page.getByRole('button', { name: 'New project', exact: true }).click(); await page.waitForURL('**/create/*');
+  const audit = await app.evaluate(() => globalThis.windowAudit);
+  for (const type of ['mainFrame', 'script', 'stylesheet', 'font', 'xhr']) assert.ok(audit.decisions.some(value => value.type === type && value.capability && !value.cancel), type);
+  assert.ok(audit.decisions.some(value => value.path.includes('/v1/runs/') && value.path.endsWith('/events') && value.capability));
+  assert.ok(audit.decisions.some(value => value.path.startsWith('/_next/') && value.capability));
+  const bare = await fetch(origin+'/healthz'); assert.equal(bare.status, 403);
+  const windowsBefore = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+  await page.evaluate(() => { window.open('https://example.com/'); });
+  await page.evaluate(() => { window.location.href = 'https://example.com/'; });
+  await page.waitForTimeout(200);
+  assert.equal(new URL(page.url()).origin, origin);
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), windowsBefore);
+  assert.equal(await page.evaluate(() => Notification.requestPermission()), 'denied');
+  let contacted = false;
+  const stranger = http.createServer((_request, response) => { contacted = true; response.end('untrusted'); });
+  await new Promise(resolve => stranger.listen(0, '127.0.0.1', resolve));
+  try {
+    assert.equal(await page.evaluate(async url => { try { await fetch(url); return false; } catch { return true; } }, `http://127.0.0.1:${stranger.address().port}/`), true);
+    assert.equal(contacted, false);
+  } finally { await new Promise(resolve => stranger.close(resolve)); }
+  assert.equal(await app.evaluate(async ({ BrowserWindow }, origin) => {
+    const source = BrowserWindow.getAllWindows()[0], other = new BrowserWindow({ show: false, webPreferences: { session: source.webContents.session, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
+    try { return await other.loadURL(origin).then(() => false, () => true); } finally { other.destroy(); }
+  }, origin), true);
+  assert.equal((await app.quit()).code, 0);
+});
+
+test('two actual processes ignore the second config and keep a single native window and owner', { timeout: 70000 }, async t => {
+  const item = await fixture(t), app = await item.start(), page = await app.firstPage(); await page.locator('.heading .primary').waitFor();
+  const before = await managed(app); assert.equal(before.filter(value => value.guardian).length, 2);
+  await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].minimize(); });
+  assert.equal(await secondary(item, join(item.root, 'not-readable-do-not-use.json'), ['file:///must-not-execute', 'https://example.com/untrusted']), 0);
+  await until(() => app.evaluate(({ BrowserWindow }) => !BrowserWindow.getAllWindows()[0].isMinimized()));
+  assert.deepEqual((await managed(app)).map(value => value.pid).sort(), before.map(value => value.pid).sort());
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+  assert.equal((await app.quit()).code, 0); await treesGone(before);
+});
+
+test('real response loss, reload, cache-only clear and native restart preserve two explicit retry identities', { timeout: 120000 }, async t => {
+  const item = await fixture(t); let app = await item.start(), page = await app.firstPage();
+  const committed = [], keys = [];
+  async function intercept(page, lose) {
+    const cdp = await app.context.newCDPSession(page);
+    await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/v1/runs', requestStage: 'Response' }] });
+    cdp.on('Fetch.requestPaused', async event => {
+      if (event.request.method !== 'POST') { await cdp.send('Fetch.continueResponse', { requestId: event.requestId }); return; }
+      keys.push(Object.entries(event.request.headers).find(([name]) => name.toLowerCase() === 'idempotency-key')?.[1]);
+      if (lose) {
+        const body = await cdp.send('Fetch.getResponseBody', { requestId: event.requestId });
+        const value = JSON.parse(body.base64Encoded ? Buffer.from(body.body, 'base64').toString('utf8') : body.body);
+        committed.push(value.run_id);
+        await cdp.send('Fetch.failRequest', { requestId: event.requestId, errorReason: 'Aborted' });
+      } else await cdp.send('Fetch.continueResponse', { requestId: event.requestId });
+    });
+  }
+  await intercept(page, true);
+  await page.locator('.heading .primary').click();
+  for (const [index, title] of ['First unresolved native write', 'Second unresolved native write'].entries()) {
+    await page.locator('input[name=title]').fill(title); await page.locator('#create-form button[type=submit]').click();
+    await until(() => committed.length === index + 1);
+    await until(() => page.locator('#form-error').textContent().then(Boolean));
+  }
+  assert.ok(committed.length === 2 && committed.every(Boolean));
+  assert.equal(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('loopcast.run.create.pending.v1.')).length), 2);
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.session.clearCache());
+  const originalOwner = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.session.cookies.get({ name: 'loopcast_owner' }));
+  assert.equal((await app.quit()).code, 0);
+  app = await item.start(); page = await app.firstPage(); await intercept(page, false);
+  await page.locator('#create-dialog[open]').waitFor(); assert.equal(keys.length, 2);
+  const frozen = await page.locator('input[name=title]').inputValue();
+  const firstIndex = frozen.startsWith('First') ? 0 : 1;
+  const owner = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.session.cookies.get({ name: 'loopcast_owner' }));
+  assert.ok(owner[0].value === originalOwner[0].value);
+  await page.locator('#create-form button[type=submit]').click(); await page.waitForURL('**/runs/'+committed[firstIndex]);
+  assert.ok(keys[2] === keys[firstIndex]);
+  await page.reload(); await page.locator('#create-dialog[open]').waitFor();
+  assert.equal(keys.length, 3);
+  await page.locator('#create-form button[type=submit]').click(); await page.waitForURL('**/runs/'+committed[1-firstIndex]);
+  assert.ok(keys[3] === keys[1-firstIndex]);
+  assert.equal(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('loopcast.run.create.pending.v1.')).length), 0);
+  const count = await page.evaluate(async () => (await (await fetch('/v1/runs?limit=100')).json()).items.length); assert.equal(count, 2);
+  assert.equal((await app.quit()).code, 0);
+});
+
+test('native renderer crash and host death preserve the STOP/guard boundary without replacement', { timeout: 100000 }, async t => {
+  const item = await fixture(t); let app = await item.start(), page = await app.firstPage(); await page.locator('.heading .primary').waitFor();
+  const normal = await managed(app);
+  await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer(); });
+  await app.detach(); assert.equal((await new Budget(20000).run(app.exited)).code, 0); await treesGone(normal);
+  await assert.rejects(stat(join(item.data, 'desktop-runtime.guard.v1')));
+  app = await item.start(); page = await app.firstPage(); await page.locator('.heading .primary').waitFor();
+  const abnormal = await managed(app); app.child.kill('SIGKILL'); await app.detach(); await app.exited; await treesGone(abnormal);
+  assert.ok(await stat(join(item.data, 'desktop-runtime.guard.v1')));
+  const refused = await item.start();
+  await until(() => refused.evaluate(() => globalThis.windowAudit.dialogs.length > 0));
+  assert.equal(await refused.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 0);
+  assert.equal((await refused.quit()).code, 1);
+  assert.ok(await stat(join(item.data, 'desktop-runtime.guard.v1')));
+});
+
+test('actual native error dialogs are localized and quit cancels them within the bound', { timeout: 70000 }, async t => {
+  for (const locale of ['en', 'zh-Hans']) {
+    const item = await fixture(t, { locale }); item.config.node.sha256 = '0'.repeat(64);
+    await writeFile(item.filename, JSON.stringify(item.config), { mode: 0o600 });
+    const app = await item.start(); await until(() => app.evaluate(() => globalThis.windowAudit.dialogs.length > 0));
+    const dialogs = await app.evaluate(() => globalThis.windowAudit.dialogs);
+    assert.equal(dialogs[0].message, message('CONFIG_INVALID', locale));
+    assert.equal((await app.quit()).code, 1);
+    await assert.rejects(stat(join(item.data, 'state.sqlite3')));
+    await assert.rejects(stat(join(item.data, 'desktop-runtime.guard.v1')));
+  }
+});
+
+test('missing configuration and startup-time exit create no fallback profile or second owner', { timeout: 60000 }, async t => {
+  const item = await fixture(t);
+  assert.equal(await secondary(item, join(item.root, 'missing.json')), 1);
+  await assert.rejects(stat(join(item.data, 'state.sqlite3')));
+  assert.equal((await readdir(item.session)).length, 0);
+  const lock = await readdir(join(item.appData, 'LoopCast-instance'));
+  assert.equal(lock.some(name => /Cache|Cookies|Local Storage|Partitions/.test(name)), false);
+  const app = await item.start();
+  await app.evaluate(({ app }) => { app.quit(); app.quit(); });
+  await app.detach(); assert.equal((await new Budget(20000).run(app.exited)).code, 0);
   await assert.rejects(stat(join(item.data, 'desktop-runtime.guard.v1')));
 });
