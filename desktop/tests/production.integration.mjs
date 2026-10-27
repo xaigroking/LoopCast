@@ -199,3 +199,38 @@ with closing(sqlite3.connect('file:'+sys.argv[1]+'/state.sqlite3?mode=ro',uri=Tr
   assert.equal((await fetch(origin+'/healthz',{headers:auth()})).status,200);
   assert.equal((await host.stop()).confirmed,true);
 });
+
+test('installed backup and restore CLI feed an unconnected read-only workspace review', { timeout: 30000 }, async t => {
+  const item=await manifest(t), packagePath=join(item.root,'package'), restoredPath=join(item.root,'restored');
+  const {parseCreatedBackup,parseRestoredBackup}=await import('../src/maintenance-model.mjs');
+  const {restoredObservation,reviewRestoredOpen}=await import('../src/workspace-model.mjs');
+  const env={PATH:'/usr/bin:/bin',LANG:'C.UTF-8',HOME:item.sessionDir,TMPDIR:item.sessionDir};
+  async function command(argv) {
+    const port=createTreePort(item.config),budget=new Budget(10000);
+    const owned=port.launch({executable:item.config.python.path,argv:['-I',...argv],cwd:item.sessionDir,env,stdio:['pipe','pipe','pipe'],deadline:budget.end});
+    try{return await capture(owned,budget,32768);}
+    finally{assert.equal((await owned.closeTree(budget.end)).confirmed,true);}
+  }
+  await command(['-c','from loopcast.storage import Store; import sys; Store(sys.argv[1])',item.dataDir]);
+  const created=parseCreatedBackup(Buffer.from(await command(['-m','loopcast','backup','create','--data-dir',item.dataDir,'--output',packagePath])));
+  const restored=parseRestoredBackup(Buffer.from(await command(['-m','loopcast','restore','--backup',packagePath,'--expected-manifest-sha256',created.manifest_sha256,'--data-dir',restoredPath])),created.backup_id);
+  const script=`import json,os,sys
+from loopcast.workspace_inspection import inspect_restored,directory_identity
+from loopcast.ownership import directory
+result=inspect_restored(sys.argv[1],expected_digest=sys.argv[2],expected_backup_id=sys.argv[3],expected_restore_id=sys.argv[4])
+identities=[]
+for path in sys.argv[5:]:
+ _,fd=directory(path)
+ try: identities.append(directory_identity(fd))
+ finally: os.close(fd)
+print(json.dumps({'observation':result,'identities':identities}))`;
+  const value=JSON.parse(await command(['-c',script,restoredPath,created.manifest_sha256,created.backup_id,restored.restore_id,item.dataDir,item.sessionDir]));
+  const observation=restoredObservation(value.observation);
+  const source={format:'loopcast.workspace-binding.candidate.v1',id:'1'.repeat(64),role:'ORIGINAL',boot_sha256:value.identities[0].boot_sha256,
+    object_sha256:value.identities[0].object_sha256,object_family_sha256:value.identities[0].object_family_sha256,profile_sha256:value.identities[1].object_sha256,origin_port:28786,restore_id:null};
+  const plan=reviewRestoredOpen({operationId:'2'.repeat(32),source,observation,bindings:[source],currentBoot:source.boot_sha256,
+    sourceProfile:source.profile_sha256,newBindingId:'3'.repeat(64),newOriginPort:28787,resourcesRevalidated:true});
+  assert.equal(plan.start_authorized,false);assert.equal(plan.upload_allowed,false);assert.equal(plan.profile_action,'CREATE_PRIVATE_PROFILE_AFTER_COMMIT');
+  assert.equal(plan.restore_id,restored.restore_id);
+  await assert.rejects(stat(join(restoredPath,'session')));
+});

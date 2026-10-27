@@ -106,7 +106,7 @@ jobs:
       - name: Prepare verified Electron test runtime and a sandbox-capable display
         run: |
           npm --prefix desktop ci --ignore-scripts --no-audit --no-fund
-          sudo apt-get install -y libgtk-3-0t64 xvfb xauth openbox x11-utils
+          sudo apt-get install -y libgtk-3-0t64 xvfb xauth openbox x11-utils xdotool
           sudo sysctl -w kernel.unprivileged_userns_clone=1
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           python desktop/scripts/provision-test-runtime.py /tmp/loopcast-electron-test

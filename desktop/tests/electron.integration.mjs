@@ -157,8 +157,13 @@ test('real native requests, navigation, media, resources and hostile contexts us
   const item = await fixture(t), app = await item.start(), page = await app.firstPage();
   const create = page.locator('.heading .primary');
   await create.waitFor({ state: 'visible' });
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].focus());
-  await until(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isFocused()));
+  const nativeWindow = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getNativeWindowHandle().readUInt32LE(0));
+  assert.ok(Number.isSafeInteger(nativeWindow) && nativeWindow > 0);
+  await promisify(execFile)('xdotool', ['windowactivate','--sync',String(nativeWindow)], { timeout:7000 });
+  assert.equal(Number((await promisify(execFile)('xdotool',['getactivewindow'],{timeout:3000})).stdout.trim()),nativeWindow);
+  await until(() => app.evaluate(({ BrowserWindow }) => {
+    const window=BrowserWindow.getAllWindows()[0];return window.isFocused() && window.webContents.isFocused();
+  }));
   await create.focus();
   await until(() => create.evaluate(element => document.hasFocus() && document.activeElement === element));
   await create.evaluate(element => {
@@ -170,11 +175,9 @@ test('real native requests, navigation, media, resources and hostile contexts us
       document.addEventListener(type, listener, true); return [type, listener];
     });
   });
-  // Exercise Electron's native input path, independently of CDP key dispatch.
-  await app.evaluate(({ BrowserWindow }) => {
-    const contents = BrowserWindow.getAllWindows()[0].webContents;
-    for (const type of ['keyDown','char','keyUp']) contents.sendInputEvent({ type, keyCode: 'Return' });
-  });
+  // XTEST delivers one Return through the actual focused X11 window. No CDP
+  // key dispatch, DOM click, handler replacement or fallback activation.
+  await promisify(execFile)('xdotool',['key','--clearmodifiers','Return'],{timeout:3000});
   try { await page.locator('#create-dialog[open]').waitFor({ state: 'visible', timeout: 5000 }); }
   catch {
     const evidence = await create.evaluate(element => ({ events: window.nativeKeyboardAudit, focused: document.hasFocus(), activeButton: document.activeElement === element, disabled: element.disabled, dialogOpen: Boolean(document.querySelector('#create-dialog')?.open) }));

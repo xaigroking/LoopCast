@@ -1,7 +1,7 @@
 """Bounded offline observations. Never starts an owner or executes manifest tools."""
 import argparse
 import errno
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -230,7 +230,8 @@ def resource(item, budget):
         return actual
     finally: os.close(fd); os.close(parent)
 
-def database_facts(fd, budget):
+@contextmanager
+def database_snapshot(fd, budget):
     """Only copied, stable source bytes reach SQLite; source sidecars stay untouched."""
     opened = {}; before = {}
     names = ('state.sqlite3', 'state.sqlite3-wal')
@@ -274,16 +275,20 @@ def database_facts(fd, budget):
                     db.execute('BEGIN')
                     rows = db.execute('SELECT version FROM schema_version LIMIT 2').fetchall()
                     if len(rows) != 1 or rows[0][0] not in {6,7,8,CURRENT_VERSION}: raise DiagnosticError('SCHEMA_UNSUPPORTED')
-                    schema = rows[0][0]
-                    guard = db.execute('SELECT state FROM restore_guard WHERE id=1').fetchone() if schema >= 7 else None
-                    state = guard[0] if guard else 'CLEAR' if schema >= 7 else None
-                    if state not in {None, 'CLEAR', 'ACTIVE'}: raise DiagnosticError('READ_STATE_UNAVAILABLE')
-                    count = db.execute("SELECT COUNT(*) FROM release_targets WHERE state IN ('UNKNOWN','SUBMITTED')").fetchone()[0]
+                    yield db, rows[0][0]
                     budget.check()
-                    return state, count
             finally: os.close(copied)
     finally:
         for handle in opened.values(): os.close(handle)
+
+def database_facts(fd, budget):
+    with database_snapshot(fd, budget) as (db, schema):
+        guard = db.execute('SELECT state FROM restore_guard WHERE id=1').fetchone() if schema >= 7 else None
+        state = guard[0] if guard else 'CLEAR' if schema >= 7 else None
+        if state not in {None, 'CLEAR', 'ACTIVE'}: raise DiagnosticError('READ_STATE_UNAVAILABLE')
+        count = db.execute("SELECT COUNT(*) FROM release_targets WHERE state IN ('UNKNOWN','SUBMITTED')").fetchone()[0]
+        budget.check()
+        return state, count
 
 def collect(manifest_path=None, data_dir=None, *, timeout_ms=2000, max_bytes=268435456, cancelled=lambda: False, _context=None):
     os_name = sys.platform if sys.platform in {'linux','win32','darwin'} else 'other'
