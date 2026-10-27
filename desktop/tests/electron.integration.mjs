@@ -155,7 +155,14 @@ test('unpaused executable startup also uses the configured profile and exits thr
 
 test('real native requests, navigation, media, resources and hostile contexts use only the production policy', { timeout: 90000 }, async t => {
   const item = await fixture(t), app = await item.start(), page = await app.firstPage();
-  await page.locator('.heading .primary').focus(); await page.keyboard.press('Enter');
+  const create = page.locator('.heading .primary');
+  await create.waitFor({ state: 'visible' });
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].focus());
+  await until(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isFocused()));
+  await create.focus();
+  await until(() => create.evaluate(element => document.hasFocus() && document.activeElement === element));
+  await create.press('Enter');
+  await page.locator('#create-dialog[open]').waitFor({ state: 'visible' });
   await page.locator('input[name=title]').fill('Native Electron request ownership');
   await page.locator('#create-form button[type=submit]').click(); await page.waitForURL('**/runs/*');
   const id = new URL(page.url()).pathname.split('/').at(-1), origin = new URL(page.url()).origin;
