@@ -89,12 +89,37 @@ test('same-source actual backend, Next, host and production port start/stop/rest
   const ranged = await fetch(origin+`/v1/studio/assets/${asset.id}/content`, { headers: { ...auth(), Range: 'bytes=0-15' } });
   assert.equal(ranged.status, 206); assert.ok(ranged.headers.get('content-range')?.startsWith('bytes 0-15/'));
   assert.deepEqual(Buffer.from(await ranged.arrayBuffer()), media.subarray(0, 16));
+  const snapshot = async () => (await fetch(origin+`/v1/runs/${id}`, { headers: auth() })).json();
+  async function waitFor(predicate) {
+    const deadline = performance.now() + 8000;
+    while (performance.now() < deadline) {
+      const value = await snapshot(); if (predicate(value)) return value;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.fail('Real fixture did not reach its expected durable state.');
+  }
+  async function write(path, body, key) {
+    const response = await fetch(origin+path, { method: 'POST', headers: { ...auth(), Origin: origin, 'Content-Type': 'application/json', 'Idempotency-Key': key }, body: JSON.stringify(body) });
+    assert.ok(response.status === 200 || response.status === 202); return response.json();
+  }
+  let state = await waitFor(value => value.state === 'SUCCEEDED');
+  const publicationPath = `/v1/runs/${id}/publications`;
+  for (const [account, scenario, expected] of [['unknown', 'lost_response', 'UNKNOWN'], ['published', 'success', 'PUBLISHED']]) {
+    state = await write(publicationPath, { platform: 'simulator', account, expected_version: state.state_version }, `intent-${account}`);
+    const target = state.publications.find(value => value.account === account);
+    await write(`${publicationPath}/${target.id}/dispatch`, { expected_version: state.state_version, scenario }, `dispatch-${account}`);
+    state = await waitFor(value => value.publications.find(item => item.id === target.id)?.state === expected);
+  }
+  const durable = state.publications.map(({ id, state, attempts, receipts }) => ({ id, state, attempts, receipts }));
   assert.equal((await host.stop()).confirmed, true);
   await assert.rejects(stat(join(item.dataDir, 'desktop-runtime.guard.v1')));
   host = await start(); assert.equal(host.gateway.origin, origin);
   const retried = await fetch(origin+'/v1/runs', { method: 'POST', headers: { ...headers, ...auth(), Cookie: cookie }, body: JSON.stringify(input) });
   assert.equal(retried.status, 200); const again = await retried.json();
   assert.equal(again.run_id ?? again.id ?? again.run?.id, id);
+  const recovered = await snapshot();
+  assert.deepEqual(recovered.publications.map(({ id, state, attempts, receipts }) => ({ id, state, attempts, receipts })), durable);
+  assert.ok(recovered.publications.every(target => target.allowed_actions.dispatch.enabled === false));
   assert.equal((await host.stop()).confirmed, true);
 });
 

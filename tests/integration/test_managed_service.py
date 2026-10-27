@@ -54,6 +54,11 @@ class ManagedServiceTests(unittest.TestCase):
             with urllib.request.urlopen(request, timeout=3) as response:
                 self.assertTrue(json.load(response)['ready'])
                 self.assertEqual(response.headers['x-loopcast-desktop-proof'], proof(token, 'response', nonce, api, origin, source_revision()))
+            for direction, probe, bound_origin, revision in [('response', nonce, origin, source_revision()), ('request', 'c'*64, origin, source_revision()), ('request', nonce, origin+'0', source_revision()), ('request', nonce, origin, 'd'*40)]:
+                invalid = proof(token, direction, probe, api, bound_origin, revision)
+                bad = urllib.request.Request(api+'/healthz', headers={**headers, 'X-LoopCast-Desktop-Probe': nonce, 'X-LoopCast-Desktop-Proof': invalid})
+                with self.assertRaises(urllib.error.HTTPError) as error: urllib.request.urlopen(bad, timeout=3)
+                self.assertEqual(error.exception.code, 403); error.exception.close()
             child.stdin.write(b'STOP\n'); child.stdin.close()
             self.assertIn('STOPPED', child.stdout.read().decode()); self.assertEqual(child.wait(8), 0)
             self.assertTrue((Path(root)/'desktop-runtime.guard.v1').exists())
