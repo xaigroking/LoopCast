@@ -46,7 +46,8 @@ allowed = {
     "publisher": {"runner", "diagnostics"},
     "runtime": {"storage", "worker", "generation", "publisher", "media", "creation", "social", "studio_service", "ownership", "inspection_service"},
     "api": {"runtime", "storage", "diagnostics", "studio_api", "feedback_api", "operations_api", "schedule_api", "schedule_models", "inspection_api"}, "openapi": {"api"},
-    "__main__": {"managed", "desktop_session", "platform_info", "api", "diagnostics", "generator_diagnostics", "mpt_install", "feedback_demo", "backup", "restore", "operations_snapshot", "schedule_config", "inspection_models"}, "__init__": set(),
+    "desktop_diagnostics": {"backup", "migrations", "ownership", "platform_info", "runtime_guard"},
+    "__main__": {"desktop_diagnostics", "managed", "desktop_session", "platform_info", "api", "diagnostics", "generator_diagnostics", "mpt_install", "feedback_demo", "backup", "restore", "operations_snapshot", "schedule_config", "inspection_models"}, "__init__": set(),
 }
 graph = {name: set() for name in modules}
 for name, path in modules.items():

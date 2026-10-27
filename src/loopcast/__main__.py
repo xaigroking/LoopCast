@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import socket
 import sqlite3
+import sys
 
 
 async def _serve(args, settings):
@@ -77,9 +78,13 @@ async def _serve(args, settings):
 
 
 def main():
+    if sys.argv[1:2] == ['desktop-diagnostics']:
+        from .desktop_diagnostics import cli
+        raise SystemExit(cli(sys.argv[2:]))
     parser = argparse.ArgumentParser(prog='loopcast', description='LoopCast creation workspace and controlled publishing. Live sending defaults off.')
     parser.add_argument('--version', action='version', version=f"%(prog)s {version('loopcast')}")
     commands = parser.add_subparsers(dest='command')
+    commands.add_parser('desktop-diagnostics', help='Collect bounded offline desktop evidence without starting an owner')
     commands.add_parser('platform-info', help='Read installed source and platform capabilities without opening application data')
     serve = commands.add_parser('serve', help='Start the local single-user fixture console')
     serve.add_argument('--host', choices=['127.0.0.1', 'localhost'], default='127.0.0.1')

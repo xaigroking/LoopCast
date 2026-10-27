@@ -92,18 +92,22 @@ def sync_directory(path):
         os.close(handle)
 
 
+def publish_entry(handle, staging_name, target_name):
+    """Atomically publish a new entry under an already anchored directory."""
+    if any(Path(name).name != name or name in {'.', '..'} for name in (staging_name, target_name)):
+        raise ValueError('UNSAFE_DESTINATION')
+    rename = ctypes.CDLL(None, use_errno=True).renameat2
+    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    rename.restype = ctypes.c_int
+    if rename(handle, os.fsencode(staging_name), handle, os.fsencode(target_name), 1):
+        raise OSError(ctypes.get_errno(), 'Unable to publish private entry')
+    os.fsync(handle)
+
+
 def publish_directory(staging, target):
     _, handle = directory(target.parent)
-    try:
-        rename = ctypes.CDLL(None, use_errno=True).renameat2
-        rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
-        rename.restype = ctypes.c_int
-        if rename(handle, os.fsencode(staging.name), handle, os.fsencode(target.name), 1):
-            code = ctypes.get_errno()
-            raise OSError(code, 'Unable to publish private directory')
-        os.fsync(handle)
-    finally:
-        os.close(handle)
+    try: publish_entry(handle, staging.name, target.name)
+    finally: os.close(handle)
 
 
 def copy_reference(source_fd, relative, destination, expected):
