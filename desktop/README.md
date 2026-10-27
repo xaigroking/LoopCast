@@ -339,3 +339,8 @@ cannot authorize a launch or prove process-tree cleanup.
 恢复工作区当前仅提供未接生产的只读观察与身份/计划候选模型，没有原生打开或交接入口。
 观察不创建业务库、锁或profile，也不授权启动或上传。候选实体身份仅覆盖同一次内核启动与
 mount；跨系统重启/重新挂载的连续性尚未实现，不会用可重用inode或静默新profile掩盖未知。
+
+The Linux native keyboard regression requires `xdotool` in the test environment.
+It activates the actual X11 window and sends one XTEST Return, then checks trusted
+keyboard events, exactly one default button click and the real opened dialog.
+This is a test dependency; the desktop application does not execute it.
