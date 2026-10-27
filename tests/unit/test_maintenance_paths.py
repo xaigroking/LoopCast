@@ -46,3 +46,19 @@ class MaintenancePathTests(unittest.TestCase):
         self.assertTrue(bool(canary) and canary[0].exists(),'Cleanup removed a replacement directory')
         self.assertEqual(canary[0].read_bytes(),b'keep external object')
         self.assertFalse((self.parent/'restored').exists())
+
+    def test_replacement_during_cleanup_never_redirects_the_held_tree(self):
+        import loopcast.backup as backup
+        original=backup.clear_staging_fd;canary=[];changed=False
+        def replace(handle):
+            nonlocal changed
+            if not changed:
+                changed=True
+                stage=next(self.parent.glob('.loopcast-backup-*'))
+                stage.rename(self.root/'held-stage');stage.mkdir(mode=0o700)
+                path=stage/'external-canary';path.write_bytes(b'keep external object');canary.append(path)
+            return original(handle)
+        with patch('loopcast.backup.code_identity',side_effect=OSError('controlled failure')),patch('loopcast.backup.clear_staging_fd',side_effect=replace):
+            with self.assertRaises(OSError):create_backup(self.store.directory,self.parent/'backup')
+        self.assertTrue(bool(canary) and canary[0].exists())
+        self.assertEqual(canary[0].read_bytes(),b'keep external object')

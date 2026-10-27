@@ -150,29 +150,52 @@ def new_target(path, source=None):
 def staging_identity(path):
     """Remember only the parent and directory objects created by this call."""
     _, parent = directory(path.parent)
+    handle = None
     try:
-        entry = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
-        parent_info = os.fstat(parent)
-        if not stat.S_ISDIR(entry.st_mode): raise ValueError('STAGING_CHANGED')
-        return (parent_info.st_dev, parent_info.st_ino), (entry.st_dev, entry.st_ino)
-    finally: os.close(parent)
+        handle = os.open(path.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        entry = os.fstat(handle)
+        named = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        if (entry.st_dev, entry.st_ino) != (named.st_dev, named.st_ino): raise ValueError('STAGING_CHANGED')
+        return parent, handle, (entry.st_dev, entry.st_ino)
+    except BaseException:
+        if handle is not None: os.close(handle)
+        os.close(parent)
+        raise
+
+
+def clear_staging_fd(handle):
+    """Only traverse the held temporary, never a re-resolved root pathname."""
+    for name in os.listdir(handle):
+        entry = os.stat(name, dir_fd=handle, follow_symlinks=False)
+        if stat.S_ISDIR(entry.st_mode):
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=handle)
+            try:
+                current = os.fstat(child)
+                if (current.st_dev, current.st_ino) != (entry.st_dev, entry.st_ino): raise ValueError('STAGING_CHANGED')
+                clear_staging_fd(child)
+                named = os.stat(name, dir_fd=handle, follow_symlinks=False)
+                if (named.st_dev, named.st_ino) != (current.st_dev, current.st_ino): raise ValueError('STAGING_CHANGED')
+                os.rmdir(name, dir_fd=handle)
+            finally: os.close(child)
+        else:
+            os.unlink(name, dir_fd=handle)  # A child symlink is unlinked, never followed.
 
 
 def discard_staging(path, expected):
     """An unknown/replaced name is retained, never treated as our temporary."""
-    parent = None
+    parent, handle, identity = expected
     try:
-        _, parent = directory(path.parent)
-        info = os.fstat(parent)
-        if (info.st_dev, info.st_ino) != expected[0]: return False
         try: entry = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
         except FileNotFoundError: return True
-        if not stat.S_ISDIR(entry.st_mode) or (entry.st_dev, entry.st_ino) != expected[1]: return False
-        shutil.rmtree(path.name, dir_fd=parent)
+        if not stat.S_ISDIR(entry.st_mode) or (entry.st_dev, entry.st_ino) != identity: return False
+        clear_staging_fd(handle)
+        entry = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        if (entry.st_dev, entry.st_ino) != identity: return False
+        os.rmdir(path.name, dir_fd=parent)
         return True
-    except OSError: return False
+    except (OSError, ValueError): return False
     finally:
-        if parent is not None: os.close(parent)
+        os.close(handle); os.close(parent)
 
 
 def create_backup(source, output):
