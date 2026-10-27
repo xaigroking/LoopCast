@@ -23,7 +23,7 @@ class DesktopDiagnosticsCLITests(unittest.TestCase):
         self.tool=self.root/'install/tool'
         self.tool.write_text('#!/bin/sh\ntouch "'+str(self.root/'EXECUTED')+'"\necho secret-executable-output\n');self.tool.chmod(0o700)
         resource={'path':str(self.tool),'sha256':hashlib.sha256(self.tool.read_bytes()).hexdigest()}
-        self.config={'format':'loopcast.desktop.v1','mode':'development','hostRevision':'a'*40,'apiRevision':'a'*40,'webRevision':'a'*40,'nodeVersion':'24.22.1',
+        self.config={'format':'loopcast.desktop.v1','mode':'development','locale':'en','gatewayPort':28788,'startTimeoutMs':30000,'stopTimeoutMs':6000,'hostRevision':'a'*40,'apiRevision':'a'*40,'webRevision':'a'*40,'nodeVersion':'24.22.1',
             'python':resource,'node':resource,'treeModule':resource,'dataDir':str(self.root/'data'),'sessionDir':str(self.root/'session'),'nextRoot':str(self.root/'install'),'configs':{},'credentials':'secret-manifest-canary'}
         self.manifest=self.root/'config/desktop.json';self.manifest.write_text(json.dumps(self.config));self.manifest.chmod(0o600)
     def command(self,*args):
@@ -84,7 +84,8 @@ class DesktopDiagnosticsCLITests(unittest.TestCase):
         with DirectoryLock(self.root/'data'):inspect('OWNER_HELD')
         marker=self.root/'data'/NAME;marker.write_text(json.dumps({'format':'loopcast.desktop-guard.v1','identity':'1'*32}));marker.chmod(0o600)
         inspect('DESKTOP_CLEANUP_UNCONFIRMED');marker.write_text('private-guard-canary');inspect('GUARD_UNSAFE');marker.unlink()
-        (self.root/'session').chmod(0o755);inspect('DIRECTORY_UNSAFE')
+        (self.root/'session').chmod(0o755);inspect('DIRECTORY_UNSAFE');(self.root/'session').chmod(0o700)
+        lock=self.root/'data/service.lock';linked=self.root/'reports/lock-link';os.link(lock,linked);inspect('FILE_UNSAFE');linked.unlink()
 
     def test_real_signal_cancellation_stops_collection_with_a_redacted_partial_report(self):
         large=self.root/'install/large-resource'
@@ -107,6 +108,7 @@ class DesktopDiagnosticsCLITests(unittest.TestCase):
             process.terminate();stdout,stderr=process.communicate(timeout=5)
             self.assertEqual(process.returncode,1);self.assertEqual(stderr,'')
             report=json.loads(stdout);self.assertIn('CANCELLED',{x['code'] for x in report['checks']})
+            checks={x['id']:x for x in report['checks']};self.assertEqual(checks['resource_node']['code'],'CANCELLED');self.assertEqual(checks['owner_lock']['code'],'CANCELLED')
             self.assertNotIn(str(self.root),stdout);self.assertEqual(list((self.root/'data').iterdir()),[])
         finally:
             if process.poll() is None:process.kill();process.wait()

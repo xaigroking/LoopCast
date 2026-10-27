@@ -22,7 +22,7 @@ class DesktopDiagnosticsTests(unittest.TestCase):
         (self.root/'install/.next/BUILD_ID').write_text('a'*40)
         self.tool=self.root/'install/tool';self.tool.write_bytes(b'not executed: secret-tool-canary');self.tool.chmod(0o600)
         digest=hashlib.sha256(self.tool.read_bytes()).hexdigest()
-        self.config={'format':'loopcast.desktop.v1','mode':'development','hostRevision':'a'*40,'apiRevision':'a'*40,'webRevision':'a'*40,
+        self.config={'format':'loopcast.desktop.v1','mode':'development','locale':'en','gatewayPort':28788,'startTimeoutMs':30000,'stopTimeoutMs':6000,'hostRevision':'a'*40,'apiRevision':'a'*40,'webRevision':'a'*40,
             'nodeVersion':'24.22.1','python':{'path':str(self.tool),'sha256':digest},'node':{'path':str(self.tool),'sha256':digest},'treeModule':{'path':str(self.tool),'sha256':digest},
             'dataDir':str(self.root/'data'),'sessionDir':str(self.root/'session'),'nextRoot':str(self.root/'install'),'configs':{},
             'credential':'manifest-secret-canary'}
@@ -47,6 +47,8 @@ class DesktopDiagnosticsTests(unittest.TestCase):
         self.assertFalse(missing.exists());self.assertEqual(self.checks(report)['data_directory']['code'],'DIRECTORY_MISSING');self.assert_safe(report)
         self.manifest.write_text('{"format":"broken","token":"manifest-secret-canary"}')
         report=self.report();self.assertEqual(self.checks(report)['manifest']['code'],'MANIFEST_INVALID');self.assert_safe(report)
+        self.config.pop('gatewayPort');self.save()
+        self.assertEqual(self.checks()['manifest']['code'],'MANIFEST_INVALID')
         self.manifest.write_text('{"format":1,"format":2}')
         self.assertEqual(self.checks()['manifest']['code'],'MANIFEST_INVALID')
 

@@ -1,5 +1,6 @@
 """Bounded offline observations. Never starts an owner or executes manifest tools."""
 import argparse
+import errno
 from contextlib import closing
 from datetime import datetime, timezone
 import hashlib
@@ -79,8 +80,15 @@ def absolute(path):
 
 def anchored_file(path):
     path = absolute(path); _, parent = directory(path.parent)
-    try: return parent, regular(parent, path.name)
+    try: return parent, safe_regular(parent, path.name)
     except BaseException: os.close(parent); raise
+
+def safe_regular(parent, name):
+    try: return regular(parent, name)
+    except ValueError: raise DiagnosticError('FILE_UNSAFE') from None
+    except OSError as error:
+        if error.errno in {errno.ELOOP,errno.ENOTDIR}: raise DiagnosticError('FILE_UNSAFE') from None
+        raise
 
 def stable(parent, name, fd, before):
     if version(os.fstat(fd)) != version(before) or identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) != identity(before):
@@ -113,6 +121,7 @@ def reason(error, missing='READ_STATE_UNAVAILABLE'):
     if isinstance(error, DiagnosticError): return error.code
     if isinstance(error, FileNotFoundError): return missing
     if isinstance(error, PermissionError): return 'PERMISSION_DENIED'
+    if isinstance(error, OSError) and error.errno in {errno.ELOOP,errno.ENOTDIR}: return 'PATH_UNSAFE'
     if isinstance(error, KeyboardInterrupt): return 'CANCELLED'
     if isinstance(error, (OSError, ValueError, TypeError, KeyError, sqlite3.Error)): return 'READ_STATE_UNAVAILABLE'
     return 'DIAGNOSTICS_UNAVAILABLE'
@@ -130,6 +139,13 @@ def manifest(path, budget):
     except (ValueError, TypeError): raise DiagnosticError('MANIFEST_INVALID') from None
     if not isinstance(value, dict) or value.get('format') != 'loopcast.desktop.v1' or value.get('mode') not in {'development','release'}:
         raise DiagnosticError('MANIFEST_INVALID')
+    if value.get('locale') not in {'en','zh-Hans'} or type(value.get('gatewayPort')) is not int or not 1<=value['gatewayPort']<=65535:
+        raise DiagnosticError('MANIFEST_INVALID')
+    for key,maximum in [('startTimeoutMs',120000),('stopTimeoutMs',60000)]:
+        if type(value.get(key)) is not int or not 100<=value[key]<=maximum:raise DiagnosticError('MANIFEST_INVALID')
+    if not isinstance(value.get('configs'),dict):raise DiagnosticError('MANIFEST_INVALID')
+    for key in ('generator','media','social','schedule','inspection'):
+        if key in value['configs']:absolute(value['configs'][key])
     for key in ('hostRevision','apiRevision','webRevision'):
         if not isinstance(value.get(key), str) or not HEX40.fullmatch(value[key]): raise DiagnosticError('MANIFEST_INVALID')
     for key in ('dataDir','sessionDir','nextRoot'): absolute(value.get(key))
@@ -145,7 +161,7 @@ def manifest(path, budget):
     return value
 
 def owner_probe(fd):
-    try: lock = regular(fd, 'service.lock')
+    try: lock = safe_regular(fd, 'service.lock')
     except FileNotFoundError: return 'LOCK_MISSING', 'MISSING'
     try:
         before = os.fstat(lock); private(before, 'file')
@@ -189,6 +205,7 @@ def preflight(paths):
         return 'OK'
     except BaseException as error:
         code = reason(error, 'DIRECTORY_MISSING')
+        if code == 'PATH_UNSAFE': code = 'DIRECTORY_UNSAFE'
         return code if code in {'DIRECTORY_MISSING','DIRECTORY_UNSAFE','FILE_UNSAFE','PERMISSION_DENIED','GUARD_UNSAFE'} else 'DIAGNOSTICS_UNAVAILABLE'
 
 def resource(item, budget):
@@ -222,7 +239,7 @@ def database_facts(fd, budget):
         except FileNotFoundError: pass
         else: raise DiagnosticError('READ_STATE_UNAVAILABLE')
         for name in names:
-            try: handle = regular(fd, name)
+            try: handle = safe_regular(fd, name)
             except FileNotFoundError:
                 if name == 'state.sqlite3': raise DiagnosticError('DATABASE_MISSING') from None
                 before[name] = None; continue
