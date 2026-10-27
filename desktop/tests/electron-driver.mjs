@@ -1,0 +1,123 @@
+// SPDX-License-Identifier: Apache-2.0
+// Actual executable + native Node inspector and browser CDP. No Electron loader
+// replaces app.ready, app.isReady, secureWindow or capability headers.
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { chromium } from 'playwright-core';
+import { Budget } from '../src/errors.mjs';
+
+export async function launchElectron({ executable, directory, manifest, env, observe = true }) {
+  const args = [observe ? '--inspect-brk=0' : '--inspect=0', '--remote-debugging-port=0', directory, '--desktop-config', manifest];
+  const child = spawn(executable, args, { env, stdio: ['ignore', 'ignore', 'pipe'] });
+  let status, inspectorURL, browserURL, pending = '', diagnostic = '';
+  const exited = new Promise(resolve => {
+    child.once('exit', (code, signal) => { status = { code, signal }; resolve(status); });
+    child.once('error', () => { status = { code: null, signal: null }; resolve(status); });
+  });
+  child.stderr.on('data', chunk => {
+    pending += chunk;
+    while (pending.includes('\n')) {
+      const index = pending.indexOf('\n'), line = pending.slice(0, index); pending = pending.slice(index + 1);
+      const node = /^Debugger listening on (ws:\/\/127\.0\.0\.1:[0-9]+\/[^ ]+)/.exec(line);
+      const browser = /^DevTools listening on (ws:\/\/127\.0\.0\.1:[0-9]+\/[^ ]+)/.exec(line);
+      if (node) inspectorURL = node[1];
+      else if (browser) browserURL = browser[1];
+      // Keep diagnostic categories only. Debugger URLs, headers, full environment
+      // and application output never become logs or test attachments.
+      else if (/sandbox|namespace|shared libraries/i.test(line)) diagnostic = 'RUNTIME_SANDBOX_OR_LIBRARY_FAILURE';
+    }
+    if (pending.length > 4096) pending = '';
+  });
+  const budget = new Budget(45000);
+  async function until(fn) {
+    while (!fn()) {
+      if (status) throw new Error(diagnostic || 'ELECTRON_EXITED_BEFORE_READY');
+      await budget.run(new Promise(resolve => setTimeout(resolve, 20)));
+    }
+    return fn();
+  }
+  let socket, browser;
+  try {
+    await until(() => inspectorURL);
+    socket = new WebSocket(inspectorURL); await budget.run(once(socket, 'open'));
+    let serial = 0; const requests = new Map();
+    socket.addEventListener('message', event => {
+      const result = JSON.parse(event.data);
+      if (result.id) { const task = requests.get(result.id); requests.delete(result.id); task?.resolve(result); }
+      if (result.method === 'Debugger.paused') socket.send(JSON.stringify({ id: ++serial, method: 'Debugger.resume' }));
+    });
+    async function send(method, params = {}) {
+      const id = ++serial;
+      const result = await new Budget(10000).run(new Promise(resolve => { requests.set(id, { resolve }); socket.send(JSON.stringify({ id, method, params })); }));
+      if (result.error) throw new Error('NODE_INSPECTOR_COMMAND_FAILED');
+      return result.result;
+    }
+    async function evaluate(fn, argument) {
+      const expression = `(async()=>{const electron=process.getBuiltinModule('module').createRequire(process.execPath)('electron');return (${fn.toString()})(electron,${JSON.stringify(argument) ?? 'undefined'});})()`;
+      const result = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, includeCommandLineAPI: true });
+      if (result.exceptionDetails) throw new Error('NATIVE_ELECTRON_EVALUATION_FAILED');
+      return result.result.value;
+    }
+    if (observe) {
+      await send('Runtime.enable');
+      await send('Debugger.enable');
+      await send('Debugger.setSkipAllPauses', { skip: true });
+      await evaluate(({ app, session, dialog }) => {
+        globalThis.windowAudit = { ready: null, decisions: [], dialogs: [], failures: [] };
+        app.once('ready', () => { globalThis.windowAudit.ready = { userData: app.getPath('userData'), sessionData: app.getPath('sessionData') }; });
+        const partition = session.fromPartition.bind(session);
+        session.fromPartition = (...args) => {
+          const current = partition(...args);
+          if (!current.windowAuditInstalled) {
+            current.windowAuditInstalled = true;
+            const original = current.webRequest.onBeforeSendHeaders.bind(current.webRequest);
+            current.webRequest.onBeforeSendHeaders = (filter, policy) => original(filter, (details, callback) => policy(details, result => {
+              const audit = globalThis.windowAudit;
+              if (audit.decisions.length < 1000) audit.decisions.push({ type: details.resourceType,
+                path: new URL(details.url).pathname, frame: Boolean(details.frame), top: details.frame?.parent === null,
+                initiator: details.initiatorOrigin ?? null, cancel: Boolean(result.cancel),
+                capability: Object.keys(result.requestHeaders ?? {}).some(key => key.toLowerCase() === 'x-loopcast-desktop-session') });
+              callback(result); // Exactly the production policy's decision.
+            }));
+          }
+          return current;
+        };
+        const nativeDialog = dialog.showMessageBox.bind(dialog);
+        dialog.showMessageBox = options => {
+          globalThis.windowAudit.dialogs.push({ type: options.type, message: options.message, buttons: options.buttons });
+          return nativeDialog(options); // Show the actual bounded native dialog.
+        };
+        app.on('web-contents-created', (_event, contents) => contents.on('did-fail-load', (_event, code, _description, _url, isMainFrame) => {
+          globalThis.windowAudit.failures.push({ code, isMainFrame });
+        }));
+      });
+      await send('Runtime.runIfWaitingForDebugger');
+    }
+    await until(() => browserURL);
+    browser = await chromium.connectOverCDP(browserURL, { timeout: 15000 });
+    const context = browser.contexts()[0];
+    async function firstPage() {
+      try {
+        const page = await until(() => context.pages().find(page => page.url().startsWith('http://127.0.0.1:')));
+        await page.waitForLoadState('domcontentloaded', { timeout: 15000 }); return page;
+      } catch {
+        const diagnostic = observe ? await evaluate(() => ({ failures: globalThis.windowAudit.failures,
+          denied: globalThis.windowAudit.decisions.filter(value => value.cancel).map(({ type, frame, top, initiator }) => ({ type, frame, top, hasInitiator: initiator !== null })) })).catch(() => ({})) : {};
+        throw new Error('REAL_WINDOW_LOAD_FAILED ' + JSON.stringify(diagnostic));
+      }
+    }
+    return { child, browser, context, evaluate, firstPage, exited, get status() { return status; },
+      async quit() {
+        if (!status) await evaluate(({ app }) => { app.quit(); });
+        // Inspector clients must detach to allow Node's clean process exit.
+        socket.close(); await browser.close();
+        return new Budget(20000).run(exited);
+      },
+      async detach() { socket.close(); await browser.close(); },
+    };
+  } catch (error) {
+    socket?.close(); await browser?.close().catch(() => {});
+    if (!status) child.kill('SIGKILL'); await exited;
+    throw error;
+  }
+}

@@ -74,7 +74,7 @@ jobs:
       LOOPCAST_MEDIA_TOOLS: /tmp/loopcast-media-tools
     name: browser
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -106,6 +106,17 @@ jobs:
       - run: scripts/check-web.sh
       - name: Verify real managed backend and standalone desktop composition
         run: bash scripts/check-desktop.sh
+      - name: Prepare verified Electron test runtime and a sandbox-capable display
+        run: |
+          npm --prefix desktop ci --ignore-scripts --no-audit --no-fund
+          sudo apt-get install -y libgtk-3-0t64 xvfb xauth openbox
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          python desktop/scripts/provision-test-runtime.py /tmp/loopcast-electron-test
+      - name: Verify the actual Electron entry with default renderer isolation
+        env:
+          LOOPCAST_ELECTRON_BINARY: /tmp/loopcast-electron-test/electron
+        run: xvfb-run -a bash scripts/check-electron.sh
       - name: Upload verified application candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
