@@ -6,7 +6,7 @@ import { once } from 'node:events';
 import { chromium } from 'playwright-core';
 import { Budget } from '../src/errors.mjs';
 
-export async function launchElectron({ executable, directory, manifest, env, observe = true }) {
+export async function launchElectron({ executable, directory, manifest, env, observe = true, trace }) {
   const args = [observe ? '--inspect-brk=0' : '--inspect=0', '--remote-debugging-port=0', directory, '--desktop-config', manifest];
   const child = spawn(executable, args, { env, stdio: ['ignore', 'ignore', 'pipe'] });
   let status, inspectorURL, browserURL, pending = '', diagnostic = '', debuggerWaiting = false;
@@ -74,10 +74,19 @@ export async function launchElectron({ executable, directory, manifest, env, obs
       entryBreakpoint = (await send('Debugger.setBreakpointByUrl', { lineNumber: 0, urlRegex: '/src/main\\.mjs$' })).breakpointId;
       await send('Runtime.runIfWaitingForDebugger');
       await budget.run(entry);
-      await evaluate(electron => {
+      await evaluate((electron, trace) => {
         const { app } = electron;
         globalThis.windowAudit = { ready: null, decisions: [], dialogs: [], failures: [] };
+        const lifecycle = [];
+        const record = name => {
+          if (lifecycle.length < 100) lifecycle.push(name);
+          if (trace) process.getBuiltinModule('fs').writeFileSync(trace, JSON.stringify(lifecycle), { mode: 0o600 });
+        };
+        for (const name of ['before-quit', 'will-quit', 'quit', 'window-all-closed']) app.on(name, () => record(name));
+        process.on('uncaughtExceptionMonitor', () => record('uncaught-exception'));
+        process.on('exit', () => record('node-exit'));
         app.once('ready', () => {
+        record('ready');
         globalThis.windowAudit.ready = { userData: app.getPath('userData'), sessionData: app.getPath('sessionData') };
         const { session, dialog } = electron;
         const partition = session.fromPartition.bind(session);
@@ -85,6 +94,11 @@ export async function launchElectron({ executable, directory, manifest, env, obs
           const current = partition(...args);
           if (!current.windowAuditInstalled) {
             current.windowAuditInstalled = true;
+            const flush = current.cookies.flushStore.bind(current.cookies);
+            current.cookies.flushStore = () => {
+              record('cookie-flush-start');
+              return flush().then(value => { record('cookie-flush-done'); return value; }, error => { record('cookie-flush-error'); throw error; });
+            };
             const original = current.webRequest.onBeforeSendHeaders.bind(current.webRequest);
             current.webRequest.onBeforeSendHeaders = (filter, policy) => original(filter, (details, callback) => policy(details, result => {
               try {
@@ -101,14 +115,18 @@ export async function launchElectron({ executable, directory, manifest, env, obs
         };
         const nativeDialog = dialog.showMessageBox.bind(dialog);
         dialog.showMessageBox = options => {
+          record('native-error-dialog');
           globalThis.windowAudit.dialogs.push({ type: options.type, message: options.message, buttons: options.buttons });
           return nativeDialog(options); // Show the actual bounded native dialog.
         };
         });
-        app.on('web-contents-created', (_event, contents) => contents.on('did-fail-load', (_event, code, _description, _url, isMainFrame) => {
-          globalThis.windowAudit.failures.push({ code, isMainFrame });
-        }));
-      }, undefined, false);
+        app.on('web-contents-created', (_event, contents) => {
+          contents.on('render-process-gone', (_event, details) => record('renderer-gone-'+details.reason));
+          contents.on('did-fail-load', (_event, code, _description, _url, isMainFrame) => {
+            globalThis.windowAudit.failures.push({ code, isMainFrame });
+          });
+        });
+      }, trace, false);
       await send('Debugger.removeBreakpoint', { breakpointId: entryBreakpoint });
       entryBreakpoint = undefined;
       await send('Debugger.resume');

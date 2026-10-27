@@ -33,7 +33,9 @@ async function fixture(t, { locale = 'en' } = {}) {
   for (const key of ['XAUTHORITY', 'LD_LIBRARY_PATH', 'DBUS_SESSION_BUS_ADDRESS']) if (process.env[key]) env[key] = process.env[key];
   const applications = [];
   async function start(options = {}) {
-    const app = await launchElectron({ executable, directory, manifest: filename, env, ...options });
+    const trace = join(root, `native-lifecycle-${applications.length}.json`);
+    const app = await launchElectron({ executable, directory, manifest: filename, env, trace, ...options });
+    app.lifecycleTrace = trace;
     applications.push(app); return app;
   }
   t.after(async () => {
@@ -303,7 +305,10 @@ test('native renderer crash and host death preserve the STOP/guard boundary with
   const normal = await managed(app);
   await stage('RENDERER_TRIGGER', () => app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer(); }));
   await stage('RENDERER_DETACH', () => app.detach());
-  assert.equal((await stage('RENDERER_EXIT', () => new Budget(20000).run(app.exited))).code, 0);
+  let crashedExit;
+  try { crashedExit = await new Budget(20000).run(app.exited); }
+  catch { throw new Error('NATIVE_LIFECYCLE_RENDERER_EXIT_FAILED '+await readFile(app.lifecycleTrace, 'utf8')); }
+  assert.equal(crashedExit.code, 0);
   await stage('RENDERER_TREES', () => treesGone(normal));
   await assert.rejects(stat(join(item.data, 'desktop-runtime.guard.v1')));
   app = await stage('HOST_BOOT', () => item.start()); page = await app.firstPage(); await page.locator('.heading .primary').waitFor();
