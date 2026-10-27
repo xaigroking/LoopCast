@@ -2,9 +2,10 @@
 import { spawn } from 'node:child_process';
 import { isAbsolute } from 'node:path';
 import { Budget, HostError } from './errors.mjs';
+import { parsePreflight } from './preflight.mjs';
 
 export function createTreePort(config) {
-  if (process.platform !== 'linux' || process.arch !== 'x64') throw new HostError('PLATFORM_UNAVAILABLE');
+  if (process.platform !== 'linux' || process.arch !== 'x64') throw new HostError('PLATFORM_UNSUPPORTED');
   const records = [];
   let paths;
   const env = { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', HOME: config.sessionDir, TMPDIR: config.sessionDir };
@@ -14,7 +15,7 @@ export function createTreePort(config) {
       if (records.some(record => record.status === undefined)) throw new HostError('PLATFORM_UNAVAILABLE');
       records.length = 0;
       paths = value;
-      await command(['-I', '-m', 'loopcast.desktop_guard', 'validate', value.dataDir, value.sessionDir], value.deadline);
+      await command(['-I', '-m', 'loopcast.desktop_guard', 'validate-result', value.dataDir, value.sessionDir], value.deadline, true);
       return { api: { ...env }, web: { ...env } };
     },
     launch(spec) {
@@ -73,17 +74,33 @@ export function createTreePort(config) {
       return { confirmed: true };
     },
   };
-  async function command(argv, deadline) {
+  async function command(argv, deadline, structured = false) {
     const owned = port.launch({ executable: config.python.path, argv, cwd: config.sessionDir, env,
       stdio: ['pipe', 'pipe', 'pipe'], deadline });
-    owned.child.stdin.end(); owned.child.stdout.resume(); owned.child.stderr.resume();
+    owned.child.stdin.end(); owned.child.stderr.resume();
+    let chunks = [], size = 0, malformed = false;
+    const output = new Promise((resolve, reject) => {
+      owned.child.stdout.on('data', chunk => {
+        size += chunk.length;
+        if (size > 512) { malformed = true; chunks = []; }
+        else if (structured) chunks.push(chunk);
+      });
+      owned.child.stdout.once('end', resolve);
+      owned.child.stdout.once('error', () => reject(new HostError('DIAGNOSTICS_UNAVAILABLE')));
+    });
+    output.catch(() => {});
     let status, result;
     try {
-      status = await new Budget(Math.max(1, deadline - performance.now())).run(new Promise(resolve => {
+      [status] = await new Budget(Math.max(1, deadline - performance.now())).run(Promise.all([new Promise(resolve => {
         owned.child.once('exit', resolve); owned.child.once('error', () => resolve(null));
-      }));
+      }), output]));
     } finally { result = await owned.closeTree(deadline); }
-    if (status !== 0 || !result.confirmed) throw new HostError('PLATFORM_UNAVAILABLE');
+    if (!result.confirmed) throw new HostError('STOP_UNCONFIRMED');
+    if (structured) {
+      if (malformed) throw new HostError('DIAGNOSTICS_UNAVAILABLE');
+      const code = parsePreflight(Buffer.concat(chunks), status);
+      if (code !== 'OK') throw new HostError(code);
+    } else if (status !== 0) throw new HostError('PLATFORM_UNAVAILABLE');
   }
   return port;
 }

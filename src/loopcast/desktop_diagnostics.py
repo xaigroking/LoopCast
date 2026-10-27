@@ -30,7 +30,7 @@ IDS = ('manifest', 'resource_python', 'resource_node', 'resource_tree', 'resourc
        'platform_capabilities', 'sandbox_runtime', 'upstream_runtime')
 CODES = frozenset(('OK MANIFEST_MISSING MANIFEST_INVALID MANIFEST_CHANGED PATH_UNSAFE RESOURCE_MISSING '
     'RESOURCE_DIGEST_MISMATCH RESOURCE_CHANGED VERSION_MISMATCH PLATFORM_UNSUPPORTED CAPABILITY_UNAVAILABLE '
-    'DIRECTORY_MISSING DIRECTORY_UNSAFE FILE_UNSAFE PERMISSION_DENIED OWNER_HELD OWNER_NOT_HELD LOCK_MISSING '
+    'DIRECTORY_MISSING DIRECTORY_UNSAFE FILE_UNSAFE PERMISSION_DENIED ENTRY_PORT_BUSY OWNER_HELD OWNER_NOT_HELD LOCK_MISSING '
     'DESKTOP_CLEANUP_UNCONFIRMED GUARD_ABSENT GUARD_UNSAFE READ_STATE_UNAVAILABLE DATABASE_MISSING '
     'SCHEMA_UNSUPPORTED STATE_CHANGED BUDGET_EXCEEDED CANCELLED DIAGNOSTICS_UNAVAILABLE START_FAILED '
     'START_TIMEOUT STOP_UNCONFIRMED RUNTIME_UNVERIFIED EXPORT_REFUSED').split())
@@ -84,6 +84,12 @@ def stable(parent, name, fd, before):
     if version(os.fstat(fd)) != version(before) or identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) != identity(before):
         raise DiagnosticError('STATE_CHANGED')
 
+def same_directory(path, fd):
+    _, current = directory(path)
+    try:
+        if identity(os.fstat(current)) != identity(os.fstat(fd)): raise DiagnosticError('STATE_CHANGED')
+    finally: os.close(current)
+
 def small_file(path, budget, maximum=65536, require_private=True):
     parent, fd = anchored_file(path)
     try:
@@ -97,6 +103,7 @@ def small_file(path, budget, maximum=65536, require_private=True):
             result.extend(chunk)
         if len(result) != before.st_size: raise DiagnosticError('STATE_CHANGED')
         stable(parent, Path(path).name, fd, before)
+        same_directory(Path(path).parent, parent)
         return bytes(result)
     finally: os.close(fd); os.close(parent)
 
@@ -175,6 +182,7 @@ def preflight(paths):
                 if index == 0:
                     code, _ = owner_probe(fd)
                     if code == 'OWNER_HELD': return code
+                same_directory(absolute(path), fd)
             finally: os.close(fd)
         return 'OK'
     except BaseException as error:
@@ -183,10 +191,12 @@ def preflight(paths):
 
 def resource(item, budget):
     # Match the existing venv resource policy, but never execute it.
-    path = absolute(item['path']).resolve(strict=True)
+    declared = absolute(item['path']); declared_info = declared.lstat()
+    path = declared.resolve(strict=True)
     parent, fd = anchored_file(path)
     try:
         before = os.fstat(fd); digest = hashlib.sha256()
+        if before.st_mode & 0o022: raise DiagnosticError('FILE_UNSAFE')
         if before.st_size > budget.left: raise DiagnosticError('BUDGET_EXCEEDED')
         consumed = 0
         while consumed < before.st_size:
@@ -194,6 +204,8 @@ def resource(item, budget):
             if not chunk: raise DiagnosticError('RESOURCE_CHANGED')
             digest.update(chunk); consumed += len(chunk)
         stable(parent, path.name, fd, before)
+        same_directory(path.parent, parent)
+        if version(declared.lstat()) != version(declared_info) or declared.resolve(strict=True) != path: raise DiagnosticError('RESOURCE_CHANGED')
         actual = digest.hexdigest()
         if actual != item['sha256']: raise DiagnosticError('RESOURCE_DIGEST_MISMATCH')
         return actual
@@ -277,7 +289,8 @@ def collect(manifest_path=None, data_dir=None, *, timeout_ms=2000, max_bytes=268
                 put('manifest','OK','manifest_file','VALID',revision=config['hostRevision'])
             except BaseException as error: put('manifest',reason(error,'MANIFEST_MISSING'),'manifest_file',status='unavailable')
         put('installed_source','OK' if rev else 'READ_STATE_UNAVAILABLE','installed_resource',revision=rev,status='verified' if rev else 'unavailable')
-        put('platform_capabilities','OK' if supported() else 'PLATFORM_UNSUPPORTED','implementation_metadata', 'SUPPORTED_IMPLEMENTATION' if supported() else 'UNSUPPORTED',status='unverified')
+        platform_code = 'OK' if supported() else 'CAPABILITY_UNAVAILABLE' if sys.platform == 'linux' and platform.machine() == 'x86_64' else 'PLATFORM_UNSUPPORTED'
+        put('platform_capabilities',platform_code,'implementation_metadata', 'SUPPORTED_IMPLEMENTATION' if supported() else 'UNSUPPORTED',status='unverified')
         for key in ('sandbox_runtime','upstream_runtime'): put(key,'RUNTIME_UNVERIFIED','runtime_not_exercised',status='unverified')
         if config:
             if rev and config['apiRevision'] != rev: put('installed_source','VERSION_MISMATCH','installed_resource',revision=rev)
@@ -306,6 +319,12 @@ def collect(manifest_path=None, data_dir=None, *, timeout_ms=2000, max_bytes=268
                     except BaseException as error:
                         code=reason(error)
                         for name in ('restore_publication_guard','unknown_publications'): put(name,code,'sqlite_private_read_transaction',status='unavailable')
+                try: same_directory(absolute(path),fd)
+                except BaseException:
+                    affected = (key,'owner_lock','desktop_cleanup_guard','restore_publication_guard','unknown_publications') if key == 'data_directory' else (key,)
+                    for name in affected:
+                        source = checks[name]['source'] if name in checks else 'not_observed'
+                        put(name,'STATE_CHANGED',source,status='unavailable')
             except BaseException as error: put(key,reason(error,'DIRECTORY_MISSING'),'directory_metadata',status='unavailable')
             finally:
                 if fd is not None: os.close(fd)

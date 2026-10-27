@@ -182,7 +182,8 @@ Crash handling never replays a generation or publication operation.
 The production integration test executes the actual installed backend, Next,
 coordinator and Linux port; the browser restart test uses real Chromium with a
 persistent private profile. Chromium driver capability headers do not validate
-Electron frame/initiator behavior. Real Electron windows, Windows/macOS ports,
+Electron frame/initiator behavior. The native CI also runs the actual verified Electron executable with default
+renderer isolation on a sandbox-capable Xvfb display. Windows/macOS ports,
 target runtime distribution, native builds, installers, signing, upgrades and
 clean-machine acceptance remain separate, unverified work. Existing Python ownership, permanent
 publication ledger, UNKNOWN, recovery guard/epoch and plan facts remain owned by
@@ -294,3 +295,18 @@ or resumes sending. Do not downgrade an unresolved directory to an older sender.
 不表示可以安全恢复。桌面清理屏障、数据库恢复发布屏障和锁占用分别列出；无法读取就报告未知。
 资源错配应核对同源码可信资源；占用应正常关闭原实例；未确认清理和发布屏障应保留原目录、
 业务事实与进程证据，交运行环境维护者核查。本命令不提供清屏障、强制解锁或恢复发送功能。
+
+
+Startup failures use the same bounded native error mechanism, with explicit
+English/Simplified Chinese causes and static offline instructions. An early
+failure keeps the no-fallback-profile exit path. No diagnostic subprocess is
+added while showing an error, and diagnostic failure cannot replace the
+original startup cause or extend its budget. The production directory preflight
+returns one bounded canonical allowlisted result; malformed output and missing
+tree evidence never become a successful observation. No clipboard or renderer
+bridge is introduced.
+
+The required Windows diagnostic smoke check verifies an actual unsupported OS:
+it emits `PLATFORM_UNSUPPORTED` without touching the requested directories.
+This verifies truthful reporting, not a Windows file/process-tree port or
+Electron compatibility. Linux provides the offline file/SQLite observations.

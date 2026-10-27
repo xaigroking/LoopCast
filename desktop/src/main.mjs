@@ -3,18 +3,21 @@ import { app, BrowserWindow, dialog, session } from 'electron';
 import { configPath, loadTreePort, readConfig } from './config.mjs';
 import { readBootstrap, instanceDirectory } from './bootstrap.mjs';
 import { DesktopHost } from './host.mjs';
-import { Budget, HostError, message, safeError } from './errors.mjs';
+import { Budget, HostError, message, safeError, failureDetails, failureText } from './errors.mjs';
 import { secureWindow, webPreferences } from './window-policy.mjs';
 
 const entryStarted = performance.now();
 let window, host, config, browserSession, quitting = false, exiting = false, exitCode = 0, errorDialog, rendererGone = false;
+let primaryError;
 
 async function report(error) {
+  primaryError ??= safeError(error);
   exitCode = 1;
   const controller = new AbortController(); errorDialog = controller;
   const timer = setTimeout(() => controller.abort(), 30000);
   try {
-    await dialog.showMessageBox({ type: 'error', title: 'LoopCast', message: message(safeError(error).code, config?.locale),
+    await dialog.showMessageBox({ type: 'error', title: 'LoopCast', message: message(primaryError.code, config?.locale),
+      detail: failureDetails(primaryError, config?.locale, error),
       buttons: [config?.locale === 'zh-Hans' ? '关闭' : 'Close'], noLink: true, signal: controller.signal });
   } finally { clearTimeout(timer); if (errorDialog === controller) errorDialog = undefined; }
 }
@@ -35,7 +38,7 @@ function initialize() {
   } catch (error) {
     // Before ready, Electron's Linux error box reports safe text to stderr and
     // does not initialize a fallback browser profile or business owner.
-    dialog.showErrorBox('LoopCast', message(safeError(error).code, config?.locale));
+    dialog.showErrorBox('LoopCast', failureText(error, config?.locale));
     app.exit(1); return;
   }
   app.on('second-instance', () => { if (window && !window.isDestroyed()) { if (window.isMinimized()) window.restore(); window.focus(); } });
@@ -75,7 +78,10 @@ function initialize() {
       const treePort = await entryBudget.run(loadTreePort(config));
       if (quitting) throw new Error();
       host = new DesktopHost(config, treePort, { startupDeadline: entryBudget.end });
-      host.on('fault', () => { if (!quitting) app.quit(); });
+      host.on('fault', error => {
+        // Startup catch retains its original cause even if cleanup also fails.
+        if (host.state === 'READY' && !quitting) { primaryError ??= safeError(error); app.quit(); }
+      });
       const origin = await host.start();
       if (quitting) throw new Error();
       browserSession = session.fromPartition('persist:loopcast-desktop');
@@ -94,4 +100,4 @@ function initialize() {
 }
 
 try { initialize(); }
-catch (error) { dialog.showErrorBox('LoopCast', message(safeError(error).code)); app.exit(1); }
+catch (error) { dialog.showErrorBox('LoopCast', failureText(error)); app.exit(1); }

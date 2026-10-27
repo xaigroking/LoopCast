@@ -40,9 +40,10 @@ class DesktopDiagnosticsCLITests(unittest.TestCase):
         text=self.command('--manifest',self.manifest,'--format','text');self.assertIn('cannot confirm safe recovery',text.stdout)
     def test_installed_cli_active_owner_dynamic_wal_and_guard_remain_independent(self):
         store=Store(self.root/'data');store.create({'title':'secret-business-canary'},'fixture')
+        store.prepare_restored_state({'backup_id':'private-backup-id','created_at':'2026-01-01T00:00:00Z','schema_version':9},'a'*64)
         marker=self.root/'data'/NAME;marker.write_text(json.dumps({'format':'loopcast.desktop-guard.v1','identity':'1'*32}));marker.chmod(0o600)
         with DirectoryLock(self.root/'data',desktop_identity='1'*32),closing(store.connect()) as db:
-            db.execute("INSERT INTO restore_guard VALUES(1,'private-restore-identity',1,'ACTIVE','EXTERNAL_HISTORY_UNRECONCILED')")
+            db.execute("UPDATE runs SET version=version+1")
             original={p.name:p.read_bytes() for p in (self.root/'data').iterdir() if p.is_file()}
             for _ in range(2):
                 result=self.command('--manifest',self.manifest);self.assertEqual(result.returncode,0)
@@ -71,3 +72,16 @@ class DesktopDiagnosticsCLITests(unittest.TestCase):
         result=self.command('--manifest',self.manifest,'--output',self.root/'data/secret-business-canary');self.assertEqual(result.returncode,1);self.assertEqual(list((self.root/'data').iterdir()),[])
         for args in [('--format','secret-manifest-canary'),('--timeout-ms','secret-manifest-canary'),('--secret-manifest-canary',)]:self.assertEqual(self.command(*args).returncode,2)
         result=self.command('--manifest',self.manifest,'--max-bytes','1');self.assertEqual(result.returncode,1);self.assertIn('BUDGET_EXCEEDED',result.stdout)
+
+    def test_actual_preflight_result_frames_distinguish_owner_guard_and_directory(self):
+        def inspect(expected):
+            result=subprocess.run([sys.executable,'-I','-m','loopcast.desktop_guard','validate-result',str(self.root/'data'),str(self.root/'session')],capture_output=True,text=True,timeout=10)
+            self.assertLessEqual(len(result.stdout.encode()),512);self.assertEqual(result.stderr,'')
+            self.assertEqual(json.loads(result.stdout),{'format':'loopcast.desktop-preflight.v1','code':expected})
+            self.assertEqual(result.returncode,0 if expected=='OK' else 1)
+            self.assertNotIn(str(self.root),result.stdout)
+        inspect('OK')
+        with DirectoryLock(self.root/'data'):inspect('OWNER_HELD')
+        marker=self.root/'data'/NAME;marker.write_text(json.dumps({'format':'loopcast.desktop-guard.v1','identity':'1'*32}));marker.chmod(0o600)
+        inspect('DESKTOP_CLEANUP_UNCONFIRMED');marker.write_text('private-guard-canary');inspect('GUARD_UNSAFE');marker.unlink()
+        (self.root/'session').chmod(0o755);inspect('DIRECTORY_UNSAFE')

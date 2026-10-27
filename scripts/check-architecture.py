@@ -21,7 +21,7 @@ allowed = {
     "quota_storage": {"domain"},
     "schedule_models": {"studio_models", "schedule_config"}, "schedule_config": {"studio_models"},
     "schedule_time": {"domain", "schedule_models"}, "schedule_storage": {"domain", "schedule_time"},
-    "ownership": {"runtime_guard"}, "runtime_guard": set(), "desktop_guard": {"ownership", "runtime_guard"}, "managed": set(), "desktop_session": set(), "platform_info": set(), "process_tree": {"platform_info", "desktop_guard"}, "backup": {"migrations", "ownership"},
+    "ownership": {"runtime_guard"}, "runtime_guard": set(), "desktop_guard": {"ownership", "runtime_guard", "desktop_diagnostics"}, "managed": set(), "desktop_session": set(), "platform_info": set(), "process_tree": {"platform_info", "desktop_guard"}, "backup": {"migrations", "ownership"},
     "operations_storage": {"domain"}, "restore": {"backup", "ownership", "storage", "operations_storage"},
     "operations_snapshot": {"backup", "migrations", "ownership", "runner"},
     "operations_models": {"studio_models"}, "operations_api": {"operations_models", "operations_snapshot"},

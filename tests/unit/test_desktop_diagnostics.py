@@ -20,7 +20,7 @@ class DesktopDiagnosticsTests(unittest.TestCase):
         for name in ('data','session','install','config','reports'):(self.root/name).mkdir(mode=0o700)
         (self.root/'install/.next').mkdir(mode=0o700)
         (self.root/'install/.next/BUILD_ID').write_text('a'*40)
-        self.tool=self.root/'install/tool';self.tool.write_bytes(b'not executed: secret-tool-canary')
+        self.tool=self.root/'install/tool';self.tool.write_bytes(b'not executed: secret-tool-canary');self.tool.chmod(0o600)
         digest=hashlib.sha256(self.tool.read_bytes()).hexdigest()
         self.config={'format':'loopcast.desktop.v1','mode':'development','hostRevision':'a'*40,'apiRevision':'a'*40,'webRevision':'a'*40,
             'nodeVersion':'24.22.1','python':{'path':str(self.tool),'sha256':digest},'node':{'path':str(self.tool),'sha256':digest},'treeModule':{'path':str(self.tool),'sha256':digest},
@@ -53,7 +53,7 @@ class DesktopDiagnosticsTests(unittest.TestCase):
     def test_distinct_resource_directory_platform_and_runtime_evidence(self):
         self.config['node']['sha256']='0'*64;self.config['python']['path']=str(self.root/'missing-resource');self.save()
         (self.root/'install/.next/BUILD_ID').write_text('b'*40);(self.root/'session').chmod(0o755)
-        with patch('loopcast.desktop_diagnostics.supported',return_value=False):report=self.report()
+        with patch('loopcast.desktop_diagnostics.supported',return_value=False),patch('loopcast.desktop_diagnostics.platform.machine',return_value='arm64'):report=self.report()
         checks=self.checks(report)
         for key,code in [('resource_node','RESOURCE_DIGEST_MISMATCH'),('resource_python','RESOURCE_MISSING'),('resource_next','VERSION_MISMATCH'),('session_directory','DIRECTORY_UNSAFE'),('platform_capabilities','PLATFORM_UNSUPPORTED')]:self.assertEqual(checks[key]['code'],code)
         self.assertEqual(checks['sandbox_runtime']['status'],'unverified');self.assert_safe(report)
