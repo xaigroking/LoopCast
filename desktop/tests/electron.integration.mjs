@@ -133,6 +133,11 @@ test('actual entry sets native ready/session paths and loads its isolated produc
   assert.ok(nextOwner.length === 1 && nextOwner[0].value === owner[0].value);
   assert.equal((await restarted.quit()).code, 0);
   console.log('Electron native entry/session/isolation and disk restart PASS', JSON.stringify(values.versions));
+  const pythonVersion = (await promisify(execFile)(item.config.python.path, ['-I', '--version'], { timeout: 5000 })).stdout.trim();
+  // Record verified resource identity without paths, manifests or capabilities.
+  console.log('Native resource identity', JSON.stringify({ platform: process.platform, arch: process.arch, pythonVersion,
+    revisions: { host: item.config.hostRevision, api: item.config.apiRevision, next: item.config.webRevision },
+    sha256: { python: item.config.python.sha256, node: item.config.node.sha256, treeModule: item.config.treeModule.sha256 } }));
 });
 
 test('unpaused executable startup also uses the configured profile and exits through the real window', { timeout: 60000 }, async t => {
