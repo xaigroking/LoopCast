@@ -310,3 +310,28 @@ The required Windows diagnostic smoke check verifies an actual unsupported OS:
 it emits `PLATFORM_UNSUPPORTED` without touching the requested directories.
 This verifies truthful reporting, not a Windows file/process-tree port or
 Electron compatibility. Linux provides the offline file/SQLite observations.
+
+Restored-workspace preparation currently consists of unconnected candidate
+models and a read-only Python observer. No native open/handoff menu,
+profile registry, persistent handoff protocol or restored-workspace startup is
+connected. Successful observations and review plans always have
+`start_authorized=false` and `upload_allowed=false`.
+
+The observer requires independently supplied backup digest, backup ID and
+restore ID. It checks the preserved restore manifest and ACTIVE restore facts,
+using the same bounded private DB/WAL snapshot reader as diagnostics. It never
+creates a Store, lock, business directory or profile. Existing owners, execution
+barriers, unsafe files, stale observations and missing evidence are refused.
+
+Candidate entity identities use Linux opaque file handles on local ext4
+or tmpfs filesystems. Their explicit scope is one kernel boot and mount. They
+distinguish copied or deleted/recreated directories without treating a path or
+reusable inode number as identity. Unsupported filesystems have no inode-only
+fallback. OS reboot/remount continuity is unimplemented: existing bindings and
+pending profiles must be retained for investigation, never silently rebound.
+These limits also apply to profile reuse in the pure review model. A review
+cannot authorize a launch or prove process-tree cleanup.
+
+恢复工作区当前仅提供未接生产的只读观察与身份/计划候选模型，没有原生打开或交接入口。
+观察不创建业务库、锁或profile，也不授权启动或上传。候选实体身份仅覆盖同一次内核启动与
+mount；跨系统重启/重新挂载的连续性尚未实现，不会用可重用inode或静默新profile掩盖未知。
