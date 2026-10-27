@@ -85,3 +85,33 @@ class DesktopDiagnosticsCLITests(unittest.TestCase):
         marker=self.root/'data'/NAME;marker.write_text(json.dumps({'format':'loopcast.desktop-guard.v1','identity':'1'*32}));marker.chmod(0o600)
         inspect('DESKTOP_CLEANUP_UNCONFIRMED');marker.write_text('private-guard-canary');inspect('GUARD_UNSAFE');marker.unlink()
         (self.root/'session').chmod(0o755);inspect('DIRECTORY_UNSAFE')
+
+    def test_real_signal_cancellation_stops_collection_with_a_redacted_partial_report(self):
+        large=self.root/'install/large-resource'
+        with large.open('wb') as file:file.truncate(400*1024*1024)
+        large.chmod(0o600)
+        self.config['python']={'path':str(large),'sha256':'0'*64}
+        self.manifest.write_text(json.dumps(self.config))
+        process=subprocess.Popen([sys.executable,'-I','-m','loopcast','desktop-diagnostics','--manifest',str(self.manifest),'--max-bytes',str(512*1024*1024),'--timeout-ms','10000'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        observed=False;deadline=time.monotonic()+5
+        try:
+            while process.poll() is None and time.monotonic()<deadline:
+                try:
+                    for entry in Path(f'/proc/{process.pid}/fd').iterdir():
+                        try:observed |= os.readlink(entry)==str(large)
+                        except OSError:pass
+                except FileNotFoundError:pass
+                if observed:break
+                time.sleep(.002)
+            self.assertTrue(observed)
+            process.terminate();stdout,stderr=process.communicate(timeout=5)
+            self.assertEqual(process.returncode,1);self.assertEqual(stderr,'')
+            report=json.loads(stdout);self.assertIn('CANCELLED',{x['code'] for x in report['checks']})
+            self.assertNotIn(str(self.root),stdout);self.assertEqual(list((self.root/'data').iterdir()),[])
+        finally:
+            if process.poll() is None:process.kill();process.wait()
+
+    def test_export_uses_the_collection_budget_instead_of_restarting_its_limits(self):
+        output=self.root/'reports/report.json'
+        result=self.command('--manifest',self.manifest,'--max-bytes',len(self.manifest.read_bytes())+1,'--output',output)
+        self.assertEqual(result.returncode,1);self.assertFalse(output.exists());self.assertEqual(list(output.parent.iterdir()),[])

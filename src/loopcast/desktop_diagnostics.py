@@ -37,8 +37,10 @@ CODES = frozenset(('OK MANIFEST_MISSING MANIFEST_INVALID MANIFEST_CHANGED PATH_U
 SOURCES = frozenset(('not_observed manifest_file resource_file next_build_id directory_metadata '
     'existing_lock_probe desktop_guard_file sqlite_private_read_transaction installed_resource '
     'implementation_metadata runtime_not_exercised').split())
-VALUES = frozenset(('VALID CONSISTENT PRIVATE HELD NOT_HELD MISSING PRESENT ABSENT CLEAR ACTIVE '
-                    'SUPPORTED_IMPLEMENTATION UNSUPPORTED UNKNOWN').split())
+VALUES = {'manifest':{'VALID'},'resource_next':{'CONSISTENT'},'data_directory':{'PRIVATE'},
+          'session_directory':{'PRIVATE'},'owner_lock':{'HELD','NOT_HELD','MISSING'},
+          'desktop_cleanup_guard':{'PRESENT','ABSENT'},'restore_publication_guard':{'CLEAR','ACTIVE'},
+          'platform_capabilities':{'SUPPORTED_IMPLEMENTATION','UNSUPPORTED'}}
 HEX40 = re.compile(r'[a-f0-9]{40}\Z')
 HEX64 = re.compile(r'[a-f0-9]{64}\Z')
 
@@ -266,7 +268,7 @@ def database_facts(fd, budget):
     finally:
         for handle in opened.values(): os.close(handle)
 
-def collect(manifest_path=None, data_dir=None, *, timeout_ms=2000, max_bytes=268435456, cancelled=lambda: False):
+def collect(manifest_path=None, data_dir=None, *, timeout_ms=2000, max_bytes=268435456, cancelled=lambda: False, _context=None):
     os_name = sys.platform if sys.platform in {'linux','win32','darwin'} else 'other'
     arch = platform.machine(); arch = arch if arch in {'x86_64','AMD64','aarch64','arm64'} else 'other'
     rev = source_revision(); rev = rev if isinstance(rev, str) and HEX40.fullmatch(rev) else None
@@ -280,12 +282,14 @@ def collect(manifest_path=None, data_dir=None, *, timeout_ms=2000, max_bytes=268
         except BaseException as error: put(key,reason(error,missing),source,status='unavailable')
     try:
         budget = Budget(timeout_ms,max_bytes,cancelled)
+        if _context is not None: _context['budget'] = budget
         if sys.platform != 'linux': raise DiagnosticError('PLATFORM_UNSUPPORTED')
         config = None
         if manifest_path is None: put('manifest','MANIFEST_MISSING','manifest_file',status='unavailable')
         else:
             try:
                 config = manifest(manifest_path,budget)
+                if _context is not None: _context['config'] = config
                 put('manifest','OK','manifest_file','VALID',revision=config['hostRevision'])
             except BaseException as error: put('manifest',reason(error,'MANIFEST_MISSING'),'manifest_file',status='unavailable')
         put('installed_source','OK' if rev else 'READ_STATE_UNAVAILABLE','installed_resource',revision=rev,status='verified' if rev else 'unavailable')
@@ -345,13 +349,16 @@ def validate_report(report):
     if [check.get('id') for check in report['checks']] != list(IDS): raise DiagnosticError('DIAGNOSTICS_UNAVAILABLE')
     for time_value in (report['started_at'],report['observed_at'],*[x['observed_at'] for x in report['checks']]):
         if not isinstance(time_value,str) or not re.fullmatch(r'[0-9T:+.Z-]{20,40}',time_value): raise DiagnosticError('DIAGNOSTICS_UNAVAILABLE')
+        parsed=datetime.fromisoformat(time_value)
+        if parsed.tzinfo is None or parsed.utcoffset().total_seconds()!=0 or parsed.isoformat()!=time_value:raise DiagnosticError('DIAGNOSTICS_UNAVAILABLE')
     for check in [report['platform'],*report['checks']]:
         if check['os'] not in {'linux','win32','darwin','other'} or check['arch'] not in {'x86_64','AMD64','aarch64','arm64','other'}: raise DiagnosticError('DIAGNOSTICS_UNAVAILABLE')
         if check['revision'] is not None and not HEX40.fullmatch(check['revision']): raise DiagnosticError('DIAGNOSTICS_UNAVAILABLE')
     for check in report['checks']:
         if set(check) != {'id','status','code','source','observed_at','os','arch','revision','value'} or check['code'] not in CODES or check['source'] not in SOURCES or check['status'] not in {'verified','unverified','unavailable'}: raise DiagnosticError('DIAGNOSTICS_UNAVAILABLE')
         value=check['value']
-        if value is not None and not (type(value) is int and check['id']=='unknown_publications' and 0<=value<=2**53-1) and not (isinstance(value,str) and (value in VALUES or check['id'] in {'resource_python','resource_node','resource_tree'} and HEX64.fullmatch(value))): raise DiagnosticError('DIAGNOSTICS_UNAVAILABLE')
+        if check['status']=='unavailable' and value is not None:raise DiagnosticError('DIAGNOSTICS_UNAVAILABLE')
+        if value is not None and not (type(value) is int and check['id']=='unknown_publications' and 0<=value<=2**53-1) and not (isinstance(value,str) and (value in VALUES.get(check['id'],set()) or check['id'] in {'resource_python','resource_node','resource_tree'} and HEX64.fullmatch(value))): raise DiagnosticError('DIAGNOSTICS_UNAVAILABLE')
     return report
 
 GUIDANCE = 'Preserve the existing data and execution evidence. This report cannot confirm safe recovery or authorize sending. Check trusted same-source resources; close the original instance normally. Unresolved cleanup or publication barriers require operator investigation. No barrier-clearing or automatic replay operation is provided.'
@@ -362,10 +369,11 @@ def render(report, format='json'):
     if format != 'text': raise DiagnosticError('DIAGNOSTICS_UNAVAILABLE')
     return 'LoopCast desktop diagnostics\nScope: NON_ATOMIC_OBSERVATIONS\n'+ '\n'.join(f"{x['id']}: {x['status']} {x['code']} {x['value'] if x['value'] is not None else 'UNKNOWN'}" for x in report['checks'])+'\n\n'+GUIDANCE+'\n'
 
-def export_report(output, report, manifest_path, config, data_dir=None, format='json'):
+def export_report(output, report, manifest_path, config, data_dir=None, format='json', budget=None):
     # Refuse unknown protection boundaries instead of guessing a safe directory.
     if not config or not manifest_path: raise DiagnosticError('EXPORT_REFUSED')
     content=render(report,format)
+    if budget: budget.check()
     target=absolute(output); parent_path,fd=directory(target.parent); staged=None; published=False; own=None
     try:
         private(os.fstat(fd),'directory')
@@ -394,6 +402,7 @@ def export_report(output, report, manifest_path, config, data_dir=None, format='
         finally:os.close(fresh)
         final=os.stat(target.name,dir_fd=fd,follow_symlinks=False);private(final,'file')
         if identity(final)!=own:raise DiagnosticError('EXPORT_REFUSED')
+        if budget: budget.check()
     except BaseException:
         # rename may succeed before its fsync raises; remove only our inode.
         if own is not None:
@@ -416,18 +425,27 @@ def cli(argv):
     parser.add_argument('--format',choices=['json','text'],default='json');parser.add_argument('--output',type=Path)
     parser.add_argument('--timeout-ms',type=int,default=2000);parser.add_argument('--max-bytes',type=int,default=268435456)
     args=parser.parse_args(argv)
-    previous=signal.getsignal(signal.SIGTERM)
-    def interrupt(_signal, _frame): raise KeyboardInterrupt()
-    signal.signal(signal.SIGTERM,interrupt)
+    previous={number:signal.getsignal(number) for number in (signal.SIGTERM,signal.SIGINT)}
+    cancelled=False
+    def interrupt(_signal, _frame):
+        nonlocal cancelled
+        cancelled=True
+        raise KeyboardInterrupt()
+    for number in previous: signal.signal(number,interrupt)
     try:
-        report=collect(args.manifest,args.data_dir,timeout_ms=args.timeout_ms,max_bytes=args.max_bytes)
+        context={}
+        report=collect(args.manifest,args.data_dir,timeout_ms=args.timeout_ms,max_bytes=args.max_bytes,cancelled=lambda:cancelled,_context=context)
         content=render(report,args.format)
         if args.output:
-            config=manifest(args.manifest,Budget()) if args.manifest else None
-            export_report(args.output,report,args.manifest,config,args.data_dir,args.format)
+            config=context.get('config');budget=context.get('budget')
+            if cancelled: raise DiagnosticError('CANCELLED')
+            if config is None or budget is None: raise DiagnosticError('EXPORT_REFUSED')
+            if manifest(args.manifest,budget) != config: raise DiagnosticError('MANIFEST_CHANGED')
+            export_report(args.output,report,args.manifest,config,args.data_dir,args.format,budget)
         else:sys.stdout.write(content)
         return 1 if any(x['code'] in {'CANCELLED','BUDGET_EXCEEDED','DIAGNOSTICS_UNAVAILABLE'} for x in report['checks']) else 0
     except (Exception,KeyboardInterrupt) as error:
         code=reason(error)
         sys.stderr.write(code+': Desktop diagnostics unavailable or export refused. Existing application state was not changed.\n');return 1
-    finally:signal.signal(signal.SIGTERM,previous)
+    finally:
+        for number, handler in previous.items(): signal.signal(number,handler)

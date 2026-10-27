@@ -161,3 +161,27 @@ class DesktopDiagnosticsTests(unittest.TestCase):
         with patch('loopcast.desktop_diagnostics.publish_entry',side_effect=swap):
             with self.assertRaises(d.DiagnosticError):d.export_report(output,report,self.manifest,self.config)
         self.assertEqual(list((self.root/'moved').iterdir()),[]);self.assertEqual(list(output.parent.iterdir()),[])
+
+    def test_source_directory_replacement_invalidates_all_dependent_observations(self):
+        store=Store(self.root/'data');before=store.database.read_bytes();original=d.owner_probe
+        def replace(fd):
+            result=original(fd);(self.root/'data').rename(self.root/'original-data');(self.root/'data').mkdir(mode=0o700)
+            (self.root/'data/external-canary').write_text('business-secret-canary');return result
+        with patch('loopcast.desktop_diagnostics.owner_probe',side_effect=replace):report=self.report()
+        checks=self.checks(report)
+        for key in ('data_directory','owner_lock','desktop_cleanup_guard','restore_publication_guard','unknown_publications'):
+            self.assertEqual(checks[key]['code'],'STATE_CHANGED');self.assertIsNone(checks[key]['value'])
+        self.assertEqual((self.root/'original-data/state.sqlite3').read_bytes(),before)
+        self.assertEqual((self.root/'data/external-canary').read_text(),'business-secret-canary');self.assert_safe(report)
+
+    def test_future_schema_and_budget_expiring_after_publish_never_produce_success(self):
+        store=Store(self.root/'data')
+        with closing(sqlite3.connect(store.database)) as db:db.execute('UPDATE schema_version SET version=999');db.commit()
+        before=self.state();report=self.report()
+        self.assertEqual(self.checks(report)['restore_publication_guard']['code'],'SCHEMA_UNSUPPORTED');self.assertEqual(self.state(),before)
+        budget=d.Budget();original=d.publish_entry;output=self.root/'reports/report.json'
+        def late(fd,source,target):
+            original(fd,source,target);budget.end=time.monotonic()-1
+        with patch('loopcast.desktop_diagnostics.publish_entry',side_effect=late):
+            with self.assertRaises(d.DiagnosticError):d.export_report(output,report,self.manifest,self.config,budget=budget)
+        self.assertEqual(list(output.parent.iterdir()),[])
