@@ -122,3 +122,15 @@ test('monotonic budget and safe localized messages contain no raw diagnostic out
   assert.match(message('STOP_UNCONFIRMED', 'zh-Hans'), /尚未确认/);
   assert.equal(message('START_FAILED', 'ar'), message('START_FAILED', 'en'));
 });
+
+test('an already resolved late result cannot bypass a monotonic deadline', async () => {
+  let mono = 0;
+  const budget = new Budget(10, undefined, () => mono);
+  const result = Promise.resolve().then(() => { mono = 11; return 'late success'; });
+  await assert.rejects(budget.run(result), /START_TIMEOUT/);
+  await assert.rejects(budget.run(Promise.resolve('already late')), /START_TIMEOUT/);
+  await assert.rejects(budget.run(Promise.reject(new HostError('START_FAILED'))), /START_TIMEOUT/);
+  const port = fixturePort(), host = new DesktopHost(config(), port, { startupDeadline: performance.now() - 1 });
+  await assert.rejects(host.start(), /START_TIMEOUT/);
+  assert.equal(port.records.length, 0);
+});

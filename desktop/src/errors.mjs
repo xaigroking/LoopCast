@@ -44,14 +44,19 @@ export class Budget {
     return left;
   }
   async run(promise) {
+    const owned = Promise.resolve(promise);
+    owned.catch(() => {}); // Also observe work rejected after cancellation/expiry.
+    const remaining = this.remaining();
     let timer, abort;
     try {
-      return await Promise.race([promise, new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new HostError('START_TIMEOUT')), this.remaining());
+      const result = await Promise.race([owned, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new HostError('START_TIMEOUT')), remaining);
         abort = () => reject(new HostError('START_FAILED'));
         this.signal?.addEventListener('abort', abort, { once: true });
         if (this.signal?.aborted) abort();
       })]);
+      this.remaining();
+      return result;
     } finally {
       clearTimeout(timer); this.signal?.removeEventListener('abort', abort);
     }

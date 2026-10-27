@@ -41,10 +41,15 @@ export async function readConfig(filename, { packaged = false } = {}) {
       for await (const chunk of createReadStream(item.path)) hash.update(chunk);
       if (hash.digest('hex') !== item.sha256) throw new Error();
     }
-    for (const key of ['nextRoot', 'dataDir', 'sessionDir']) config[key] = await realpath(config[key]);
+    for (const key of ['nextRoot', 'dataDir', 'sessionDir']) {
+      config[key] = await realpath(config[key]);
+      if (!(await stat(config[key])).isDirectory()) throw new Error();
+    }
     if (nested(config.dataDir, config.sessionDir) || nested(config.sessionDir, config.dataDir) ||
-        nested(config.nextRoot, config.dataDir) || nested(config.nextRoot, config.sessionDir)) throw new Error();
-    for (const path of ['server.js', '.next/BUILD_ID', '.next/static', 'public']) await stat(join(config.nextRoot, path));
+        nested(config.nextRoot, config.dataDir) || nested(config.nextRoot, config.sessionDir) ||
+        nested(config.dataDir, config.nextRoot) || nested(config.sessionDir, config.nextRoot)) throw new Error();
+    for (const path of ['server.js', '.next/BUILD_ID']) if (!(await stat(join(config.nextRoot, path))).isFile()) throw new Error();
+    for (const path of ['.next/static', 'public']) if (!(await stat(join(config.nextRoot, path))).isDirectory()) throw new Error();
     if ((await readFile(join(config.nextRoot, '.next/BUILD_ID'), 'utf8')).trim() !== config.webRevision) {
       throw new HostError('VERSION_MISMATCH');
     }
