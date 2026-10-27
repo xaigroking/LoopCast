@@ -20,6 +20,10 @@ performance gains.
 
 ## Build and deploy
 
+The [desktop host source candidate](desktop/README.md) provides lifecycle and
+same-origin contracts with controlled subprocess tests. Real backend platform
+integration, desktop binaries and installers are still pending.
+
 Offline private backups and verification are described in [OPERATIONS.md](OPERATIONS.md).
 
 ```sh
