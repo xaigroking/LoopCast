@@ -30,7 +30,7 @@ def directory(path, create=False):
 
 
 class DirectoryLock:
-    def __init__(self, path, create=False):
+    def __init__(self, path, create=False, *, desktop_identity=None):
         self.path, self.directory_fd = directory(path, create)
         self.fd = None
         try:
@@ -39,6 +39,10 @@ class DirectoryLock:
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise ValueError('UNSAFE_LOCK')
             fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # Deferred import keeps the lock/guard boundary shared by service and
+            # offline commands without creating a second owner implementation.
+            from .runtime_guard import check
+            check(self.directory_fd, desktop_identity)
         except BaseException:
             self.close()
             raise

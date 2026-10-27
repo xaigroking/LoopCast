@@ -2,6 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { apiRequest } from './api';
 import { StudioClient, type Capabilities } from './studio-client';
+import { durablePendingStorage } from './pending-storage';
 
 type ContextValue = { client: StudioClient; caps: Capabilities | null; error: unknown; refreshSignal: number; refresh: () => void; busy: Set<string>; perform: <T>(id: string, fn: () => Promise<T>) => Promise<T> };
 const Context = createContext<ContextValue | null>(null);
@@ -13,7 +14,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<unknown>(null);
   const [refreshSignal, setRefreshSignal] = useState(0);
   const [busy, setBusy] = useState<Set<string>>(new Set());
-  useEffect(() => { try { client.hydrate(window.sessionStorage); } catch { client.storageAvailable = false; } }, [client]);
+  useEffect(() => { try { client.hydrate(durablePendingStorage(window.localStorage, window.sessionStorage)); } catch { client.storageAvailable = false; } }, [client]);
   useEffect(() => {
     const controller = new AbortController();
     void apiRequest<Capabilities>('/v1/studio/capabilities', { signal: controller.signal }).then((value) => { setCaps(value); setError(null); }).catch((e: unknown) => { if (!controller.signal.aborted) setError(e); });

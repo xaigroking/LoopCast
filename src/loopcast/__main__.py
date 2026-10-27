@@ -16,12 +16,25 @@ async def _serve(args, settings):
 
     configure_logging()
 
+    managed = stop_task = None
+    desktop_session = None
+    if args.managed_stdin:
+        from .managed import ManagedInput
+        managed = await ManagedInput().open()
+        if args.desktop_session_stdin:
+            from .desktop_session import DesktopSession
+            from .platform_info import source_revision
+            token = await managed.session()
+        stop_task = asyncio.create_task(managed.stop())
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((args.host, args.port))
     sock.listen(128)
     sock.setblocking(False)
     port = sock.getsockname()[1]
+    if args.desktop_session_stdin:
+        desktop_session = DesktopSession(token, f'http://127.0.0.1:{port}', args.public_origin, source_revision())
     media_settings = json.loads(args.media_config.read_text()) if args.media_config else None
     social_settings = json.loads(args.social_config.read_text()) if args.social_config else None
     schedule_settings = json.loads(args.schedule_config.read_text()) if args.schedule_config else None
@@ -30,7 +43,7 @@ async def _serve(args, settings):
     inspection_settings=json.loads(args.inspection_config.read_text()) if args.inspection_config else None
     from .inspection_models import InspectionSettings
     inspection_settings=InspectionSettings.model_validate(inspection_settings or {})
-    app = create_app(args.data_dir, settings, schedule_settings=schedule_settings, inspection_settings=inspection_settings, public_origin=args.public_origin, trusted_proxies=tuple(args.trusted_proxy), media_settings=media_settings, social_settings=social_settings)
+    app = create_app(args.data_dir, settings, schedule_settings=schedule_settings, inspection_settings=inspection_settings, public_origin=args.public_origin, trusted_proxies=tuple(args.trusted_proxy), media_settings=media_settings, social_settings=social_settings, desktop_session=desktop_session, desktop_identity=args.desktop_guard_identity)
     config = uvicorn.Config(app, host=args.host, port=port, workers=1, reload=False, access_log=False, proxy_headers=False, lifespan="on", timeout_graceful_shutdown=5)
     server = uvicorn.Server(config)
     task = asyncio.create_task(server.serve(sockets=[sock]))
@@ -38,23 +51,42 @@ async def _serve(args, settings):
         while not server.started:
             if task.done():
                 await task
+                if stop_task and stop_task.done() and getattr(app.state, 'shutdown_complete', False): break
                 raise RuntimeError("ASGI server stopped before readiness")
+            if stop_task and stop_task.done(): server.should_exit = True
             await asyncio.sleep(.02)
-        print(f"READY http://127.0.0.1:{port}", flush=True)
+        if not (stop_task and stop_task.done()): print(f"READY http://127.0.0.1:{port}", flush=True)
+        if stop_task:
+            done, _ = await asyncio.wait([task, stop_task], return_when=asyncio.FIRST_COMPLETED)
+            if stop_task in done:
+                if hasattr(app.state, 'runtime'): app.state.runtime.stopping.set()
+                server.should_exit = True
         await task
+        if managed:
+            if managed.invalid or not getattr(app.state, 'shutdown_complete', False): raise RuntimeError('Managed shutdown failed')
+            print('STOPPED', flush=True)
     finally:
         if not task.done():
             server.should_exit = True
             await task
+        sock.close()
+        if stop_task:
+            stop_task.cancel()
+            await asyncio.gather(stop_task, return_exceptions=True)
+        if managed: managed.close()
 
 
 def main():
     parser = argparse.ArgumentParser(prog='loopcast', description='LoopCast creation workspace and controlled publishing. Live sending defaults off.')
     parser.add_argument('--version', action='version', version=f"%(prog)s {version('loopcast')}")
     commands = parser.add_subparsers(dest='command')
+    commands.add_parser('platform-info', help='Read installed source and platform capabilities without opening application data')
     serve = commands.add_parser('serve', help='Start the local single-user fixture console')
     serve.add_argument('--host', choices=['127.0.0.1', 'localhost'], default='127.0.0.1')
     serve.add_argument('--port', type=int, default=8080)
+    serve.add_argument('--managed-stdin', action='store_true', help='Stop through a private bounded STOP/EOF input pipe')
+    serve.add_argument('--desktop-session-stdin', action='store_true', help='Require a private desktop session first frame')
+    serve.add_argument('--desktop-guard-identity', help=argparse.SUPPRESS)
     serve.add_argument('--data-dir', type=Path, default=Path.home() / '.local/share/loopcast')
     serve.add_argument('--generator-config', type=Path, help='Trusted local generator settings JSON')
     serve.add_argument('--media-config', type=Path, help='Pinned local media tools JSON')
@@ -95,6 +127,9 @@ def main():
     snapshot_parser.add_argument('--media-config',type=Path)
     snapshot_parser.add_argument('--generator-config',type=Path)
     args = parser.parse_args()
+    if args.command == 'platform-info':
+        from .platform_info import platform_info
+        print(json.dumps(platform_info(), sort_keys=True)); return
     if args.command == 'snapshot':
         from .operations_snapshot import snapshot,render_snapshot,write_report
         try:
@@ -158,6 +193,10 @@ def main():
         return
     if not 0 <= args.port <= 65535:
         parser.error('port must be between 0 and 65535')
+    if args.desktop_session_stdin and (not args.managed_stdin or not args.public_origin or not args.desktop_guard_identity):
+        parser.error('desktop mode requires its managed process owner and public origin')
+    if args.desktop_guard_identity and not args.desktop_session_stdin:
+        parser.error('desktop ownership requires a managed desktop session')
     try:
         settings = json.loads(args.generator_config.read_text()) if args.generator_config else None
         asyncio.run(_serve(args, settings))

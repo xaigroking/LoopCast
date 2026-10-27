@@ -6,6 +6,8 @@ import { useTranslation } from 'react-i18next';
 import { apiRequest, ApiError, requestKey, type RunCreate, type RunSnapshot } from '@/lib/api';
 import { useWorkspace } from '@/lib/workspace';
 
+const pendingPrefix = 'loopcast.run.create.pending.v1.';
+
 export function CreateDialog() {
   const { t } = useTranslation();
   const workspace = useWorkspace();
@@ -13,6 +15,8 @@ export function CreateDialog() {
   const dialog = useRef<HTMLDialogElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const operation = useRef<{ signature: string; key: string } | null>(null);
+  const hydrated = useRef(false);
+  const [pendingReady, setPendingReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [retrySafe, setRetrySafe] = useState(false);
@@ -20,6 +24,27 @@ export function CreateDialog() {
   const title = String(workspace.drafts.get('create:title') ?? '');
   const scenario = String(workspace.drafts.get('create:scenario') ?? 'success');
   const delay = String(workspace.drafts.get('create:delay') ?? '300');
+
+  useEffect(() => {
+    if (!workspace.ready || hydrated.current) return;
+    hydrated.current = true;
+    try {
+      for (let index = 0; index < localStorage.length; index++) {
+        const name = localStorage.key(index);
+        if (!name?.startsWith(pendingPrefix)) continue;
+        const value = JSON.parse(localStorage.getItem(name) ?? 'null') as { key: string; signature: string };
+        if (!value || typeof value.key !== 'string' || typeof value.signature !== 'string' || value.signature.length > 20000 || name !== pendingPrefix + value.key) throw Error();
+        const input = JSON.parse(value.signature) as RunCreate;
+        if (!['fixture', 'mpt'].includes(input.mode ?? '') || typeof input.title !== 'string') throw Error();
+        operation.current = value;
+        workspace.setDraft('create:title', input.title);
+        workspace.setDraft('create:mode', input.mode ?? 'fixture');
+        if (input.mode !== 'mpt') { workspace.setDraft('create:scenario', input.scenario ?? 'success'); workspace.setDraft('create:delay', String(input.delay_ms ?? 150)); }
+        setRetrySafe(true); workspace.openCreate(); break;
+      }
+      setPendingReady(true);
+    } catch { setRetrySafe(true); setPendingReady(false); }
+  }, [workspace.ready]);
 
   useEffect(() => {
     const element = dialog.current;
@@ -41,13 +66,14 @@ export function CreateDialog() {
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy) return;
+    if (busy || !pendingReady) return;
     const value: RunCreate = mode === 'mpt'
       ? { mode: 'mpt', title }
       : { mode: 'fixture', title, scenario: scenario as 'success' | 'fail_once' | 'fail' | 'slow', delay_ms: Number(delay) };
     const signature = JSON.stringify(value);
     try {
       if (!operation.current || operation.current.signature !== signature) operation.current = { signature, key: requestKey() };
+      localStorage.setItem(pendingPrefix + operation.current.key, JSON.stringify(operation.current));
     } catch {
       setErrorCode('SECURE_RANDOM_UNAVAILABLE');
       setRetrySafe(false);
@@ -62,12 +88,14 @@ export function CreateDialog() {
       body: signature,
     }).then((snapshot) => {
       workspace.accept(snapshot);
+      if (operation.current) localStorage.removeItem(pendingPrefix + operation.current.key);
       operation.current = null;
       for (const key of ['create:title', 'create:mode', 'create:scenario', 'create:delay']) workspace.setDraft(key, key === 'create:scenario' ? 'success' : key === 'create:delay' ? '300' : '');
       workspace.resetCreate();
       router.push(`/runs/${snapshot.run_id}`);
     }).catch((error: unknown) => {
       if (error instanceof ApiError) {
+        if (operation.current) localStorage.removeItem(pendingPrefix + operation.current.key);
         setErrorCode(error.code);
         setRetrySafe(false);
         if (error.snapshot) workspace.accept(error.snapshot);
@@ -108,7 +136,7 @@ export function CreateDialog() {
       <div className="dialog-actions">
         <button type="button" id="dialog-settings" onClick={() => { close(); router.push('/settings'); }}>{t('settings')}</button>
         <button type="button" id="dismiss" className="quiet" onClick={close}>{t('dismiss')}</button>
-        <button type="submit" className="primary" disabled={busy}>{t(busy ? 'creating' : generating ? 'generate' : 'create')}</button>
+        <button type="submit" className="primary" disabled={busy || !pendingReady}>{t(busy ? 'creating' : generating ? 'generate' : 'create')}</button>
       </div>
     </form>
   </dialog>;

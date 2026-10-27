@@ -1,11 +1,12 @@
-# Desktop host source candidate
+# Linux development desktop host
 
 This directory contains a thin Electron host for the existing Python owner and
 production Next standalone UI. It includes a lifecycle coordinator, a fixed
 streaming same-origin entry, an isolated window policy, and subprocess contract
-tests. It does not yet run against the current backend: the managed platform
-port and opt-in backend desktop session described below must be implemented
-before real integration. Missing capabilities cause startup to fail.
+tests. Linux x86_64 now has an installed Python subreaper bridge, real managed backend
+protocol and opt-in desktop session. Missing capabilities cause startup to fail.
+Windows/macOS production ports and actual Electron window acceptance remain
+separate, unverified work.
 
 Electron is pinned to **45.0.0**. Next runs under a separate, absolute **Node
 24.22.1** executable, not Electron's embedded Node. The npm lock records source
@@ -81,8 +82,9 @@ different operations; this candidate provides no data deletion command.
 ## Required platform and backend contracts
 
 The trusted `treeModule` exports `treePort` with the
-[`loopcast.process-tree.v1` interface](src/platform-contract.d.ts). This is an
-integration boundary, not a newly implemented Windows/POSIX process manager.
+[`loopcast.process-tree.v1` interface](src/platform-contract.d.ts). The Linux module
+`src/linux-tree.mjs` implements this boundary through the installed Python
+`loopcast.process_tree` subreaper guardian. It is not a Windows/macOS port.
 It validates private directories and any unresolved recovery barriers, returns
 minimal per-role environments and synchronously transfers ownership of launched
 children. It must contain the complete process tree before user code executes
@@ -109,7 +111,9 @@ The exact Python executable is probed with
 }
 ```
 
-This is the host's proposed contract; the current backend does not implement it.
+The installed Linux backend implements this contract. Source identity is embedded
+when building both sdist and wheel; dirty or unidentified sources report
+`unavailable` and cannot pass the desktop combination check.
 `implemented` alone never means native-platform verification has passed.
 
 The API is launched with the existing controlled arguments plus
@@ -175,10 +179,12 @@ trees. A bounded timeout or missing evidence leaves STOPPING, reports
 after host death depends on the required platform/backend recovery barrier.
 Crash handling never replays a generation or publication operation.
 
-Actual backend integration, real Electron windows, native Linux/Windows/macOS
-behavior, same-source release combinations, browser recovery of unknown writes,
+The production integration test executes the actual installed backend, Next,
+coordinator and Linux port; the browser restart test uses real Chromium with a
+persistent private profile. Chromium driver capability headers do not validate
+Electron frame/initiator behavior. Real Electron windows, Windows/macOS ports,
 target runtime distribution, native builds, installers, signing, upgrades and
-clean-machine acceptance remain unverified. Existing Python ownership, permanent
+clean-machine acceptance remain separate, unverified work. Existing Python ownership, permanent
 publication ledger, UNKNOWN, recovery guard/epoch and plan facts remain owned by
 the backend; this host never migrates, merges, clears or restores them.
 
@@ -190,3 +196,48 @@ Electron API contracts were checked against its pinned npm declarations and
 The npm Electron package is MIT licensed. Future binary distributions must
 include Electron/Chromium and all other runtime notices in addition to this
 repository's existing application, dependency and font notices.
+
+
+## Read-only planning and production integration
+
+`node desktop/scripts/prepare.mjs --python /absolute/venv/bin/python --node
+/absolute/node --next /absolute/standalone --data /absolute/private-data
+--session /absolute/private-session --port 18786 --revision <source-sha>` emits
+a development manifest to its caller. All paths are trusted operator input. It
+checks resource digests, installed source identity, capabilities and existing
+private directories without creating a store, migrating data or downloading
+runtimes. Save its output in a private file. A venv interpreter's symlink is
+hashed through its target but its original absolute launch path is preserved.
+
+`bash scripts/check-desktop.sh` requires the normal same-source wheel/standalone
+release build and existing locked media/browser tools. It exercises actual
+production processes; it does not substitute fixture-port for the platform.
+`run-local.mjs` is a windowless coordinator entry for that harness, not a public
+HTTP credential issuer. Its bootstrap capability goes only to a caller-owned
+private descriptor (default fd3); stdout contains only READY.
+
+The Linux guardian enables PR_SET_CHILD_SUBREAPER before business code and
+retains private control and witness pipes. On leader exit or host pipe EOF it
+terminates adopted descendants with pidfds and reaps until the kernel returns
+ECHILD. Session changes or double forks do not make descendants unowned. An
+exit status without a valid private tree witness is unconfirmed. This is
+process ownership, not an OS sandbox against arbitrary privileged code.
+
+Before desktop admission, the Python owner creates and syncs a private
+`desktop-runtime.guard.v1` marker with format `loopcast.desktop-guard.v1` and a
+random run identity. This runtime safety marker does not change schema9,
+publication facts or the backup format. Every new service/offline owner refuses
+an existing unresolved marker. Only this launch's normal API STOPPED/exit0 and
+complete-tree evidence for every component allow the coordinator to finalize
+its matching marker under the original service lock. Host/guardian death or
+missing evidence leaves it in place. There is no automatic expiration or
+recovery bypass. Older application versions do not understand this marker:
+never downgrade an unresolved directory to an older sender. Manual recovery
+needs a separately reviewed procedure, preserving the original data.
+
+Non-sensitive pending browser writes use independent localStorage records per
+idempotency key, preserving concurrent windows and surviving a destroyed
+window/host restart. Existing sessionStorage records migrate without replay.
+Sensitive authorization/control payloads are excluded. A new window restores
+the frozen creation payload and key for explicit retry; it never sends it on
+reload automatically. HTTP cache clearing does not remove these identities.
