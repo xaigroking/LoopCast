@@ -55,11 +55,21 @@ def directory_identity(fd):
         if separator and left.split()[0] == str(mount.value): types.append(right.split()[0])
     filesystem = {'ext4':(0xEF53,'EXT4'), 'tmpfs':(0x01021994,'TMPFS')}.get(types[0]) if len(types) == 1 else None
     if filesystem is None or filesystem_type != filesystem[0]: raise files.DiagnosticError('ENTITY_IDENTITY_UNAVAILABLE')
+    # Ordinary mount IDs may be recycled. Linux 6.8+ provides a boot-unique ID.
+    try: statx = library.statx
+    except AttributeError: raise files.DiagnosticError('ENTITY_IDENTITY_UNAVAILABLE') from None
+    statx.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_uint, ctypes.c_void_p]
+    statx.restype = ctypes.c_int
+    metadata = ctypes.create_string_buffer(256)
+    if statx(fd, b'', 0x1000, 0x4000, metadata): raise files.DiagnosticError('ENTITY_IDENTITY_UNAVAILABLE')
+    mask = ctypes.c_uint32.from_buffer(metadata).value
+    unique_mount = ctypes.c_uint64.from_buffer(metadata, 144).value
+    if not mask & 0x4000 or unique_mount == 0: raise files.DiagnosticError('ENTITY_IDENTITY_UNAVAILABLE')
     boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
     if not re.fullmatch('[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}', boot):
         raise files.DiagnosticError('ENTITY_IDENTITY_UNAVAILABLE')
     boot_hash = hashlib.sha256(b'loopcast-kernel-boot\0' + boot.encode()).hexdigest()
-    raw = b'loopcast-directory-object\0' + boot_hash.encode() + b'\0' + str(mount.value).encode() + b'\0' + str(handle.kind).encode() + b'\0' + bytes(handle.value[:handle.length])
+    raw = b'loopcast-directory-object\0' + boot_hash.encode() + b'\0' + str(unique_mount).encode() + b'\0' + str(handle.kind).encode() + b'\0' + bytes(handle.value[:handle.length])
     return {'identity_scope':'KERNEL_BOOT', 'filesystem':filesystem[1], 'boot_sha256':boot_hash,
             'object_sha256':hashlib.sha256(raw).hexdigest()}
 

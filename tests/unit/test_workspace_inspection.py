@@ -120,3 +120,14 @@ class WorkspaceInspectionTests(unittest.TestCase):
             with self.assertRaises(d.DiagnosticError) as error:self.observe()
             self.assertEqual(error.exception.code,'ENTITY_IDENTITY_UNAVAILABLE')
         self.assertEqual(before,self.unchanged())
+
+    def test_missing_unique_mount_identity_does_not_fall_back_to_reusable_mount_id(self):
+        real=w.ctypes.CDLL(None,use_errno=True)
+        class NoUnique:
+            def __call__(self,*_args): return 0  # Zero result mask: field unavailable.
+        class Library:
+            statx=NoUnique()
+            def __getattr__(self,name): return getattr(real,name)
+        with patch.object(w.ctypes,'CDLL',return_value=Library()):
+            with self.assertRaises(d.DiagnosticError) as error:self.observe()
+            self.assertEqual(error.exception.code,'ENTITY_IDENTITY_UNAVAILABLE')

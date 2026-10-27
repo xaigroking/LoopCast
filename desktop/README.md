@@ -324,7 +324,9 @@ creates a Store, lock, business directory or profile. Existing owners, execution
 barriers, unsafe files, stale observations and missing evidence are refused.
 
 Candidate entity identities use Linux opaque file handles on local ext4
-or tmpfs filesystems. Their explicit scope is one kernel boot and mount. They
+or tmpfs filesystems with Linux 6.8+ boot-unique mount IDs (`STATX_MNT_ID_UNIQUE`).
+Ordinary reusable mount IDs are used only to inspect filesystem type. The
+explicit identity scope is one kernel boot and mount. These identities
 distinguish copied or deleted/recreated directories without treating a path or
 reusable inode number as identity. Unsupported filesystems have no inode-only
 fallback. OS reboot/remount continuity is unimplemented: existing bindings and
