@@ -50,7 +50,7 @@ export function createTreePort(config) {
         get status() { return status; }, get witness() { return witness; } };
       records.push(record);
       let closing;
-      return { child, closeTree(deadline) {
+      const owned = { child, closeTree(deadline) {
         if (!closing) closing = (async () => {
           if (status === undefined) child.stdio[4].end(`TERMINATE ${Math.max(0, Math.floor(deadline - performance.now()) - 10)}\n`);
           try {
@@ -60,8 +60,12 @@ export function createTreePort(config) {
         })();
         return closing;
       } };
+      record.closeTree = owned.closeTree;
+      return owned;
     },
     async finish({ confirmed, deadline }) {
+      const evidence = await Promise.all(records.map(record => record.closeTree(deadline)));
+      if (evidence.some(value => !value.confirmed)) return { confirmed: false };
       const api = records.find(record => record.api);
       if (!api) return { confirmed };
       if (!confirmed || api.status !== 0 || !api.witness?.identity || records.some(record => !record.witness?.confirmed)) return { confirmed: false };
@@ -73,10 +77,12 @@ export function createTreePort(config) {
     const owned = port.launch({ executable: config.python.path, argv, cwd: config.sessionDir, env,
       stdio: ['pipe', 'pipe', 'pipe'], deadline });
     owned.child.stdin.end(); owned.child.stdout.resume(); owned.child.stderr.resume();
-    const status = await new Budget(Math.max(1, deadline - performance.now())).run(new Promise(resolve => {
-      owned.child.once('exit', resolve); owned.child.once('error', () => resolve(null));
-    }));
-    const result = await owned.closeTree(deadline);
+    let status, result;
+    try {
+      status = await new Budget(Math.max(1, deadline - performance.now())).run(new Promise(resolve => {
+        owned.child.once('exit', resolve); owned.child.once('error', () => resolve(null));
+      }));
+    } finally { result = await owned.closeTree(deadline); }
     if (status !== 0 || !result.confirmed) throw new HostError('PLATFORM_UNAVAILABLE');
   }
   return port;

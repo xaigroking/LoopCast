@@ -53,6 +53,7 @@ async function manifest(t) {
   const paths = await workspace(t);
   const value = await prepare({ python, node: process.execPath, next: process.env.LOOPCAST_DESKTOP_NEXT,
     data: paths.dataDir, session: paths.sessionDir, port: '28786', revision: process.env.LOOPCAST_DESKTOP_REVISION });
+  value.configs.media = process.env.LOOPCAST_DESKTOP_MEDIA_CONFIG;
   const filename = join(paths.root, 'desktop.json'); await writeFile(filename, JSON.stringify(value), { mode: 0o600 });
   return { ...paths, filename, config: await readConfig(filename) };
 }
@@ -65,6 +66,9 @@ test('same-source actual backend, Next, host and production port start/stop/rest
   const page = await fetch(origin, { headers: auth() }); assert.equal(page.status, 200);
   assert.ok(page.headers.get('content-security-policy')?.includes("nonce-"));
   const health = await fetch(origin+'/healthz', { headers: auth() }); assert.equal(health.status, 200);
+  const competitor = new DesktopHost(item.config, await loadTreePort(item.config));
+  await assert.rejects(competitor.start()); await competitor.stop();
+  assert.equal((await fetch(origin+'/healthz', { headers: auth() })).status, 200);
   assert.equal((await fetch(origin+'/v1/runs')).status, 403);
   const key = 'same-lost-response-write';
   const input = { title: 'Managed restart fixture', mode: 'fixture', scenario: 'success', delay_ms: 20 };
@@ -75,9 +79,16 @@ test('same-source actual backend, Next, host and production port start/stop/rest
   const id = result.run_id ?? result.id ?? result.run?.id;
   assert.ok(typeof id === 'string');
   assert.equal((await fetch(origin+`/runs/${id}`, { headers: auth() })).status, 200);
-  const events = await fetch(origin+`/v1/runs/${id}/events`, { headers: auth(), signal: AbortSignal.timeout(5000) });
+  const events = await fetch(origin+`/v1/runs/${id}/events?after=${result.last_event_id}`, { headers: auth(), signal: AbortSignal.timeout(5000) });
   assert.equal(events.status, 200); assert.ok(events.headers.get('content-type').includes('text/event-stream'));
   const reader = events.body.getReader(); assert.ok((await reader.read()).value.length > 0); await reader.cancel();
+  const media = await readFile(process.env.LOOPCAST_DESKTOP_SAMPLE);
+  const imported = await fetch(origin+'/v1/studio/assets/import?kind=video', { method: 'POST',
+    headers: { ...auth(), Origin: origin, 'Content-Type': 'application/octet-stream', 'Idempotency-Key': 'desktop-real-media', 'X-File-Name': 'sample.mp4', 'X-Source': 'Owned generated contract clip' }, body: media });
+  assert.equal(imported.status, 200); const asset = await imported.json();
+  const ranged = await fetch(origin+`/v1/studio/assets/${asset.id}/content`, { headers: { ...auth(), Range: 'bytes=0-15' } });
+  assert.equal(ranged.status, 206); assert.ok(ranged.headers.get('content-range')?.startsWith('bytes 0-15/'));
+  assert.deepEqual(Buffer.from(await ranged.arrayBuffer()), media.subarray(0, 16));
   assert.equal((await host.stop()).confirmed, true);
   await assert.rejects(stat(join(item.dataDir, 'desktop-runtime.guard.v1')));
   host = await start(); assert.equal(host.gateway.origin, origin);
