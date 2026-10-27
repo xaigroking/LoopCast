@@ -26,10 +26,12 @@ export function validateConfig(value) {
 }
 
 const nested = (a, b) => { const p = relative(a, b); return p === '' || (!p.startsWith(`..${sep}`) && p !== '..' && !isAbsolute(p)); };
-export async function readConfig(filename, { packaged = false } = {}) {
+export async function readConfig(filename, { packaged = false, expectedDigest } = {}) {
   try {
     if (!absolute(filename) || (await stat(filename)).size > 65536) throw new Error();
-    const config = validateConfig(JSON.parse(await readFile(filename, 'utf8')));
+    const raw = await readFile(filename);
+    if (expectedDigest && createHash('sha256').update(raw).digest('hex') !== expectedDigest) throw new Error();
+    const config = validateConfig(JSON.parse(raw.toString('utf8')));
     if (packaged !== (config.mode === 'release')) throw new Error();
     // The manifest is trusted main-process input, never renderer input. Resolve
     // resource identities before hashing; the platform port validates data ACLs.
