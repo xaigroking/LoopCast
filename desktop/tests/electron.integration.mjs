@@ -355,7 +355,7 @@ test('an existing managed CLI owner and an occupied entry port are never attache
   try {
     const app = await item.start();
     try {
-      await until(async () => app.status || await app.evaluate(() => globalThis.windowAudit.dialogs.length > 0).catch(() => false), item.config.startTimeoutMs + item.config.stopTimeoutMs + 1000);
+      await until(async () => app.status || app.debuggerWaiting || await app.evaluate(() => globalThis.windowAudit.dialogs.length > 0).catch(() => false), item.config.startTimeoutMs + item.config.stopTimeoutMs + 1000);
     } catch { throw new Error('NATIVE_OWNER_REJECTION_FAILED '+await readFile(app.lifecycleTrace, 'utf8')); }
     if (!app.status) assert.equal((await app.quit()).code, 1);
     else assert.equal(app.status.code, 1);

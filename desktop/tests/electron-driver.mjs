@@ -145,6 +145,7 @@ export async function launchElectron({ executable, directory, manifest, env, obs
       }
     }
     return { child, browser, context, evaluate, firstPage, exited, get status() { return status; },
+      get debuggerWaiting() { return debuggerWaiting; },
       async quit() {
         const closing = new Budget(20000);
         while (!status && !debuggerWaiting) {
