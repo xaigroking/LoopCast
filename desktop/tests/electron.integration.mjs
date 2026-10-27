@@ -161,8 +161,32 @@ test('real native requests, navigation, media, resources and hostile contexts us
   await until(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isFocused()));
   await create.focus();
   await until(() => create.evaluate(element => document.hasFocus() && document.activeElement === element));
-  await create.press('Enter');
-  await page.locator('#create-dialog[open]').waitFor({ state: 'visible' });
+  await create.evaluate(element => {
+    window.nativeKeyboardAudit = [];
+    window.nativeKeyboardListeners = ['keydown','keypress','keyup','click'].map(type => {
+      const listener = event => {
+        if (window.nativeKeyboardAudit.length < 20) window.nativeKeyboardAudit.push({ type, enter: event.key === 'Enter', button: event.target === element, trusted: event.isTrusted });
+      };
+      document.addEventListener(type, listener, true); return [type, listener];
+    });
+  });
+  // Exercise Electron's native input path, independently of CDP key dispatch.
+  await app.evaluate(({ BrowserWindow }) => {
+    const contents = BrowserWindow.getAllWindows()[0].webContents;
+    for (const type of ['keyDown','char','keyUp']) contents.sendInputEvent({ type, keyCode: 'Return' });
+  });
+  try { await page.locator('#create-dialog[open]').waitFor({ state: 'visible', timeout: 5000 }); }
+  catch {
+    const evidence = await create.evaluate(element => ({ events: window.nativeKeyboardAudit, focused: document.hasFocus(), activeButton: document.activeElement === element, disabled: element.disabled, dialogOpen: Boolean(document.querySelector('#create-dialog')?.open) }));
+    throw new Error('NATIVE_KEYBOARD_ACTIVATION_FAILED '+JSON.stringify(evidence));
+  }
+  const keys = await page.evaluate(() => {
+    for (const [type, listener] of window.nativeKeyboardListeners) document.removeEventListener(type, listener, true);
+    return window.nativeKeyboardAudit;
+  });
+  assert.ok(keys.some(event => event.type === 'keydown' && event.enter && event.button && event.trusted));
+  assert.equal(keys.filter(event => event.type === 'click' && event.button && event.trusted).length, 1);
+  console.log('Native keyboard activation PASS', JSON.stringify(keys));
   await page.locator('input[name=title]').fill('Native Electron request ownership');
   await page.locator('#create-form button[type=submit]').click(); await page.waitForURL('**/runs/*');
   const id = new URL(page.url()).pathname.split('/').at(-1), origin = new URL(page.url()).origin;
