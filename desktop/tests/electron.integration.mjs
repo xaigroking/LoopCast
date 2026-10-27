@@ -51,6 +51,11 @@ async function until(fn, timeout = 15000) {
   }
 }
 
+async function stage(name, work) {
+  try { return await work(); }
+  catch { throw new Error(`NATIVE_LIFECYCLE_${name}_FAILED`); }
+}
+
 async function managed(app) {
   return app.evaluate(() => {
     const fs = process.getBuiltinModule('fs'), pending = [process.pid], result = [];
@@ -142,7 +147,7 @@ test('unpaused executable startup also uses the configured profile and exits thr
 
 test('real native requests, navigation, media, resources and hostile contexts use only the production policy', { timeout: 90000 }, async t => {
   const item = await fixture(t), app = await item.start(), page = await app.firstPage();
-  await page.locator('.heading .primary').click();
+  await page.locator('.heading .primary').focus(); await page.keyboard.press('Enter');
   await page.locator('input[name=title]').fill('Native Electron request ownership');
   await page.locator('#create-form button[type=submit]').click(); await page.waitForURL('**/runs/*');
   const id = new URL(page.url()).pathname.split('/').at(-1), origin = new URL(page.url()).origin;
@@ -174,6 +179,7 @@ test('real native requests, navigation, media, resources and hostile contexts us
   for (const type of ['mainFrame', 'script', 'stylesheet', 'font', 'xhr']) assert.ok(audit.decisions.some(value => value.type === type && value.capability && !value.cancel), type);
   assert.ok(audit.decisions.some(value => value.path.includes('/v1/runs/') && value.path.endsWith('/events') && value.capability));
   assert.ok(audit.decisions.some(value => value.path.startsWith('/_next/') && value.capability));
+  assert.equal(audit.decisions.some(value => value.cancel), false, 'A legitimate native request was rejected before adversarial probes');
   const bare = await fetch(origin+'/healthz'); assert.equal(bare.status, 403);
   assert.equal((await fetch(origin+'/healthz', { headers: { 'X-LoopCast-Desktop-Session': 'forged' } })).status, 403);
   const windowsBefore = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
@@ -183,6 +189,16 @@ test('real native requests, navigation, media, resources and hostile contexts us
   assert.equal(new URL(page.url()).origin, origin);
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), windowsBefore);
   assert.equal(await page.evaluate(() => Notification.requestPermission()), 'denied');
+  await page.evaluate(() => {
+    window.nativeFrameViolations = 0;
+    document.addEventListener('securitypolicyviolation', event => { if (event.violatedDirective === 'frame-src') window.nativeFrameViolations++; });
+    const child = document.createElement('iframe'); child.name = 'untrusted-native-frame'; document.body.append(child);
+  });
+  await page.waitForTimeout(200);
+  const frame = page.frame({ name: 'untrusted-native-frame' });
+  if (frame) assert.equal(await frame.evaluate(async origin => { try { return (await fetch(origin+'/healthz')).status === 200; } catch { return false; } }, origin).catch(() => false), false);
+  assert.ok(await app.evaluate(() => globalThis.windowAudit.decisions.some(value => value.type === 'xhr' && !value.top && value.cancel && !value.capability)) || await page.evaluate(() => window.nativeFrameViolations > 0));
+  await page.evaluate(() => document.querySelector('iframe[name="untrusted-native-frame"]').remove());
   let contacted = false;
   const stranger = http.createServer((_request, response) => { contacted = true; response.end('untrusted'); });
   await new Promise(resolve => stranger.listen(0, '127.0.0.1', resolve));
@@ -277,28 +293,34 @@ test('real response loss, reload, cache-only clear and native restart preserve t
 });
 
 test('native renderer crash and host death preserve the STOP/guard boundary without replacement', { timeout: 100000 }, async t => {
-  const item = await fixture(t); let app = await item.start(), page = await app.firstPage(); await page.locator('.heading .primary').waitFor();
+  const item = await fixture(t); let app = await stage('RENDERER_BOOT', () => item.start()), page = await app.firstPage(); await page.locator('.heading .primary').waitFor();
   const normal = await managed(app);
-  await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer(); });
-  await app.detach(); assert.equal((await new Budget(20000).run(app.exited)).code, 0); await treesGone(normal);
+  await stage('RENDERER_TRIGGER', () => app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer(); }));
+  await stage('RENDERER_DETACH', () => app.detach());
+  assert.equal((await stage('RENDERER_EXIT', () => new Budget(20000).run(app.exited))).code, 0);
+  await stage('RENDERER_TREES', () => treesGone(normal));
   await assert.rejects(stat(join(item.data, 'desktop-runtime.guard.v1')));
-  app = await item.start(); page = await app.firstPage(); await page.locator('.heading .primary').waitFor();
-  const abnormal = await managed(app); app.child.kill('SIGKILL'); await app.detach(); await app.exited; await treesGone(abnormal);
+  app = await stage('HOST_BOOT', () => item.start()); page = await app.firstPage(); await page.locator('.heading .primary').waitFor();
+  const abnormal = await managed(app); app.child.kill('SIGKILL');
+  await stage('HOST_DETACH', () => app.detach()); await app.exited;
+  await stage('HOST_TREES', () => treesGone(abnormal));
   assert.ok(await stat(join(item.data, 'desktop-runtime.guard.v1')));
-  const refused = await item.start();
-  await until(() => refused.evaluate(() => globalThis.windowAudit.dialogs.length > 0));
+  const refused = await stage('GUARD_BOOT', () => item.start());
+  await stage('GUARD_DIALOG', () => until(() => refused.evaluate(() => globalThis.windowAudit.dialogs.length > 0)));
   assert.equal(await refused.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 0);
-  assert.equal((await refused.quit()).code, 1);
+  assert.equal((await stage('GUARD_EXIT', () => refused.quit())).code, 1);
   assert.ok(await stat(join(item.data, 'desktop-runtime.guard.v1')));
 });
 
 test('actual native error dialogs are localized and quit cancels them within the bound', { timeout: 70000 }, async t => {
-  for (const locale of ['en', 'zh-Hans']) {
-    const item = await fixture(t, { locale }); item.config.node.sha256 = '0'.repeat(64);
+  for (const [locale, code] of [['en', 'CONFIG_INVALID'], ['zh-Hans', 'CONFIG_INVALID'], ['en', 'VERSION_MISMATCH']]) {
+    const item = await fixture(t, { locale });
+    if (code === 'CONFIG_INVALID') item.config.node.sha256 = '0'.repeat(64);
+    else item.config.webRevision = 'f'.repeat(40);
     await writeFile(item.filename, JSON.stringify(item.config), { mode: 0o600 });
     const app = await item.start(); await until(() => app.evaluate(() => globalThis.windowAudit.dialogs.length > 0));
     const dialogs = await app.evaluate(() => globalThis.windowAudit.dialogs);
-    assert.equal(dialogs[0].message, message('CONFIG_INVALID', locale));
+    assert.equal(dialogs[0].message, message(code, locale));
     assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 0);
     await until(async () => (await promisify(execFile)('xwininfo', ['-root', '-tree'])).stdout.includes('"LoopCast"'));
     assert.equal((await app.quit()).code, 1);
