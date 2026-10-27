@@ -17,6 +17,13 @@ export function sameOrigin(url, origin) {
  */
 export function secureWindow(window, session, origin, token) {
   const contents = window.webContents;
+  // Blank child frames inherit their parent's origin. Revoke this window's
+  // authority permanently, including requests queued before child removal.
+  let frameRevoked = false;
+  contents.on('frame-created', (_event, { frame }) => {
+    try { if (frame.parent !== null) frameRevoked = true; }
+    catch { frameRevoked = true; }
+  });
   session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.setPermissionCheckHandler(() => false);
   session.on('will-download', event => event.preventDefault());
@@ -32,9 +39,14 @@ export function secureWindow(window, session, origin, token) {
   session.webRequest.onBeforeSendHeaders({ urls: [`${origin}/*`] }, (details, callback) => {
     const headers = { ...details.requestHeaders };
     for (const key of Object.keys(headers)) if (key.toLowerCase() === 'x-loopcast-desktop-session') delete headers[key];
-    const mainFrame = details.frame && details.frame.processId === contents.mainFrame.processId && details.frame.routingId === contents.mainFrame.routingId;
-    const trusted = details.webContentsId === contents.id && details.resourceType !== 'subFrame' && sameOrigin(details.url, origin) &&
-      (details.resourceType === 'mainFrame' || (mainFrame && sameOrigin(contents.getURL(), origin) && details.initiatorOrigin === origin));
+    let trusted = false;
+    try {
+      const top = contents.mainFrame;
+      const mainFrame = details.frame && details.frame.processId === top.processId && details.frame.routingId === top.routingId;
+      trusted = !frameRevoked && top.frames.length === 0 && details.webContentsId === contents.id &&
+        details.resourceType !== 'subFrame' && sameOrigin(details.url, origin) &&
+        (details.resourceType === 'mainFrame' || (mainFrame && sameOrigin(contents.getURL(), origin) && details.initiatorOrigin === origin));
+    } catch { /* Disposed native frames must fail closed during crash/quit. */ }
     if (trusted) headers['X-LoopCast-Desktop-Session'] = token;
     callback({ requestHeaders: headers, cancel: !trusted });
   });

@@ -7,7 +7,7 @@ import { Budget, HostError, message, safeError } from './errors.mjs';
 import { secureWindow, webPreferences } from './window-policy.mjs';
 
 const entryStarted = performance.now();
-let window, host, config, browserSession, quitting = false, exiting = false, exitCode = 0, errorDialog;
+let window, host, config, browserSession, quitting = false, exiting = false, exitCode = 0, errorDialog, rendererGone = false;
 
 async function report(error) {
   exitCode = 1;
@@ -49,12 +49,19 @@ function initialize() {
     quitting = true;
     if (window && !window.isDestroyed()) window.destroy();
     void (async () => {
-      browserSession?.flushStorageData();
-      try { await browserSession?.cookies.flushStore(); } catch { exitCode = 1; }
-      const result = await host?.stop();
-      if (result?.confirmed === false) { exitCode = 1; await report(new HostError('STOP_UNCONFIRMED')); }
+      // Start STOP before awaiting Chromium; a stalled profile flush must never
+      // leave the business owner running. Both operations have finite bounds.
+      const stopped = host?.stop();
+      try {
+        browserSession?.flushStorageData();
+        await new Budget(config.stopTimeoutMs).run(browserSession?.cookies.flushStore());
+      } catch { exitCode = 1; }
+      try {
+        const result = await stopped;
+        if (result?.confirmed === false) { exitCode = 1; await report(new HostError('STOP_UNCONFIRMED')); }
+      } catch { exitCode = 1; await report(new HostError('STOP_UNCONFIRMED')); }
       exiting = true;
-      if (exitCode) app.exit(exitCode);
+      if (exitCode || rendererGone) app.exit(exitCode);
       else app.quit(); // Let Chromium finish its normal persistent-profile shutdown.
     })();
   });
@@ -76,7 +83,7 @@ function initialize() {
       window.removeMenu();
       secureWindow(window, browserSession, origin, host.gatewayToken);
       window.on('close', event => { if (!quitting) { event.preventDefault(); app.quit(); } });
-      window.webContents.on('render-process-gone', () => app.quit());
+      window.webContents.on('render-process-gone', () => { rendererGone = true; app.quit(); });
       await entryBudget.run(window.loadURL(origin));
       if (!quitting && !window.isDestroyed()) window.show();
     } catch (error) {

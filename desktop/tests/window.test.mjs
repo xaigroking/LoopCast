@@ -6,7 +6,7 @@ import { secureWindow, sameOrigin, webPreferences } from '../src/window-policy.m
 
 function fixture() {
   const origin = 'http://127.0.0.1:12345', token = 'fixture-session';
-  const contents = Object.assign(new EventEmitter(), { id: 7, mainFrame: { processId: 12, routingId: 34 }, getURL: () => origin,
+  const contents = Object.assign(new EventEmitter(), { id: 7, mainFrame: { processId: 12, routingId: 34, frames: [] }, getURL: () => origin,
     setWindowOpenHandler(handler) { this.open = handler; } });
   const hooks = {}, session = Object.assign(new EventEmitter(), {
     webRequest: { onBeforeSendHeaders(filter, handler) { hooks.send = handler; hooks.filter = filter; }, onHeadersReceived(_filter, handler) { hooks.headers = handler; } },
@@ -56,4 +56,18 @@ test('window response policy preserves Next nonce and offline resources', () => 
   const { hooks } = fixture(); let result;
   hooks.headers({ responseHeaders: { 'Content-Security-Policy': ["script-src 'self' 'nonce-test'; font-src 'self'; media-src 'self'"] } }, value => { result = value; });
   assert.equal(result.responseHeaders['Content-Security-Policy'][0], "script-src 'self' 'nonce-test'; font-src 'self'; media-src 'self'; frame-src 'none'");
+});
+
+test('blank child creation permanently revokes authority and disposed frames fail closed', () => {
+  const { contents, hooks, origin } = fixture();
+  const request = { webContentsId: contents.id, url: `${origin}/healthz`, resourceType: 'xhr',
+    frame: contents.mainFrame, initiatorOrigin: origin, requestHeaders: {} };
+  let result;
+  contents.emit('frame-created', {}, { frame: { parent: contents.mainFrame } });
+  hooks.send(request, value => { result = value; });
+  assert.equal(result.cancel, true); assert.equal(Object.keys(result.requestHeaders).length, 0);
+  const disposed = fixture();
+  Object.defineProperty(disposed.contents, 'mainFrame', { get() { throw new Error('disposed native object'); } });
+  disposed.hooks.send(request, value => { result = value; });
+  assert.equal(result.cancel, true); assert.equal(Object.keys(result.requestHeaders).length, 0);
 });

@@ -189,16 +189,6 @@ test('real native requests, navigation, media, resources and hostile contexts us
   assert.equal(new URL(page.url()).origin, origin);
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), windowsBefore);
   assert.equal(await page.evaluate(() => Notification.requestPermission()), 'denied');
-  await page.evaluate(() => {
-    window.nativeFrameViolations = 0;
-    document.addEventListener('securitypolicyviolation', event => { if (event.violatedDirective === 'frame-src') window.nativeFrameViolations++; });
-    const child = document.createElement('iframe'); child.name = 'untrusted-native-frame'; document.body.append(child);
-  });
-  await page.waitForTimeout(200);
-  const frame = page.frame({ name: 'untrusted-native-frame' });
-  if (frame) assert.equal(await frame.evaluate(async origin => { try { return (await fetch(origin+'/healthz')).status === 200; } catch { return false; } }, origin).catch(() => false), false);
-  assert.ok(await app.evaluate(() => globalThis.windowAudit.decisions.some(value => value.type === 'xhr' && !value.top && value.cancel && !value.capability)) || await page.evaluate(() => window.nativeFrameViolations > 0));
-  await page.evaluate(() => document.querySelector('iframe[name="untrusted-native-frame"]').remove());
   let contacted = false;
   const stranger = http.createServer((_request, response) => { contacted = true; response.end('untrusted'); });
   await new Promise(resolve => stranger.listen(0, '127.0.0.1', resolve));
@@ -232,6 +222,17 @@ test('real native requests, navigation, media, resources and hostile contexts us
     link.download = 'native-contract.mp4'; document.body.append(link); link.click(); link.remove();
   });
   await until(() => app.evaluate(() => globalThis.windowAudit.downloadDenied === true));
+  await page.evaluate(() => {
+    window.nativeFrameViolations = 0;
+    document.addEventListener('securitypolicyviolation', event => { if (event.violatedDirective === 'frame-src') window.nativeFrameViolations++; });
+    const child = document.createElement('iframe'); child.name = 'untrusted-native-frame'; document.body.append(child);
+  });
+  await page.waitForTimeout(200);
+  const frame = page.frame({ name: 'untrusted-native-frame' });
+  if (frame) assert.equal(await frame.evaluate(async origin => { try { return (await fetch(origin+'/healthz')).status === 200; } catch { return false; } }, origin).catch(() => false), false);
+  assert.ok(await app.evaluate(() => globalThis.windowAudit.decisions.some(value => value.type === 'xhr' && value.cancel && !value.capability)) || await page.evaluate(() => window.nativeFrameViolations > 0));
+  await page.evaluate(() => document.querySelector('iframe[name="untrusted-native-frame"]').remove());
+  assert.equal(await page.evaluate(async () => { try { return (await fetch('/healthz')).status === 200; } catch { return false; } }), false);
   assert.equal((await app.quit()).code, 0);
 });
 
