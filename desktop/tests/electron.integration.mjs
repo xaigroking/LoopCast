@@ -2,7 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm, stat, readFile, readdir } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -11,6 +12,8 @@ import { prepare } from '../scripts/prepare.mjs';
 import { launchElectron } from './electron-driver.mjs';
 import { Budget } from '../src/errors.mjs';
 import { message } from '../src/errors.mjs';
+import { createTreePort } from '../src/linux-tree.mjs';
+import { readiness, observeExit } from '../src/protocol.mjs';
 
 const directory = fileURLToPath(new URL('../', import.meta.url));
 const executable = process.env.LOOPCAST_ELECTRON_BINARY;
@@ -172,6 +175,7 @@ test('real native requests, navigation, media, resources and hostile contexts us
   assert.ok(audit.decisions.some(value => value.path.includes('/v1/runs/') && value.path.endsWith('/events') && value.capability));
   assert.ok(audit.decisions.some(value => value.path.startsWith('/_next/') && value.capability));
   const bare = await fetch(origin+'/healthz'); assert.equal(bare.status, 403);
+  assert.equal((await fetch(origin+'/healthz', { headers: { 'X-LoopCast-Desktop-Session': 'forged' } })).status, 403);
   const windowsBefore = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
   await page.evaluate(() => { window.open('https://example.com/'); });
   await page.evaluate(() => { window.location.href = 'https://example.com/'; });
@@ -185,11 +189,33 @@ test('real native requests, navigation, media, resources and hostile contexts us
   try {
     assert.equal(await page.evaluate(async url => { try { await fetch(url); return false; } catch { return true; } }, `http://127.0.0.1:${stranger.address().port}/`), true);
     assert.equal(contacted, false);
+    const interception = await app.context.newCDPSession(page);
+    await interception.send('Fetch.enable', { patterns: [{ urlPattern: '*/native-redirect-contract', requestStage: 'Response' }] });
+    interception.on('Fetch.requestPaused', event => interception.send('Fetch.fulfillRequest', {
+      requestId: event.requestId, responseCode: 302,
+      responseHeaders: [...(event.responseHeaders ?? []).filter(header => !['content-length', 'location'].includes(header.name.toLowerCase())), { name: 'Location', value: `http://127.0.0.1:${stranger.address().port}/` }], body: '',
+    }).catch(() => {}));
+    await page.evaluate(() => { window.location.href = '/native-redirect-contract'; });
+    await page.waitForTimeout(200); assert.equal(new URL(page.url()).origin, origin); assert.equal(contacted, false);
+    await interception.send('Fetch.disable'); await interception.detach();
   } finally { await new Promise(resolve => stranger.close(resolve)); }
   assert.equal(await app.evaluate(async ({ BrowserWindow }, origin) => {
     const source = BrowserWindow.getAllWindows()[0], other = new BrowserWindow({ show: false, webPreferences: { session: source.webContents.session, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
     try { return await other.loadURL(origin).then(() => false, () => true); } finally { other.destroy(); }
   }, origin), true);
+  await app.evaluate(({ BrowserWindow }) => {
+    const current = BrowserWindow.getAllWindows()[0].webContents.session;
+    current.once('will-download', (_event, item) => setImmediate(() => {
+      try { globalThis.windowAudit.downloadDenied = item.getState() === 'cancelled'; }
+      catch { globalThis.windowAudit.downloadDenied = true; }
+    }));
+  });
+  await page.evaluate(async () => {
+    const assets = await (await fetch('/v1/studio/assets')).json();
+    const link = document.createElement('a'); link.href = `/v1/studio/assets/${assets.items[0].id}/content`;
+    link.download = 'native-contract.mp4'; document.body.append(link); link.click(); link.remove();
+  });
+  await until(() => app.evaluate(() => globalThis.windowAudit.downloadDenied === true));
   assert.equal((await app.quit()).code, 0);
 });
 
@@ -273,10 +299,40 @@ test('actual native error dialogs are localized and quit cancels them within the
     const app = await item.start(); await until(() => app.evaluate(() => globalThis.windowAudit.dialogs.length > 0));
     const dialogs = await app.evaluate(() => globalThis.windowAudit.dialogs);
     assert.equal(dialogs[0].message, message('CONFIG_INVALID', locale));
+    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 0);
+    await until(async () => (await promisify(execFile)('xwininfo', ['-root', '-tree'])).stdout.includes('"LoopCast"'));
     assert.equal((await app.quit()).code, 1);
     await assert.rejects(stat(join(item.data, 'state.sqlite3')));
     await assert.rejects(stat(join(item.data, 'desktop-runtime.guard.v1')));
   }
+});
+
+test('an existing managed CLI owner and an occupied entry port are never attached or replaced', { timeout: 100000 }, async t => {
+  const item = await fixture(t), port = createTreePort(item.config), budget = new Budget(30000);
+  const env = await port.environment({ dataDir: item.data, sessionDir: item.session, deadline: budget.end });
+  const owned = port.launch({ executable: item.config.python.path, argv: ['-I', '-m', 'loopcast', 'serve', '--port', '0', '--data-dir', item.data, '--managed-stdin'],
+    env: env.api, cwd: item.session, stdio: ['pipe', 'pipe', 'pipe'], deadline: budget.end });
+  const exit = observeExit(owned.child), protocol = readiness(owned.child.stdout); owned.child.stderr.resume();
+  const cliOrigin = await budget.run(protocol.ready);
+  try {
+    const app = await item.start();
+    await until(async () => app.status || await app.evaluate(() => globalThis.windowAudit.dialogs.length > 0).catch(() => false));
+    if (!app.status) assert.equal((await app.quit()).code, 1);
+    else assert.equal(app.status.code, 1);
+    assert.equal((await fetch(cliOrigin+'/healthz')).status, 200);
+    assert.equal(exit.result, undefined);
+  } finally {
+    owned.child.stdin.end('STOP\n'); await new Budget(10000).run(Promise.all([protocol.stopped, exit.exited]));
+    assert.equal((await owned.closeTree(performance.now()+5000)).confirmed, true);
+  }
+  const second = await fixture(t); let requests = 0;
+  const stranger = http.createServer((_request, response) => { requests++; response.end('not the application'); });
+  await new Promise(resolve => stranger.listen(second.config.gatewayPort, '127.0.0.1', resolve));
+  try {
+    const refused = await second.start(); await until(() => refused.evaluate(() => globalThis.windowAudit.dialogs.length > 0));
+    assert.equal((await refused.quit()).code, 1); assert.equal(requests, 0);
+    await assert.rejects(stat(join(second.data, 'state.sqlite3')));
+  } finally { await new Promise(resolve => stranger.close(resolve)); }
 });
 
 test('missing configuration and startup-time exit create no fallback profile or second owner', { timeout: 60000 }, async t => {

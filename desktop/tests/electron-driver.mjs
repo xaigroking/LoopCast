@@ -9,7 +9,7 @@ import { Budget } from '../src/errors.mjs';
 export async function launchElectron({ executable, directory, manifest, env, observe = true }) {
   const args = [observe ? '--inspect-brk=0' : '--inspect=0', '--remote-debugging-port=0', directory, '--desktop-config', manifest];
   const child = spawn(executable, args, { env, stdio: ['ignore', 'ignore', 'pipe'] });
-  let status, inspectorURL, browserURL, pending = '', diagnostic = '';
+  let status, inspectorURL, browserURL, pending = '', diagnostic = '', debuggerWaiting = false;
   const exited = new Promise(resolve => {
     child.once('exit', (code, signal) => { status = { code, signal }; resolve(status); });
     child.once('error', () => { status = { code: null, signal: null }; resolve(status); });
@@ -22,6 +22,7 @@ export async function launchElectron({ executable, directory, manifest, env, obs
       const browser = /^DevTools listening on (ws:\/\/127\.0\.0\.1:[0-9]+\/[^ ]+)/.exec(line);
       if (node) inspectorURL = node[1];
       else if (browser) browserURL = browser[1];
+      else if (line.includes('Waiting for the debugger to disconnect')) debuggerWaiting = true;
       // Keep diagnostic categories only. Debugger URLs, headers, full environment
       // and application output never become logs or test attachments.
       else if (/sandbox|namespace|shared libraries/i.test(line)) diagnostic = 'RUNTIME_SANDBOX_OR_LIBRARY_FAILURE';
@@ -50,6 +51,10 @@ export async function launchElectron({ executable, directory, manifest, env, obs
         if (entryBreakpoint && result.params.hitBreakpoints?.includes(entryBreakpoint)) entryPaused();
         else socket.send(JSON.stringify({ id: ++serial, method: 'Debugger.resume' }));
       }
+    });
+    socket.addEventListener('close', () => {
+      for (const task of requests.values()) task.resolve({ error: true });
+      requests.clear();
     });
     async function send(method, params = {}) {
       const id = ++serial;
@@ -123,10 +128,13 @@ export async function launchElectron({ executable, directory, manifest, env, obs
     }
     return { child, browser, context, evaluate, firstPage, exited, get status() { return status; },
       async quit() {
-        if (!status) await evaluate(({ app }) => { app.quit(); });
-        // Inspector clients must detach to allow Node's clean process exit.
+        const closing = new Budget(20000);
+        while (!status && !debuggerWaiting) {
+          await evaluate(({ app }) => { app.quit(); }).catch(() => {});
+          if (!status) await closing.run(Promise.race([exited, new Promise(resolve => setTimeout(resolve, 100))]));
+        }
         socket.close(); await browser.close();
-        return new Budget(20000).run(exited);
+        return closing.run(exited);
       },
       async detach() { socket.close(); await browser.close(); },
     };
