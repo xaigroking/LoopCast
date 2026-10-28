@@ -21,7 +21,10 @@ test('receipt edits, a missing key, permissive files and directory substitutions
   const root = fixture(t), journal = new ReceiptJournal(root); t.after(() => journal.close());
   const name = join(root,'maintenance',`${'b'.repeat(32)}-COMPLETE.json`);
   journal.append({operation_id:'b'.repeat(32),state:'COMPLETE'});
-  const raw = readFileSync(name,'utf8'); writeFileSync(name,raw.replace('COMPLETE','UNKNOWN_RESULT'));
+  const raw = readFileSync(name,'utf8');
+  writeFileSync(name,raw.replace('"state":"COMPLETE"','"state":"COMPLETE","state":"COMPLETE"'));
+  assert.throws(() => journal.records(), /MAINTENANCE_UNCONFIRMED/);
+  writeFileSync(name,raw.replace('COMPLETE','UNKNOWN_RESULT'));
   assert.throws(() => journal.records(), /MAINTENANCE_UNCONFIRMED/);
   writeFileSync(name,raw); chmodSync(name,0o644);
   assert.throws(() => journal.records(), /FILE_UNSAFE/);

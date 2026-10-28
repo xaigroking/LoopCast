@@ -16,6 +16,8 @@ test('application stages form an authenticated no-replace chain with a committed
   const records=journal.load();assert.deepEqual(records.map(record=>record.sequence),[1,2,3,4]);
   assert.equal(records.at(-1).payload.binding,'restored');
   const name=join(root,'events',readdirSync(join(root,'events')).sort()[1]),raw=readFileSync(name,'utf8');
+  writeFileSync(name,raw.replace('"phase":"PENDING_DURABLE"','"phase":"PENDING_DURABLE","phase":"PENDING_DURABLE"'));
+  assert.throws(()=>journal.load(),/HANDOFF_UNCONFIRMED/);
   writeFileSync(name,raw.replace('PENDING_DURABLE','FINISHED'));
   assert.throws(()=>journal.load(),/HANDOFF_UNCONFIRMED/);
   writeFileSync(name,raw);rmSync(name);assert.throws(()=>journal.load(),/HANDOFF_UNCONFIRMED/);

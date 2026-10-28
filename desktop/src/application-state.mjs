@@ -48,7 +48,7 @@ export class StateJournal {
     const records=[];
     for(const name of names){
       const raw=readPrivate(join(this.events.path,name)),envelope=JSON.parse(raw),record=envelope.record;
-      if(Object.keys(envelope).sort().join(',')!=='hmac,record'||!hex(envelope.hmac)||!record||
+      if(!raw.equals(Buffer.from(JSON.stringify(envelope)))||Object.keys(envelope).sort().join(',')!=='hmac,record'||!hex(envelope.hmac)||!record||
         Object.keys(record).sort().join(',')!=='format,operation_id,payload,phase,previous,sequence'||record.format!=='loopcast.application-event.v1'||
         record.sequence!==++sequence||record.previous!==previous||!hex(record.operation_id,32)||!/^[_A-Z]+$/.test(record.phase)||
         name!==`${String(sequence).padStart(12,'0')}-${record.operation_id}-${record.phase}.json`||
