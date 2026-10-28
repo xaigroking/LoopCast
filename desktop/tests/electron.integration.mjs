@@ -15,16 +15,18 @@ import { Budget } from '../src/errors.mjs';
 import { message } from '../src/errors.mjs';
 import { createTreePort } from '../src/linux-tree.mjs';
 import { readiness, observeExit } from '../src/protocol.mjs';
+import { applicationFixture } from './application-fixture.mjs';
 
 const directory = fileURLToPath(new URL('../', import.meta.url));
 const executable = process.env.LOOPCAST_ELECTRON_BINARY;
 if (!executable || !process.env.LOOPCAST_DESKTOP_PYTHON) throw new Error('Verified Electron and an installed same-source Python candidate are required; no silent skip.');
 
 async function fixture(t, { locale = 'en' } = {}) {
+  const cleanupApplication=await applicationFixture();
   const root = await mkdtemp(join(tmpdir(), 'loopcast Electron 中文 '));
   const data = join(root, '业务 data'), session = join(root, '窗口 session'), home = join(root, 'home'), appData = join(home, 'config');
   for (const path of [data, session, home, appData]) await mkdir(path, { mode: 0o700 });
-  const config = await prepare({ python: process.env.LOOPCAST_DESKTOP_PYTHON, node: process.execPath,
+  const config = await prepare({ python: process.env.LOOPCAST_DESKTOP_PYTHON, node: process.execPath, electron:executable,
     next: process.env.LOOPCAST_DESKTOP_NEXT, data, session, port: '28788', revision: process.env.LOOPCAST_DESKTOP_REVISION, locale });
   config.stopTimeoutMs = 6000;
   if (process.env.LOOPCAST_DESKTOP_MEDIA_CONFIG) config.configs.media = process.env.LOOPCAST_DESKTOP_MEDIA_CONFIG;
@@ -41,6 +43,7 @@ async function fixture(t, { locale = 'en' } = {}) {
   }
   t.after(async () => {
     for (const app of applications) if (!app.status) await app.quit().catch(() => app.child.kill('SIGKILL'));
+    await cleanupApplication();
     await rm(root, { recursive: true, force: true });
   });
   return { root, data, session, home, appData, filename, env, config, start };
@@ -365,7 +368,7 @@ test('two actual processes ignore the second config and keep a single native win
   await until(() => app.evaluate(({ BrowserWindow }) => !BrowserWindow.getAllWindows()[0].isMinimized()));
   assert.deepEqual((await managed(app)).map(value => value.pid).sort(), before.map(value => value.pid).sort());
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
-  assert.equal((await app.quit()).code, 0); await treesGone(before);
+  assert.deepEqual(await app.quit(), { code:0, signal:null }); await treesGone(before);
 });
 
 test('real response loss, reload, cache-only clear and native restart preserve two explicit retry identities', { timeout: 120000 }, async t => {

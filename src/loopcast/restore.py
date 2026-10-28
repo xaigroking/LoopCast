@@ -18,6 +18,8 @@ class RestoreConnection(sqlite3.Connection):
 
 
 def restore_backup(backup, expected_digest, destination, *, expected_parent=None):
+    from .desktop_admission import check as application_admission
+    application_admission()
     manifest = verify_backup(backup, expected_digest)
     source, source_fd = directory(backup)
     stage_owner = None

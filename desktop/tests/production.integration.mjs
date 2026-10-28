@@ -238,7 +238,7 @@ print(json.dumps({'observation':result,'identities':identities}))`;
 });
 
 test('production maintenance coordinator stops the real owner, creates authenticated proof, verifies, restores and explicitly returns with fresh capabilities', { timeout:90000 }, async t => {
-  const item = await manifest(t), journal = new ReceiptJournal(item.root);
+  const item = await manifest(t); const applicationState=join(item.root,'application-state'); await mkdir(applicationState,{mode:0o700}); const journal = new ReceiptJournal(applicationState);
   let host = new DesktopHost(item.config, await loadTreePort(item.config));
   await host.start(); const oldGatewayToken = host.gatewayToken, oldApiToken = host.apiToken;
   let frozen = 0, shown = 0;
@@ -284,7 +284,8 @@ test('production maintenance coordinator stops the real owner, creates authentic
 });
 
 test('maintenance cancellation during normal STOP never launches a write helper and leaves the original workspace offline', { timeout:45000 }, async t => {
-  const item=await manifest(t), journal=new ReceiptJournal(item.root), host=new DesktopHost(item.config,await loadTreePort(item.config));
+  const item=await manifest(t),applicationState=join(item.root,'application-state');await mkdir(applicationState,{mode:0o700});
+  const journal=new ReceiptJournal(applicationState),host=new DesktopHost(item.config,await loadTreePort(item.config));
   await host.start(); let coordinator;
   coordinator=new MaintenanceCoordinator({config:item.config,filename:item.filename,configDigest:hash(await readFile(item.filename)),host,journal,
     freeze:async()=>{coordinator.cancel();},showWorkspace:async()=>assert.fail('Cancellation must not restart a workspace')});
@@ -318,7 +319,8 @@ export function createTreePort(config){
 }`,{mode:0o600});
   item.config.treeModule={path:wrapper,sha256:hash(await readFile(wrapper))};
   await writeFile(item.filename,JSON.stringify(item.config),{mode:0o600});
-  const host=new DesktopHost(item.config,await loadTreePort(item.config)),journal=new ReceiptJournal(item.root);
+  const applicationState=join(item.root,'application-state');await mkdir(applicationState,{mode:0o700});
+  const host=new DesktopHost(item.config,await loadTreePort(item.config)),journal=new ReceiptJournal(applicationState);
   await host.start();let shown=0;
   const coordinator=new MaintenanceCoordinator({config:item.config,filename:item.filename,configDigest:hash(await readFile(item.filename)),host,journal,
     freeze:async()=>{},showWorkspace:async()=>{shown++;}});

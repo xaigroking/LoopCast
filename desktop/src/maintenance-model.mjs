@@ -63,7 +63,7 @@ export function parseIndependentProof(bytes) {
   const checked = proofFields(value,value.source_revision,value.created_at);
   return Object.freeze({ ...checked, origin:'USER_INDEPENDENT_RECORD' });
 }
-export function resultReceipt({ operationId, action, state, sourceIdentity, configDigest, sourceRevision, treeConfirmed, code = 'OK', created = null, verified = null, expectedDigest = null, restored = null, observedAt = new Date().toISOString() }) {
+export function resultReceipt({ operationId, action, state, sourceIdentity, configDigest, sourceRevision, treeConfirmed, code = 'OK', created = null, verified = null, expectedDigest = null, restored = null, targetEntity = null, observedAt = new Date().toISOString() }) {
   if (!hex32(operationId) || !['create','verify','restore'].includes(action) ||
       !['PREPARED','COMPLETE','CANCELLED_BEFORE_EXECUTION','UNKNOWN_RESULT','UNKNOWN_TREE','REJECTED'].includes(state) ||
       !hex64(sourceIdentity) || !hex64(configDigest) || !revision(sourceRevision) || typeof treeConfirmed !== 'boolean' ||
@@ -84,7 +84,13 @@ export function resultReceipt({ operationId, action, state, sourceIdentity, conf
   if (state === 'COMPLETE' && (!packageInfo || action === 'create' && !created || action === 'restore' && (!restoreInfo || restoreInfo.backup_id !== packageInfo.backup_id))) invalid();
   if (packageInfo) Object.freeze(packageInfo);
   if (restoreInfo) Object.freeze(restoreInfo);
+  if (targetEntity !== null) {
+    if (!exact(targetEntity,['identity_scope','filesystem','boot_sha256','object_sha256','object_family_sha256']) ||
+        targetEntity.identity_scope !== 'KERNEL_BOOT' || !['EXT4','TMPFS'].includes(targetEntity.filesystem) ||
+        !['boot_sha256','object_sha256','object_family_sha256'].every(key=>hex64(targetEntity[key]))) invalid();
+    targetEntity=Object.freeze({...targetEntity});
+  }
   return Object.freeze({ format:'loopcast.maintenance-receipt.v1', operation_id:operationId, action, state,
     source_identity:sourceIdentity, config_digest:configDigest, source_revision:sourceRevision,
-    tree_confirmed:treeConfirmed, code, observed_at:observedAt, package:packageInfo, restore:restoreInfo });
+    tree_confirmed:treeConfirmed, code, observed_at:observedAt, package:packageInfo, restore:restoreInfo, target_entity:targetEntity });
 }

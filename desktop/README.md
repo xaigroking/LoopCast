@@ -56,6 +56,7 @@ The trusted manifest has these required fields:
 | `hostRevision`, `apiRevision`, `webRevision` | Actual 40 character source revisions, separately recorded |
 | `nodeVersion` | `24.22.1` |
 | `python`, `node`, `treeModule` | Each contains an absolute `path` and a 64 character `sha256` |
+| `electron` | Absolute verified executable and SHA256, required by the managed supervisor entry |
 | `nextRoot` | Absolute standalone root containing `server.js`, `.next/BUILD_ID`, `.next/static` and `public` |
 | `dataDir` | Existing trusted business data directory, validated by the platform port |
 | `sessionDir` | Existing private Electron session directory, separate from business and installation resources |
@@ -361,8 +362,8 @@ manifest digest, and retained in private HMAC receipts outside the business and
 browser directories. The result dialog can save a new independent digest record.
 Verify and restore require such a record selected outside the backup; the package
 cannot supply its own expected digest. Verification does not stop a running owner.
-Restore creates a fresh guarded directory and leaves it offline. This menu does
-not open a restored workspace or authorize uploads.
+Restore creates a fresh guarded directory and leaves it offline. A separate explicit handoff plan can open that restored workspace through the
+managed supervisor; it never authorizes uploads.
 
 Write maintenance remains offline until **Return to original workspace** is
 selected. Return revalidates resources and original directory/profile objects,
@@ -382,3 +383,51 @@ an unconfirmed result, never permission to overwrite or repeat an operation.
 Source tests, installed production-tree composition, controlled native-selector
 results and actual X11 selector cancellation are recorded separately. Only the
 last category establishes interaction with the real operating-system selector.
+
+
+## Managed workspace succession
+
+`npm start -- --desktop-config /absolute/desktop.json` starts a fixed outer Node
+supervisor. Include the independently provisioned Electron resource when preparing
+the manifest (`--electron /absolute/electron`). Each Electron process has its own
+production ProcessTree; it keeps the existing Host, API, gateway and Next ownership.
+The old Electron must normally stop its owner, flush and exit, and its entire tree
+must end before a successor starts. The supervisor owns the successor until its
+normal STOP and final tree/pump confirmation. There is no detached relaunch,
+arbitrary command surface or renderer IPC.
+
+An application lease uses the current UID's account home, independently of HOME,
+XDG, manifests and selected directories. A fixed stdlib lease helper holds flock;
+its durable active marker survives pipe EOF or parent death. Normal release follows
+confirmed cleanup of all owned trees. An independent pending marker is persisted
+before maintenance or handoff. Shared DirectoryLock admission checks both markers,
+including service/CLI attempts at a different directory. Capabilities travel only
+through private pipes, expire when consumed, and never enter argv, environment,
+browser responses, receipts or logs. These application markers do not replace the
+separate desktop, maintenance or permanent restore publication barriers.
+
+HMAC phase records and binding commits live outside business packages and browser
+profiles. A restored binding requires a real authenticated completed restore receipt
+and its independently recorded package digest and kernel directory identity. Initial
+profile creation follows the explicit plan and complete old-process exit. Reuse
+requires the same KERNEL_BOOT filesystem handle, boot-unique mount and existing
+profile; missing/replaced profiles, aliases, copies, changed boots or mounts refuse
+instead of allocating a new identity. First support remains local ext4/tmpfs on the
+supported Linux kernel. No profile or pending-storage migration is inferred.
+
+Each binding keeps a fixed loopback port. Conflicts fail without changing the
+origin. The new process configures its own persistent session before ready, starts
+with fresh API/gateway capabilities, and loads its first page while hidden. A
+restored process rechecks ACTIVE restore guard, restore identity, version and epoch
+through its actual API. Only then can the supervisor publish the current binding
+commit, finish the pending handoff and show the window. Failure before commit
+preserves the old pointer, both profiles and pending evidence. Failure after
+commit preserves that committed event as a fact; unresolved pending admission
+still prevents automatic restart or recovery.
+
+The restored menu explicitly returns through the same protocol to the original
+binding, origin and profile. It inherits no provider, social, schedule or inspection
+configuration. Cookie, localStorage, IndexedDB and pending requests stay within
+their own profiles. Cache-only clearing does not erase them, and neither startup
+nor round trips replay writes. Direct legacy Electron startup cannot enroll a
+restored directory, override an existing binding or bypass the current pointer.

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from 'node:child_process';
 import { isAbsolute } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { Budget, HostError } from './errors.mjs';
 import { parsePreflight } from './preflight.mjs';
 
@@ -23,10 +25,16 @@ export function createTreePort(config) {
       if (!isAbsolute(spec.executable) || !Array.isArray(spec.argv) || spec.argv.length > 128 ||
           [spec.executable, ...spec.argv].some(value => typeof value !== 'string' || value.includes('\0')) ||
           performance.now() >= spec.deadline || spec.signal?.aborted) throw new HostError('START_TIMEOUT');
-      const stdio = ['pipe', spec.stdio[1], 'pipe', 'pipe', 'pipe', 'pipe'];
+      for (const resource of [config.python, ...[config.node, config.electron].filter(value=>value?.path===spec.executable)]) {
+        if (resource?.sha256 && createHash('sha256').update(readFileSync(resource.path)).digest('hex') !== resource.sha256) throw new HostError('RESOURCE_DIGEST_MISMATCH');
+      }
+      if (performance.now() >= spec.deadline || spec.signal?.aborted) throw new HostError('START_TIMEOUT');
+      const stdio = ['pipe', spec.stdio[1], 'pipe', 'pipe', 'pipe', 'pipe', 'pipe'];
       const child = spawn(config.python.path, ['-I', '-m', 'loopcast.process_tree', spec.executable, ...spec.argv], {
         cwd: spec.cwd, env: spec.env, stdio, detached: true, windowsHide: true,
       });
+      child.stdio[6].on('error', () => {});
+      child.stdio[6].end(JSON.stringify({ format:'loopcast.private-admission.v1', capability:config.admission ?? null, lease:config.leaseCapability ?? null }));
       let status, witness, buffer = '', malformed = false;
       const exited = new Promise(resolve => {
         child.once('exit', code => { status = code; resolve(code); });

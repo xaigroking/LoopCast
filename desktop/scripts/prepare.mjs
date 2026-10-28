@@ -32,6 +32,7 @@ export async function prepare(values) {
     nextRoot: values.next, dataDir: values.data, sessionDir: values.session,
     gatewayPort: Number(values.port), nodeVersion: '24.22.1', locale: values.locale ?? 'en',
     configs: {}, startTimeoutMs: 30000, stopTimeoutMs: 15000 };
+  if (values.electron) result.electron = await resource(values.electron);
   const missing = Object.entries(info.capabilities ?? {}).filter(([, status]) => status !== 'implemented').map(([name]) => name);
   if (info.format !== 'loopcast.platform.v1' || missing.length || !/^[a-f0-9]{40}$/.test(info.source_revision) || revision !== values.revision || info.source_revision !== values.revision) throw new Error('Source or platform capabilities do not match the requested combination.');
   return result;

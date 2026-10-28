@@ -33,6 +33,8 @@ def main():
     if not supported(): return 2
     libc = ctypes.CDLL(None, use_errno=True)
     if libc.prctl(36, 1, 0, 0, 0) != 0: return 2  # PR_SET_CHILD_SUBREAPER
+    from .desktop_admission import load_private
+    private_bootstrap = load_private(close=True)
     argv = sys.argv[1:]
     identity = None
     if '--desktop-session-stdin' in argv:
@@ -44,7 +46,17 @@ def main():
     forced = False
     deadline = None
     try:
-        child = subprocess.Popen(argv, close_fds=True, pass_fds=(3,), start_new_session=True)
+        private_child = private_bootstrap is not None and len(argv) >= 4 and os.path.realpath(argv[0]) == os.path.realpath(sys.executable) and argv[1:3] == ['-I', '-m'] and argv[3] in {'loopcast', 'loopcast.desktop_guard', 'loopcast.desktop_admission', 'loopcast.desktop_maintenance', 'loopcast.desktop_workspace'}
+        if private_child:
+            read_fd, write_fd = os.pipe()
+            try:
+                os.write(write_fd, private_bootstrap)
+                os.dup2(read_fd, 6)
+            finally:
+                os.close(write_fd)
+                if read_fd != 6: os.close(read_fd)
+        child = subprocess.Popen(argv, close_fds=True, pass_fds=(3, 6) if private_child else (3,), start_new_session=True)
+        if private_child: os.close(6)
         os.set_blocking(4, False)
         with selectors.DefaultSelector() as selector:
             selector.register(4, selectors.EVENT_READ)

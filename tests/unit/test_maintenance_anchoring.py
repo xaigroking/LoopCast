@@ -79,3 +79,53 @@ class MaintenanceAnchoringTests(unittest.TestCase):
             restore_backup(package, created['manifest_sha256'], self.root / 'restored')
         self.assertEqual(observed, [True])
         with DirectoryLock(self.root / 'restored'): pass
+
+
+    def test_snapshot_and_prepared_guard_sync_failures_never_publish_a_target(self):
+        package = self.root / 'package'; created = create_backup(self.source, package)
+        fsync = os.fsync
+        for action in ['backup', 'restore']:
+            with self.subTest(action=action):
+                target = self.root / ('failed-' + action); count = []
+                def fail_at_database(handle):
+                    path = os.readlink('/proc/self/fd/' + str(handle))
+                    prefix = '.loopcast-backup-' if action == 'backup' else '.loopcast-restore-'
+                    if prefix in path and path.endswith('/state.sqlite3'):
+                        count.append(path)
+                        if len(count) == (1 if action == 'backup' else 2):
+                            raise OSError(5, 'Controlled database fsync failure')
+                    return fsync(handle)
+                with patch('os.fsync', side_effect=fail_at_database):
+                    with self.assertRaisesRegex(OSError, 'fsync failure'):
+                        if action == 'backup': create_backup(self.source, target)
+                        else: restore_backup(package, created['manifest_sha256'], target)
+                self.assertEqual(len(count), 1 if action == 'backup' else 2)
+                self.assertFalse(target.exists()); self.assertEqual(list(self.root.glob('.loopcast-*')), [])
+                self.assert_canary()
+        with DirectoryLock(self.source): pass
+
+    def test_parent_sync_failure_after_rename_retains_published_package_and_active_restore_guard(self):
+        package = self.root / 'package'; created = create_backup(self.source, package)
+        fsync = os.fsync
+        for action in ['backup', 'restore']:
+            with self.subTest(action=action):
+                target = self.root / ('published-' + action); failed = []
+                def fail_after_publication(handle):
+                    if os.readlink('/proc/self/fd/' + str(handle)) == str(self.root) and target.exists():
+                        failed.append(True); raise OSError(5, 'Controlled parent fsync failure')
+                    return fsync(handle)
+                with patch('os.fsync', side_effect=fail_after_publication):
+                    with self.assertRaisesRegex(OSError, 'fsync failure'):
+                        if action == 'backup': create_backup(self.source, target)
+                        else: restore_backup(package, created['manifest_sha256'], target)
+                self.assertEqual(failed, [True]); self.assertTrue(target.is_dir())
+                before = {p.relative_to(target): p.read_bytes() for p in target.rglob('*') if p.is_file()}
+                with self.assertRaises(ValueError):
+                    if action == 'backup': create_backup(self.source, target)
+                    else: restore_backup(package, created['manifest_sha256'], target)
+                self.assertEqual(before, {p.relative_to(target): p.read_bytes() for p in target.rglob('*') if p.is_file()})
+                if action == 'restore':
+                    status = Store(target).operations_status()
+                    self.assertEqual(status['restore_guard']['state'], 'ACTIVE')
+                    self.assertFalse(status['upload_allowed_by_recovery'])
+                self.assert_canary()

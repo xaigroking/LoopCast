@@ -21,8 +21,8 @@ allowed = {
     "quota_storage": {"domain"},
     "schedule_models": {"studio_models", "schedule_config"}, "schedule_config": {"studio_models"},
     "schedule_time": {"domain", "schedule_models"}, "schedule_storage": {"domain", "schedule_time"},
-    "ownership": {"runtime_guard"}, "runtime_guard": set(), "desktop_guard": {"ownership", "runtime_guard", "desktop_diagnostics"}, "managed": set(), "desktop_session": set(), "platform_info": set(), "process_tree": {"platform_info", "desktop_guard"}, "backup": {"migrations", "ownership"},
-    "operations_storage": {"domain"}, "restore": {"backup", "ownership", "storage", "operations_storage"},
+    "desktop_admission": set(), "desktop_workspace": {"desktop_admission", "ownership", "desktop_diagnostics", "workspace_inspection"}, "ownership": {"runtime_guard", "desktop_admission"}, "runtime_guard": {"desktop_admission"}, "desktop_guard": {"desktop_admission", "ownership", "runtime_guard", "desktop_diagnostics"}, "managed": set(), "desktop_session": set(), "platform_info": set(), "process_tree": {"desktop_admission", "platform_info", "desktop_guard"}, "backup": {"migrations", "ownership"},
+    "operations_storage": {"domain"}, "restore": {"desktop_admission", "backup", "ownership", "storage", "operations_storage"},
     "operations_snapshot": {"backup", "migrations", "ownership", "runner"},
     "operations_models": {"studio_models"}, "operations_api": {"operations_models", "operations_snapshot"},
     "domain": set(), "contracts": set(), "fixture": set(), "runner": set(),
@@ -46,10 +46,10 @@ allowed = {
     "publisher": {"runner", "diagnostics"},
     "runtime": {"storage", "worker", "generation", "publisher", "media", "creation", "social", "studio_service", "ownership", "inspection_service"},
     "api": {"runtime", "storage", "diagnostics", "studio_api", "feedback_api", "operations_api", "schedule_api", "schedule_models", "inspection_api"}, "openapi": {"api"},
-    "desktop_diagnostics": {"backup", "migrations", "ownership", "platform_info", "runtime_guard"},
-    "desktop_maintenance": {"ownership", "runtime_guard", "backup", "restore", "platform_info"},
+    "desktop_diagnostics": {"desktop_admission", "backup", "migrations", "ownership", "platform_info", "runtime_guard"},
+    "desktop_maintenance": {"workspace_inspection", "desktop_admission", "ownership", "runtime_guard", "backup", "restore", "platform_info"},
     "workspace_inspection": {"desktop_diagnostics", "backup", "ownership"},
-    "__main__": {"desktop_diagnostics", "managed", "desktop_session", "platform_info", "api", "diagnostics", "generator_diagnostics", "mpt_install", "feedback_demo", "backup", "restore", "operations_snapshot", "schedule_config", "inspection_models"}, "__init__": set(),
+    "__main__": {"desktop_admission", "desktop_diagnostics", "managed", "desktop_session", "platform_info", "api", "diagnostics", "generator_diagnostics", "mpt_install", "feedback_demo", "backup", "restore", "operations_snapshot", "schedule_config", "inspection_models"}, "__init__": set(),
 }
 graph = {name: set() for name in modules}
 for name, path in modules.items():

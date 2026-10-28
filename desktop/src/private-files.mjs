@@ -66,10 +66,10 @@ export class ReceiptJournal {
     const names = readdirSync(this.root.anchor);
     if (names.length > 10000 || names.some(name => name !== 'key' && !/^[a-f0-9]{32}-[A-Z_]+\.json$/.test(name))) throw new HostError('MAINTENANCE_UNCONFIRMED');
     return names.filter(name => name !== 'key').map(name => {
-      const envelope = JSON.parse(readPrivate(join(this.root.path, name)));
+      const raw = readPrivate(join(this.root.path, name)), envelope = JSON.parse(raw);
       const bytes = Buffer.from(JSON.stringify(envelope.receipt));
       const mac = createHmac('sha256', this.key).update(bytes).digest();
-      if (Object.keys(envelope).sort().join(',') !== 'hmac,receipt' || typeof envelope.hmac !== 'string' || !/^[a-f0-9]{64}$/.test(envelope.hmac) ||
+      if (!raw.equals(Buffer.from(JSON.stringify(envelope))) || Object.keys(envelope).sort().join(',') !== 'hmac,receipt' || typeof envelope.hmac !== 'string' || !/^[a-f0-9]{64}$/.test(envelope.hmac) ||
           !timingSafeEqual(mac, Buffer.from(envelope.hmac, 'hex')) || name !== `${envelope.receipt.operation_id}-${envelope.receipt.state}.json`) throw new HostError('MAINTENANCE_UNCONFIRMED');
       return envelope.receipt;
     });
