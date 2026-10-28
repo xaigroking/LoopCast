@@ -143,6 +143,85 @@ test('actual entry sets native ready/session paths and loads its isolated produc
     sha256: { python: item.config.python.sha256, node: item.config.node.sha256, treeModule: item.config.treeModule.sha256 } }));
 });
 
+test('native maintenance menu uses the production coordinator and CLI, preserves the original profile and returns only on explicit selection', { timeout:120000 }, async t => {
+  const item=await fixture(t), app=await item.start(); let page=await app.firstPage();
+  await page.locator('.heading .primary').waitFor();
+  await page.evaluate(()=>{localStorage.setItem('maintenance-profile-canary','retained');});
+  const packagePath=join(item.root,'native-package'),proofPath=join(item.root,'independent-proof.json'),restoredPath=join(item.root,'native-restored');
+  const originalOwner=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.session.cookies.get({name:'loopcast_owner'}));
+  // Controlled native-dialog result injection through the external inspector,
+  // never a product flag, renderer bridge or replacement maintenance handler.
+  await app.evaluate(({dialog},paths)=>{
+    globalThis.maintenanceDialogEvidence={plans:0,results:[],saves:0,opens:0};
+    const saves=[paths.packagePath,paths.proofPath,paths.restoredPath];
+    const opens=[paths.packagePath,paths.proofPath,paths.packagePath,paths.proofPath];
+    dialog.showSaveDialog=async()=>{globalThis.maintenanceDialogEvidence.saves++;return{canceled:false,filePath:saves.shift()};};
+    dialog.showOpenDialog=async()=>{globalThis.maintenanceDialogEvidence.opens++;return{canceled:false,filePaths:[opens.shift()]};};
+    dialog.showMessageBox=async options=>{
+      if(options.type==='question'){globalThis.maintenanceDialogEvidence.plans++;return{response:0};}
+      globalThis.maintenanceDialogEvidence.results.push({type:options.type,guarded:options.message.includes('barrier')});
+      return{response:options.buttons.length===2?1:0};
+    };
+  },{packagePath,proofPath,restoredPath});
+  async function click(id){await app.evaluate(({Menu},id)=>{const item=Menu.getApplicationMenu().getMenuItemById(id);if(!item?.enabled)throw new Error('Menu action disabled');item.click();},id);}
+  async function available(id){return app.evaluate(({Menu},id)=>Menu.getApplicationMenu().getMenuItemById(id)?.enabled,id);}
+  await click('maintenance-create');
+  await until(async()=>{try{await stat(proofPath);return available('maintenance-verify');}catch{return false;}},30000);
+  assert.equal(page.isClosed(),true); await assert.rejects(stat(join(item.data,'desktop-runtime.guard.v1')));
+  await assert.rejects(stat(join(item.data,'desktop-maintenance.guard.v1')));
+  const utility=await app.evaluate(({BrowserWindow})=>{
+    const window=BrowserWindow.getAllWindows()[0],prefs=window.webContents.getLastWebPreferences();
+    return{count:BrowserWindow.getAllWindows().length,local:window.webContents.getURL().startsWith('data:'),sandbox:prefs.sandbox,contextIsolation:prefs.contextIsolation,webSecurity:prefs.webSecurity,node:prefs.nodeIntegration,persistent:window.webContents.session.isPersistent()};
+  });
+  assert.deepEqual(utility,{count:1,local:true,sandbox:true,contextIsolation:true,webSecurity:true,node:false,persistent:false});
+  const proof=JSON.parse(await readFile(proofPath,'utf8'));assert.match(proof.manifest_sha256,/^[a-f0-9]{64}$/);
+  await click('maintenance-verify');await until(()=>available('maintenance-restore'),30000);
+  await click('maintenance-restore');
+  await until(async()=>{try{await stat(join(restoredPath,'restore-manifest.json'));return available('maintenance-return');}catch{return false;}},30000);
+  await assert.rejects(stat(join(restoredPath,'desktop-runtime.guard.v1')));
+  assert.equal((await app.evaluate(()=>globalThis.maintenanceDialogEvidence.results)).length,3);
+  await click('maintenance-return');page=await app.firstPage();await page.locator('.heading .primary').waitFor();
+  assert.equal(await page.evaluate(()=>localStorage.getItem('maintenance-profile-canary')),'retained');
+  const owner=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.session.cookies.get({name:'loopcast_owner'}));
+  assert.equal(owner[0].value,originalOwner[0].value);
+  const evidence=await app.evaluate(()=>globalThis.maintenanceDialogEvidence);
+  assert.equal(evidence.plans,3);assert.equal(evidence.saves,3);assert.equal(evidence.opens,4);
+  assert.ok(evidence.results.every(value=>value.type==='info'));assert.equal(evidence.results[2].guarded,true);
+  assert.equal((await app.quit()).code,0);
+  console.log('Controlled native-dialog results -> real maintenance menu/coordinator/ProcessTree/installed CLI/explicit original-profile Return PASS');
+});
+
+test('real native maintenance shortcut opens a save selector and native Escape cancels without stopping the owner', {timeout:70000}, async t=>{
+  const item=await fixture(t,{locale:'zh-Hans'}),app=await item.start(),page=await app.firstPage();await page.locator('.heading .primary').waitFor();
+  await app.evaluate(({dialog,BrowserWindow})=>{
+    globalThis.nativeMaintenanceSelection={opened:false,cancelled:false};
+    const original=dialog.showSaveDialog.bind(dialog);
+    dialog.showSaveDialog=async options=>{globalThis.nativeMaintenanceSelection.opened=true;const result=await original(options);globalThis.nativeMaintenanceSelection.cancelled=result.canceled;return result;};
+    BrowserWindow.getAllWindows()[0].focus();
+  });
+  const nativeWindow=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getNativeWindowHandle().readUInt32LE(0));
+  await promisify(execFile)('xdotool',['windowactivate','--sync',String(nativeWindow)],{timeout:7000});
+  await until(()=>app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isFocused()));
+  await promisify(execFile)('xdotool',['key','--clearmodifiers','ctrl+shift+b'],{timeout:3000});
+  await stage('MAINTENANCE_SELECTOR_REQUEST',()=>until(()=>app.evaluate(()=>globalThis.nativeMaintenanceSelection.opened)));
+  const title=item.config.locale==='zh-Hans'?'选择全新的私有目录名称':'Choose a new private directory name';
+  const picker=await stage('MAINTENANCE_SELECTOR_MAPPING',()=>until(async()=>{
+    const active=(await promisify(execFile)('xdotool',['getactivewindow'],{timeout:3000})).stdout.trim();
+    if(Number(active)===nativeWindow)return false;
+    const name=(await promisify(execFile)('xdotool',['getwindowname',active],{timeout:3000})).stdout.trim();
+    return name===title?active:false;
+  }));
+  await promisify(execFile)('xdotool',['windowactivate','--sync',picker],{timeout:7000});
+  assert.equal((await promisify(execFile)('xdotool',['getactivewindow'],{timeout:3000})).stdout.trim(),picker);
+  await promisify(execFile)('xdotool',['key','--clearmodifiers','Escape'],{timeout:3000});
+  await stage('MAINTENANCE_SELECTOR_CANCEL',()=>until(()=>app.evaluate(()=>globalThis.nativeMaintenanceSelection.cancelled)));
+  await until(()=>app.evaluate(({Menu})=>Menu.getApplicationMenu().getMenuItemById('maintenance-create').enabled));
+  assert.equal(page.isClosed(),false);assert.equal((await page.evaluate(async()=>(await fetch('/healthz')).status)),200);
+  assert.ok(await stat(join(item.data,'desktop-runtime.guard.v1')));await assert.rejects(stat(join(item.data,'desktop-maintenance.guard.v1')));
+  assert.equal((await app.quit()).code,0);
+  console.log('Actual X11 maintenance shortcut/native selector/Escape cancellation PASS');
+});
+
 test('unpaused executable startup also uses the configured profile and exits through the real window', { timeout: 60000 }, async t => {
   const item = await fixture(t), app = await item.start({ observe: false }), page = await app.firstPage();
   await page.locator('.heading .primary').waitFor();

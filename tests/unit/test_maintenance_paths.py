@@ -1,5 +1,6 @@
 """Maintenance must never clean a replacement object under an old stage name."""
 from pathlib import Path
+import os
 import hashlib
 import tempfile
 import unittest
@@ -22,6 +23,7 @@ class MaintenancePathTests(unittest.TestCase):
         canary=[]
         def replace(_source,relative,destination,_expected,**_options):
             stage=Path(destination).parents[1]
+            if str(stage).startswith('/proc/self/fd/'): stage=Path(os.readlink(stage))
             self.parent.rename(self.root/'owned-parent')
             self.parent.mkdir(mode=0o700)
             foreign=self.parent/stage.name;foreign.mkdir(mode=0o700)

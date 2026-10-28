@@ -27,7 +27,7 @@ from .inspection_storage import InspectionMethods
 
 
 class Store(PublicationMethods, StudioMethods, AccountMethods, ReleaseMethods, FeedbackMethods, OperationsMethods, ScheduleMethods, QuotaMethods, ScheduleExecutionMethods, InspectionMethods):
-    def __init__(self, directory, component=None, *, clock=None, schedule_settings=None, inspection_settings=None):
+    def __init__(self, directory, component=None, *, clock=None, schedule_settings=None, inspection_settings=None, _restore_connection=None):
         self.clock = clock or SystemClock()
         self.inspection_settings = InspectionSettings.model_validate(inspection_settings or {})
         self.schedule_settings = ScheduleSettings.model_validate(schedule_settings or {})
@@ -35,10 +35,11 @@ class Store(PublicationMethods, StudioMethods, AccountMethods, ReleaseMethods, F
         self._schedule_cursor_key = secrets.token_bytes(32)
         self.admission_lock = threading.RLock()
         self.component = component
-        self.directory = Path(directory).resolve()
-        self.directory.mkdir(parents=True, exist_ok=True)
+        self._restore_connection = _restore_connection
+        self.directory = Path(directory) if _restore_connection is not None else Path(directory).resolve()
+        if _restore_connection is None: self.directory.mkdir(parents=True, exist_ok=True)
         self.artifact_dir = self.directory / 'artifacts'
-        self.artifact_dir.mkdir(exist_ok=True)
+        if _restore_connection is None: self.artifact_dir.mkdir(exist_ok=True)
         self.database = self.directory / 'state.sqlite3'
         with closing(self.connect()) as db:
             db.execute('PRAGMA journal_mode=WAL')
@@ -46,6 +47,7 @@ class Store(PublicationMethods, StudioMethods, AccountMethods, ReleaseMethods, F
             migrate(db)
 
     def connect(self):
+        if self._restore_connection is not None: return self._restore_connection
         db = sqlite3.connect(self.database, timeout=30, isolation_level=None)
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA foreign_keys=ON')

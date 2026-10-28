@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HostError } from './errors.mjs';
 const codes = new Set(['OK', 'DIRECTORY_MISSING', 'DIRECTORY_UNSAFE', 'FILE_UNSAFE', 'PERMISSION_DENIED',
-  'OWNER_HELD', 'DESKTOP_CLEANUP_UNCONFIRMED', 'GUARD_UNSAFE', 'DIAGNOSTICS_UNAVAILABLE']);
+  'OWNER_HELD', 'MAINTENANCE_UNCONFIRMED', 'DESKTOP_CLEANUP_UNCONFIRMED', 'GUARD_UNSAFE', 'DIAGNOSTICS_UNAVAILABLE']);
 export function parsePreflight(bytes, exitCode) {
   try {
     if (!Buffer.isBuffer(bytes) || bytes.length > 512 || bytes.some(byte => byte > 126 || byte < 32 && byte !== 10)) throw new Error();

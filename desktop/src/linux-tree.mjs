@@ -18,6 +18,7 @@ export function createTreePort(config) {
       await command(['-I', '-m', 'loopcast.desktop_guard', 'validate-result', value.dataDir, value.sessionDir], value.deadline, true);
       return { api: { ...env }, web: { ...env } };
     },
+    maintenanceEnvironment() { return { ...env }; },
     launch(spec) {
       if (!isAbsolute(spec.executable) || !Array.isArray(spec.argv) || spec.argv.length > 128 ||
           [spec.executable, ...spec.argv].some(value => typeof value !== 'string' || value.includes('\0')) ||
