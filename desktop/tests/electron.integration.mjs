@@ -368,7 +368,7 @@ test('two actual processes ignore the second config and keep a single native win
   await until(() => app.evaluate(({ BrowserWindow }) => !BrowserWindow.getAllWindows()[0].isMinimized()));
   assert.deepEqual((await managed(app)).map(value => value.pid).sort(), before.map(value => value.pid).sort());
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
-  assert.equal((await app.quit()).code, 0); await treesGone(before);
+  assert.deepEqual(await app.quit(), { code:0, signal:null }); await treesGone(before);
 });
 
 test('real response loss, reload, cache-only clear and native restart preserve two explicit retry identities', { timeout: 120000 }, async t => {

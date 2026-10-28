@@ -41,7 +41,7 @@ export async function launchElectron({ executable, directory, manifest, env, obs
   try {
     await until(() => inspectorURL);
     socket = new WebSocket(inspectorURL); await budget.run(once(socket, 'open'));
-    let serial = 0, entryBreakpoint, entryPaused, readyBreakpoint, readyPaused;
+    let serial = 0, entryBreakpoint, entryPaused, readyBreakpoint, readyPaused, readyFrame;
     const readyPause = new Promise(resolve => { readyPaused = resolve; });
     const entry = new Promise(resolve => { entryPaused = resolve; });
     const requests = new Map();
@@ -49,7 +49,7 @@ export async function launchElectron({ executable, directory, manifest, env, obs
       const result = JSON.parse(event.data);
       if (result.id) { const task = requests.get(result.id); requests.delete(result.id); task?.resolve(result); }
       if (result.method === 'Debugger.paused') {
-        if (readyBreakpoint && result.params.hitBreakpoints?.includes(readyBreakpoint)) readyPaused();
+        if (readyBreakpoint && result.params.hitBreakpoints?.includes(readyBreakpoint)) { readyFrame=result.params.callFrames[0].callFrameId;readyPaused(); }
         else if (entryBreakpoint && result.params.hitBreakpoints?.includes(entryBreakpoint)) entryPaused();
         else socket.send(JSON.stringify({ id: ++serial, method: 'Debugger.resume' }));
       }
@@ -155,6 +155,7 @@ export async function launchElectron({ executable, directory, manifest, env, obs
     }
     return { child, browser, context, evaluate, firstPage, exited, get status() { return status; },
       readyPause, async resumeReady() { await send('Debugger.removeBreakpoint',{breakpointId:readyBreakpoint});readyBreakpoint=undefined;await send('Debugger.resume'); },
+      async pausedPid() { const result=await send('Debugger.evaluateOnCallFrame',{callFrameId:readyFrame,expression:'process.pid',returnByValue:true});if(result.exceptionDetails)throw new Error('NATIVE_PID_UNAVAILABLE');return result.result.value; },
       get debuggerWaiting() { return debuggerWaiting; },
       async quit() {
         const closing = new Budget(20000);

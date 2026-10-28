@@ -26,8 +26,9 @@ async function fixture(t,{pauseTarget=false}={}){
   const wrapper=join(root,'inspected-owned-port.mjs'),production=new URL('../src/linux-tree.mjs',import.meta.url).href;
   // External test tooling adds debugger listeners only. Production ownership,
   // cleanup, default sandbox, private pipes and every maintenance handler run.
-  await writeFile(wrapper,`import{createTreePort as production}from ${JSON.stringify(production)};let workers=0;
-export function createTreePort(config){const tree=production(config),launch=tree.launch.bind(tree);tree.launch=spec=>launch(spec.executable===${JSON.stringify(executable)}?{...spec,argv:[${pauseTarget}&&workers++>0?'--inspect-brk=0':'--inspect=0','--remote-debugging-port=0',...spec.argv]}:spec);return tree;}`,{mode:0o600});
+  await writeFile(wrapper,`import{createTreePort as production}from ${JSON.stringify(production)};let workers=0,observer;
+export function observeLaunch(fn){observer=fn;}
+export function createTreePort(config){const tree=production(config),launch=tree.launch.bind(tree);tree.launch=spec=>{const owned=launch(spec.executable===${JSON.stringify(executable)}?{...spec,argv:[${pauseTarget}&&workers++>0?'--inspect-brk=0':'--inspect=0','--remote-debugging-port=0',...spec.argv]}:spec);observer?.(owned,spec);return owned;};return tree;}`,{mode:0o600});
   config.treeModule={path:wrapper,sha256:hash(await readFile(wrapper))};
   const filename=join(root,'desktop.json');await writeFile(filename,JSON.stringify(config),{mode:0o600});
   const environment={PATH:'/usr/bin:/bin',LANG:'C.UTF-8',HOME:home,XDG_CONFIG_HOME:join(home,'config'),DISPLAY:process.env.DISPLAY};
@@ -63,7 +64,7 @@ export function createTreePort(config){const tree=production(config),launch=tree
     await until(()=>supervisor.state==='READY'&&supervisor.current.id===applications.at(-1).binding.id,45000);
     return current();
   }
-  return{root,data,profile,config,filename,supervisor,applications,current,transfer};
+  return{root,data,profile,config,filename,supervisor,applications,current,transfer,treeObserver:await import(wrapper)};
 }
 
 async function click(app,id){await app.evaluate(({Menu},id)=>{const item=Menu.getApplicationMenu().getMenuItemById(id);if(!item?.enabled)throw new Error('Native menu action is unavailable');item.click();},id);}
@@ -190,9 +191,9 @@ test('native cancelled and duplicate handoff plans never consume admission or cr
   const item=await restoredFixture(t);let duplicate;
   item.supervisor.on('phase',event=>{if(event.phase==='PLANNED'&&item.supervisor.plan){duplicate=item.supervisor.prepare({return_original:true});duplicate.catch(()=>{});}});
   await item.app.evaluate(({dialog})=>{dialog.showMessageBox=async options=>({response:options.title==='Review workspace handoff'?1:0});});
-  await click(item.app,'workspace-open');await until(()=>duplicate);
+  await click(item.app,'workspace-open');await until(()=>Boolean(duplicate));
   await assert.rejects(duplicate,/HANDOFF_UNCONFIRMED/);await until(()=>!item.supervisor.plan);
-  assert.equal(item.applications.length,1);assert.equal(item.supervisor.pendingOperation,undefined);
+  assert.equal(item.applications.length,1);assert.equal(item.supervisor.pendingOperation??null,null);
   assert.equal(item.supervisor.current.id,item.original.id);
 });
 
@@ -211,7 +212,7 @@ for(const stage of ['SOURCE_STOPPED','TARGET_ADMITTED','TARGET_READY','COMMITTED
       await until(()=>item.app.debuggerWaiting||item.app.status);await item.app.detach();
       await until(()=>item.applications.length===2);
       const app=await item.applications.at(-1).connected;
-      await new Budget(30000).run(app.readyPause);pid=await app.evaluate(()=>process.pid);
+      await new Budget(30000).run(app.readyPause);pid=await app.pausedPid();
       if(stage==='TARGET_ADMITTED'){fired=true;process.kill(pid,'SIGKILL');}else await app.resumeReady();
     }
     await until(()=>fired&&item.supervisor.state==='QUARANTINED',45000);
@@ -220,12 +221,12 @@ for(const stage of ['SOURCE_STOPPED','TARGET_ADMITTED','TARGET_READY','COMMITTED
   });
 }
 
-for(const stage of ['SOURCE_EXITED','TARGET_BOUND']){
+for(const stage of ['SOURCE_EXITED','BINDING','TARGET_BOUND']){
   test(`closing the actual supervisor at ${stage} cannot launch another Electron`,{timeout:90000},async t=>{
     const item=await restoredFixture(t);let closing;
     item.supervisor.on('phase',event=>{if(event.phase===stage)closing=item.supervisor.close();});
     await click(item.app,'workspace-open');await until(()=>item.app.debuggerWaiting||item.app.status);await item.app.detach();
-    await until(()=>closing);await closing;
+    await until(()=>Boolean(closing));await closing;
     assert.equal(item.applications.length,1);assert.equal(item.supervisor.state,'QUARANTINED');await assertFenced(item);
   });
 }
@@ -265,7 +266,7 @@ test('native cancellation after durable permission completes STOP and retains pe
       if(!item?.enabled)throw new Error('Native cancel is unavailable');item.click();
     });
   });
-  await click(item.app,'workspace-open');await until(()=>cancelling);await cancelling;
+  await click(item.app,'workspace-open');await until(()=>Boolean(cancelling));await cancelling;
   await until(()=>item.supervisor.plan?.cancelled,30000);
   assert.equal(item.applications.length,1);await assertFenced(item);
   assert.equal(await readyMenu(item.app,'workspace-open'),false);
@@ -276,7 +277,7 @@ test('a copied restored directory and a receipt-free plan cannot acquire success
   const receipt=item.supervisor.receipts.records().find(value=>value.action==='restore'&&value.state==='COMPLETE');
   await assert.rejects(item.supervisor.prepare({path:item.restoredPath}),/HANDOFF_UNCONFIRMED/);
   await assert.rejects(item.supervisor.prepare({path:copy,receipt:receipt.operation_id}),/HANDOFF_UNCONFIRMED/);
-  assert.equal(item.supervisor.pendingOperation,undefined);assert.equal(item.applications.length,1);
+  assert.equal(item.supervisor.pendingOperation??null,null);assert.equal(item.applications.length,1);
 });
 
 test('killing the actual outer Node supervisor leaves durable admission after all owned descendants stop',{timeout:90000},async t=>{
@@ -302,4 +303,19 @@ test('killing the actual outer Node supervisor leaves durable admission after al
   const unrelated=join(item.root,'unrelated');await mkdir(unrelated,{mode:0o700});
   const cli=spawn(item.config.python.path,['-I','-m','loopcast','serve','--data-dir',unrelated,'--port','0'],{env:{PATH:'/usr/bin:/bin',LANG:'C.UTF-8'},stdio:'ignore'});
   assert.notEqual(await new Budget(5000).run(new Promise(resolve=>cli.once('exit',resolve))),0);assert.deepEqual(await readdir(unrelated),[]);
+});
+
+
+test('lost actual helper witness during target binding fences every workspace and retains pending',{timeout:90000},async t=>{
+  const item=await restoredFixture(t);let destroyed=false;
+  item.supervisor.on('phase',event=>{
+    if(event.phase!=='SOURCE_EXITED')return;
+    item.treeObserver.observeLaunch((owned,spec)=>{
+      if(destroyed||!spec.argv.includes('loopcast.desktop_workspace'))return;
+      destroyed=true;owned.child.stdout.once('data',()=>owned.child.stdio[5].destroy(new Error('External witness-pipe loss')));
+    });
+  });
+  await click(item.app,'workspace-open');await until(()=>item.app.debuggerWaiting||item.app.status);await item.app.detach();
+  await until(()=>destroyed&&item.supervisor.unknownTree&&item.supervisor.closed,45000);await item.supervisor.closed;
+  assert.equal(item.supervisor.state,'QUARANTINED');assert.equal(item.applications.length,1);await assertFenced(item);
 });
