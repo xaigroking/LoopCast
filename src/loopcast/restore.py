@@ -5,7 +5,7 @@ from pathlib import Path
 import shutil
 import sqlite3
 import stat
-from .backup import verify_backup, new_target, regular, copy_reference, readonly, private_staging
+from .backup import verify_backup, new_target, regular, copy_reference, readonly, private_staging, rollback_image
 from .ownership import DirectoryLock, directory
 from .storage import Store
 from .operations_storage import ReadOnlyOperations
@@ -45,8 +45,7 @@ def restore_backup(backup, expected_digest, destination, *, expected_parent=None
                         connection.row_factory = sqlite3.Row; connection.execute('PRAGMA foreign_keys=ON')
                         store = Store(Path(os.readlink(staging)), _restore_connection=connection)
                         status = store.prepare_restored_state(manifest, expected_digest)
-                        connection.execute('VACUUM')
-                        prepared = connection.serialize()
+                        prepared = rollback_image(connection)
                     finally: connection.finish()
                     check()
                     named = os.stat('state.sqlite3', dir_fd=staging_fd, follow_symlinks=False)
