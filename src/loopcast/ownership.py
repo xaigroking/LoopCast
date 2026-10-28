@@ -30,7 +30,7 @@ def directory(path, create=False):
 
 
 class DirectoryLock:
-    def __init__(self, path, create=False, *, desktop_identity=None):
+    def __init__(self, path, create=False, *, desktop_identity=None, maintenance_identity=None):
         self.path, self.directory_fd = directory(path, create)
         self.fd = None
         try:
@@ -42,7 +42,7 @@ class DirectoryLock:
             # Deferred import keeps the lock/guard boundary shared by service and
             # offline commands without creating a second owner implementation.
             from .runtime_guard import check
-            check(self.directory_fd, desktop_identity)
+            check(self.directory_fd, desktop_identity, maintenance_identity)
         except BaseException:
             self.close()
             raise

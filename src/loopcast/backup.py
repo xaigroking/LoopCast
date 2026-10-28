@@ -1,5 +1,6 @@
 """Offline, verified private backups. No credentials or executable workspaces."""
 from contextlib import closing
+from contextlib import contextmanager
 import ctypes
 from datetime import datetime, timezone
 import hashlib
@@ -10,7 +11,6 @@ from pathlib import Path, PurePosixPath
 import shutil
 import sqlite3
 import stat
-import tempfile
 import uuid
 from .migrations import CURRENT_VERSION
 from .ownership import DirectoryLock, directory
@@ -119,7 +119,9 @@ def copy_reference(source_fd, relative, destination, expected):
             before = os.fstat(origin.fileno())
             if before.st_size != expected[0]:raise ValueError('FILE_INTEGRITY_FAILED')
             destination.parent.mkdir(mode=0o700, exist_ok=True)
-            out = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            destination_fd = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try: out = os.open(destination.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=destination_fd)
+            finally: os.close(destination_fd)
             with os.fdopen(out, 'wb') as target:
                 shutil.copyfileobj(origin, target)
                 target.flush()
@@ -198,62 +200,101 @@ def discard_staging(path, expected):
         os.close(handle); os.close(parent)
 
 
-def create_backup(source, output):
-    with DirectoryLock(source) as owner:
-        target = new_target(output, owner.path)
-        staging = Path(tempfile.mkdtemp(prefix='.loopcast-backup-', dir=target.parent))
-        staging_owner = staging_identity(staging)
-        try:
-            with closing(readonly(owner.directory_fd)) as origin:
-                check_database(origin)
-                with closing(sqlite3.connect(staging / 'state.sqlite3')) as copied:
-                    origin.backup(copied)
-                    copied.execute('PRAGMA journal_mode=DELETE')
-                    schema = check_database(copied)
-                    refs = references(copied)
-                    counts = {row[0]: copied.execute('SELECT COUNT(*) FROM "' + row[0].replace('"', '""') + '"').fetchone()[0]
-                              for row in copied.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")}
-                    cursor = copied.execute('SELECT COALESCE(MAX(id),0) FROM events').fetchone()[0]
-            (staging / 'state.sqlite3').chmod(0o600)
-            for relative, expected in sorted(refs.items()):
-                copy_reference(owner.directory_fd, relative, staging / relative, expected)
-            paths = ['state.sqlite3', *sorted(refs)]
-            manifest = {'format': FORMAT, 'backup_id': uuid.uuid4().hex,
-                        'created_at': datetime.now(timezone.utc).isoformat(), 'schema_version': schema,
-                        'credentials_policy': 'excluded_reauthorize', 'application': code_identity(),
-                        'boundary': {'last_event_id': cursor, 'external_publication_coverage': 'unknown'}, 'counts': counts,
-                        'files': [{'path': name, 'size': (staging / name).stat().st_size, 'sha256': checksum(staging / name)} for name in sorted(paths)]}
-            raw = (json.dumps(manifest, sort_keys=True, indent=2) + '\n').encode()
-            with os.fdopen(os.open(staging / 'manifest.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as stream:
-                stream.write(raw); stream.flush(); os.fsync(stream.fileno())
-            digest = hashlib.sha256(raw).hexdigest()
-            verify_backup(staging, digest)
-            for folder in sorted((p for p in staging.iterdir() if p.is_dir())):
-                sync_directory(folder)
-            with (staging / 'state.sqlite3').open('rb') as stream:
-                os.fsync(stream.fileno())
-            sync_directory(staging)
-            publish_directory(staging, target)
-            audit = 'unavailable'
-            if schema >= 7:
-                try:
-                    with closing(sqlite3.connect(f'file:/proc/self/fd/{owner.directory_fd}/state.sqlite3?mode=rw', uri=True)) as db:
-                        with db:
-                            db.execute('INSERT INTO backup_audit VALUES(?,?,?,?)', (manifest['backup_id'], manifest['created_at'], digest, 'VERIFIED_PRIVATE_BACKUP'))
-                    audit = 'recorded'
-                except sqlite3.Error:
-                    audit = 'unavailable'
-            return {'format': FORMAT, 'backup_id': manifest['backup_id'], 'manifest_sha256': digest,
-                    'schema_version': schema, 'files': len(paths), 'state': 'VERIFIED_PRIVATE_BACKUP',
-                    'credentials_policy': 'excluded_reauthorize', 'audit': audit}
-        finally:
-            discard_staging(staging, staging_owner)
+@contextmanager
+def private_staging(target, prefix, expected_parent=None):
+    """All writes and no-replace publication stay under held parent/staging FDs."""
+    _, parent = directory(target.parent)
+    handle = None
+    name = prefix + uuid.uuid4().hex
+    try:
+        info = os.fstat(parent)
+        if info.st_uid != os.getuid() or info.st_mode & 0o077: raise ValueError('PRIVATE_DIRECTORY_REQUIRED')
+        if expected_parent is not None and [str(info.st_dev), str(info.st_ino)] != expected_parent: raise ValueError('PARENT_CHANGED')
+        os.mkdir(name, 0o700, dir_fd=parent)
+        handle = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        own = (os.fstat(handle).st_dev, os.fstat(handle).st_ino)
+        def check():
+            _, current = directory(target.parent)
+            try:
+                if (os.fstat(current).st_dev, os.fstat(current).st_ino) != (info.st_dev, info.st_ino): raise ValueError('PARENT_CHANGED')
+                named = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                if not stat.S_ISDIR(named.st_mode) or (named.st_dev, named.st_ino) != own: raise ValueError('STAGING_CHANGED')
+            finally: os.close(current)
+        def publish():
+            check(); os.fsync(handle); publish_entry(parent, name, target.name)
+            _, current = directory(target.parent)
+            try:
+                final = os.stat(target.name, dir_fd=parent, follow_symlinks=False)
+                if (os.fstat(current).st_dev, os.fstat(current).st_ino) != (info.st_dev, info.st_ino) or (final.st_dev, final.st_ino) != own: raise ValueError('PARENT_CHANGED')
+            finally: os.close(current)
+        yield Path(f'/proc/self/fd/{handle}'), handle, check, publish
+    finally:
+        if handle is not None:
+            # Cleanup consumes these descriptors and removes only this inode.
+            discard_staging(target.parent / name, (parent, handle, own))
+        else: os.close(parent)
 
 
-def verify_backup(backup, expected_digest):
+def create_backup(source, output, *, maintenance_identity=None):
+    with DirectoryLock(source, maintenance_identity=maintenance_identity) as owner:
+        return create_owned_backup(owner, output)
+
+
+def create_owned_backup(owner, output, *, expected_parent=None):
+    target = new_target(output, owner.path)
+    with private_staging(target, '.loopcast-backup-', expected_parent) as (staging, staging_fd, check, publish):
+        with closing(readonly(owner.directory_fd)) as origin:
+            check_database(origin)
+            with closing(sqlite3.connect(':memory:')) as copied:
+                origin.backup(copied)
+                # Rebuild the private snapshot through SQLite itself so its
+                # serialized header uses rollback mode, without WAL sidecars.
+                copied.execute('VACUUM')
+                schema = check_database(copied)
+                refs = references(copied)
+                counts = {row[0]: copied.execute('SELECT COUNT(*) FROM "' + row[0].replace('"', '""') + '"').fetchone()[0]
+                          for row in copied.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")}
+                cursor = copied.execute('SELECT COALESCE(MAX(id),0) FROM events').fetchone()[0]
+                copied_bytes = copied.serialize()
+            with os.fdopen(os.open('state.sqlite3', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=staging_fd), 'wb') as stream:
+                stream.write(copied_bytes); stream.flush(); os.fsync(stream.fileno())
+        for relative, expected in sorted(refs.items()):
+            copy_reference(owner.directory_fd, relative, staging / relative, expected)
+        paths = ['state.sqlite3', *sorted(refs)]
+        manifest = {'format': FORMAT, 'backup_id': uuid.uuid4().hex,
+                    'created_at': datetime.now(timezone.utc).isoformat(), 'schema_version': schema,
+                    'credentials_policy': 'excluded_reauthorize', 'application': code_identity(),
+                    'boundary': {'last_event_id': cursor, 'external_publication_coverage': 'unknown'}, 'counts': counts,
+                    'files': [{'path': name, 'size': (staging / name).stat().st_size, 'sha256': checksum(staging / name)} for name in sorted(paths)]}
+        raw = (json.dumps(manifest, sort_keys=True, indent=2) + '\n').encode()
+        with os.fdopen(os.open(staging / 'manifest.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as stream:
+            stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+        digest = hashlib.sha256(raw).hexdigest()
+        verify_backup(staging, digest, directory_fd=staging_fd)
+        for folder in sorted((p for p in staging.iterdir() if p.is_dir())):
+            sync_directory(folder)
+        with (staging / 'state.sqlite3').open('rb') as stream:
+            os.fsync(stream.fileno())
+        os.fsync(staging_fd)
+        publish()
+        audit = 'unavailable'
+        if schema >= 7:
+            try:
+                with closing(sqlite3.connect(f'file:/proc/self/fd/{owner.directory_fd}/state.sqlite3?mode=rw', uri=True)) as db:
+                    with db:
+                        db.execute('INSERT INTO backup_audit VALUES(?,?,?,?)', (manifest['backup_id'], manifest['created_at'], digest, 'VERIFIED_PRIVATE_BACKUP'))
+                audit = 'recorded'
+            except sqlite3.Error:
+                audit = 'unavailable'
+        return {'format': FORMAT, 'backup_id': manifest['backup_id'], 'manifest_sha256': digest,
+                'schema_version': schema, 'files': len(paths), 'state': 'VERIFIED_PRIVATE_BACKUP',
+                'credentials_policy': 'excluded_reauthorize', 'audit': audit}
+
+
+def verify_backup(backup, expected_digest, *, directory_fd=None):
     if not hex_digest(expected_digest):
         raise ValueError('MANIFEST_DIGEST_REQUIRED')
-    root, handle = directory(backup)
+    root, handle = directory(backup) if directory_fd is None else (Path(f'/proc/self/fd/{directory_fd}'), os.dup(directory_fd))
     try:
         if os.fstat(handle).st_mode & 0o077:
             raise ValueError('BACKUP_NOT_PRIVATE')

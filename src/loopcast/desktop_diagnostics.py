@@ -197,6 +197,8 @@ def preflight(paths):
                 private(os.fstat(fd), 'directory')
                 code, _ = guard_probe(fd)
                 if code != 'GUARD_ABSENT': return code
+                from .runtime_guard import read_guard, MAINTENANCE_NAME, MAINTENANCE_FORMAT
+                if read_guard(fd, MAINTENANCE_NAME, MAINTENANCE_FORMAT) is not None: return 'MAINTENANCE_UNCONFIRMED'
                 if index == 0:
                     code, _ = owner_probe(fd)
                     if code == 'OWNER_HELD': return code

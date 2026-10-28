@@ -344,3 +344,41 @@ The Linux native keyboard regression requires `xdotool` in the test environment.
 It activates the actual X11 window and sends one XTEST Return, then checks trusted
 keyboard events, exactly one default button click and the real opened dialog.
 This is a test dependency; the desktop application does not execute it.
+
+## Native offline maintenance
+
+The main-process Maintenance menu provides create, verify and restore actions.
+Native selectors produce a concrete local plan. Create and restore freeze the
+entry gateway, normally stop the existing owner, flush the browser profile and
+confirm all production trees before calling the installed maintenance helper.
+The helper reuses the existing backup/restore core and directory lock. A private
+maintenance marker fences ordinary service and CLI ownership while that helper
+runs. It is separate from desktop cleanup and permanent restore publication
+barriers. No renderer file, executable, shell or maintenance HTTP API is added.
+
+Create results are strictly parsed, independently verified against their returned
+manifest digest, and retained in private HMAC receipts outside the business and
+browser directories. The result dialog can save a new independent digest record.
+Verify and restore require such a record selected outside the backup; the package
+cannot supply its own expected digest. Verification does not stop a running owner.
+Restore creates a fresh guarded directory and leaves it offline. This menu does
+not open a restored workspace or authorize uploads.
+
+Write maintenance remains offline until **Return to original workspace** is
+selected. Return revalidates resources and original directory/profile objects,
+starts a new host with fresh capabilities and reattaches the original stable
+origin and persistent profile. It does not replay pending writes. Unfinished
+receipts, unknown trees and unresolved maintenance markers reject replacement;
+there is no automatic retry, cleanup or barrier-clearing action. Closing during
+maintenance requests cancellation and joins bounded tree cleanup before exit.
+
+Temporary package writes and no-replace publication use held directory objects.
+SQLite backup snapshots and private restore preparation use SQLite memory
+connections; restore applies the existing Store migrations and recovery methods,
+then writes its complete prepared image to the held staging database file. Memory
+usage consequently includes the database snapshot; a helper resource failure is
+an unconfirmed result, never permission to overwrite or repeat an operation.
+
+Source tests, installed production-tree composition, controlled native-selector
+results and actual X11 selector cancellation are recorded separately. Only the
+last category establishes interaction with the real operating-system selector.
