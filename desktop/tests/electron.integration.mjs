@@ -203,9 +203,18 @@ test('real native maintenance shortcut opens a save selector and native Escape c
   await promisify(execFile)('xdotool',['windowactivate','--sync',String(nativeWindow)],{timeout:7000});
   await until(()=>app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isFocused()));
   await promisify(execFile)('xdotool',['key','--clearmodifiers','ctrl+shift+b'],{timeout:3000});
-  await until(()=>app.evaluate(()=>globalThis.nativeMaintenanceSelection.opened));
+  await stage('MAINTENANCE_SELECTOR_REQUEST',()=>until(()=>app.evaluate(()=>globalThis.nativeMaintenanceSelection.opened)));
+  const title=item.config.locale==='zh-Hans'?'选择全新的私有目录名称':'Choose a new private directory name';
+  const picker=await stage('MAINTENANCE_SELECTOR_MAPPING',()=>until(async()=>{
+    const active=(await promisify(execFile)('xdotool',['getactivewindow'],{timeout:3000})).stdout.trim();
+    if(Number(active)===nativeWindow)return false;
+    const name=(await promisify(execFile)('xdotool',['getwindowname',active],{timeout:3000})).stdout.trim();
+    return name===title?active:false;
+  }));
+  await promisify(execFile)('xdotool',['windowactivate','--sync',picker],{timeout:7000});
+  assert.equal((await promisify(execFile)('xdotool',['getactivewindow'],{timeout:3000})).stdout.trim(),picker);
   await promisify(execFile)('xdotool',['key','--clearmodifiers','Escape'],{timeout:3000});
-  await until(()=>app.evaluate(()=>globalThis.nativeMaintenanceSelection.cancelled));
+  await stage('MAINTENANCE_SELECTOR_CANCEL',()=>until(()=>app.evaluate(()=>globalThis.nativeMaintenanceSelection.cancelled)));
   await until(()=>app.evaluate(({Menu})=>Menu.getApplicationMenu().getMenuItemById('maintenance-create').enabled));
   assert.equal(page.isClosed(),false);assert.equal((await page.evaluate(async()=>(await fetch('/healthz')).status)),200);
   assert.ok(await stat(join(item.data,'desktop-runtime.guard.v1')));await assert.rejects(stat(join(item.data,'desktop-maintenance.guard.v1')));
