@@ -20,6 +20,7 @@ class RestoreConnection(sqlite3.Connection):
 def restore_backup(backup, expected_digest, destination, *, expected_parent=None):
     manifest = verify_backup(backup, expected_digest)
     source, source_fd = directory(backup)
+    stage_owner = None
     try:
         target = new_target(destination, source)
         with private_staging(target, '.loopcast-restore-', expected_parent) as (staging, staging_fd, check, publish):
@@ -33,6 +34,7 @@ def restore_backup(backup, expected_digest, destination, *, expected_parent=None
                     with os.fdopen(os.open('manifest.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=staging_fd), 'wb') as stream:
                         stream.write(raw); stream.flush(); os.fsync(stream.fileno())
                     verify_backup(staging, expected_digest, directory_fd=staging_fd)
+                    stage_owner = DirectoryLock.from_directory(staging, staging_fd)
                     os.rename('manifest.json', 'restore-manifest.json', src_dir_fd=staging_fd, dst_dir_fd=staging_fd)
                     # SQLite must never re-resolve a replaceable staging pathname
                     # for migration/guard writes. Apply the same Store operations
@@ -51,9 +53,7 @@ def restore_backup(backup, expected_digest, destination, *, expected_parent=None
                     held = os.fstat(copied.fileno())
                     if not stat.S_ISREG(named.st_mode) or named.st_nlink != 1 or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino): raise ValueError('STAGING_CHANGED')
                     copied.seek(0); copied.write(prepared); copied.truncate(); copied.flush(); os.fsync(copied.fileno())
-            # The normal service and observer expect an existing lock and media
-            # directory. Create only these fixed entries under the held stage.
-            os.close(os.open('service.lock', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=staging_fd))
+            # Fixed media directories stay under the held stage.
             try: os.mkdir('artifacts', 0o700, dir_fd=staging_fd)
             except FileExistsError: pass
             for folder in ('artifacts', 'library'):
@@ -65,7 +65,9 @@ def restore_backup(backup, expected_digest, destination, *, expected_parent=None
         return {'state': 'RESTORED_GUARDED', 'restore_id': status['restore']['id'],
                 'guard_version': status['restore_guard']['version'], 'scope': status['restore']['scope'],
                 'backup_id': manifest['backup_id'], 'upload_allowed': False, 'credentials_policy': 'excluded_reauthorize'}
-    finally: os.close(source_fd)
+    finally:
+        if stage_owner is not None: stage_owner.close()
+        os.close(source_fd)
 
 
 def reconciliation_report(path):

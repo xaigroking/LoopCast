@@ -6,6 +6,7 @@ from unittest.mock import patch
 from loopcast.backup import create_backup, code_identity
 from loopcast.restore import restore_backup
 from loopcast.storage import Store
+from loopcast.ownership import DirectoryLock
 
 
 class MaintenanceAnchoringTests(unittest.TestCase):
@@ -65,3 +66,16 @@ class MaintenanceAnchoringTests(unittest.TestCase):
                 self.assert_canary()
                 self.assertFalse((self.root / ('restored-' + kind)).exists())
         self.assertEqual(before, {p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()})
+
+    def test_restore_keeps_the_existing_directory_owner_during_guard_preparation(self):
+        package = self.root / 'package'; created = create_backup(self.source, package)
+        prepare = Store.prepare_restored_state
+        observed = []
+        def require_owner(store, manifest, digest):
+            with self.assertRaises(BlockingIOError): DirectoryLock(store.directory)
+            observed.append(True)
+            return prepare(store, manifest, digest)
+        with patch.object(Store, 'prepare_restored_state', require_owner):
+            restore_backup(package, created['manifest_sha256'], self.root / 'restored')
+        self.assertEqual(observed, [True])
+        with DirectoryLock(self.root / 'restored'): pass

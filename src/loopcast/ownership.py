@@ -33,6 +33,17 @@ class DirectoryLock:
     def __init__(self, path, create=False, *, desktop_identity=None, maintenance_identity=None):
         self.path, self.directory_fd = directory(path, create)
         self.fd = None
+        self._acquire(desktop_identity, maintenance_identity)
+
+    @classmethod
+    def from_directory(cls, path, directory_fd):
+        """Own an already held private staging directory without re-resolving it."""
+        value = cls.__new__(cls)
+        value.path, value.directory_fd, value.fd = Path(path), os.dup(directory_fd), None
+        value._acquire(None, None)
+        return value
+
+    def _acquire(self, desktop_identity, maintenance_identity):
         try:
             self.fd = os.open('service.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=self.directory_fd)
             info = os.fstat(self.fd)
