@@ -22,6 +22,7 @@ let window, host, config, browserSession, quitting = false, exiting = false, exi
 let primaryError;
 let coordinator, journal, instancePath, utility, replacingWindow = false;
 let supervision, channel, lease, admission;
+let privateTreeUnknown = false;
 
 function showOffline(title, label) {
   if (quitting) return;
@@ -125,7 +126,7 @@ function initialize() {
       // Start STOP before awaiting Chromium; a stalled profile flush must never
       // leave the business owner running. Both operations have finite bounds.
       const stopped = coordinator ? coordinator.close() : host?.stop();
-      let confirmed = true;
+      let confirmed = !privateTreeUnknown;
       try {
         browserSession?.flushStorageData();
         await new Budget(config.stopTimeoutMs).run(browserSession?.cookies.flushStore());
@@ -155,6 +156,7 @@ function initialize() {
       config = supervision ? { ...resources, dataDir:bootstrap.config.dataDir, sessionDir:bootstrap.sessionDir,
         gatewayPort:supervision.binding.origin_port, configs:supervision.binding.role === 'ORIGINAL' ? resources.configs : {},
         admission:supervision.admission, leaseCapability:supervision.lease } : resources;
+      config.onUnconfirmedTree = () => { privateTreeUnknown = true; host?.gateway?.suspend(); if (coordinator) coordinator.treeUnknown = true; app.quit(); };
       if (quitting || config.sessionDir !== bootstrap.sessionDir) throw new Error();
       if (!supervision) {
         config.electron ??= { path:process.execPath, sha256:hash(readFileSync(process.execPath)) };

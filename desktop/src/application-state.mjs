@@ -23,7 +23,7 @@ export async function privateCommand(config, module, request, { timeout=config.s
   const cleanup=new Budget(config.stopTimeoutMs);
   let result;
   try{result=await cleanup.run(owned.closeTree(cleanup.end));}catch{}
-  if(!result?.confirmed)throw new HostError('STOP_UNCONFIRMED');
+  if(!result?.confirmed){config.onUnconfirmedTree?.();throw new HostError('STOP_UNCONFIRMED');}
   if(error)throw error;
   return JSON.parse(output);
 }

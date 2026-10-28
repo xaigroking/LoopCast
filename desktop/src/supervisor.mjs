@@ -82,6 +82,11 @@ export class DesktopSupervisor extends EventEmitter {
       catch(error){if(error.code!=='ENOENT')throw error;}
       if(!this.config.electron)throw new HostError('CAPABILITY_UNAVAILABLE');
       this.config.leaseCapability=this.lease.capability;this.config.admission=null;
+      this.config.onUnconfirmedTree=()=>{
+        this.unknownTree=true;this.state='QUARANTINED';
+        try{if(this.journal)this.phase(this.worker?.operation??id(),'UNKNOWN_TREE',{scope:'SUPERVISOR_HELPER'});}catch{}
+        this.emit('fault',new HostError('STOP_UNCONFIRMED'));void this.close({confirmed:false}).catch(()=>{});
+      };
       this.journal=new StateJournal(this.lease.root);this.receipts=new ReceiptJournal(this.lease.root);this.receipts.assertClear();
       const known=this.bindings();this.original=known.find(binding=>binding.group===this.group&&binding.role==='ORIGINAL');
       if(!this.original){
@@ -99,7 +104,7 @@ export class DesktopSupervisor extends EventEmitter {
       if(this.current.role==='RESTORED')await this.observe(this.current,this.current.restore);
       this.state='STARTING';
       await this.launch(this.current);this.state='READY';return this;
-    }catch(error){await this.close({confirmed:this.owned.length===0&&!this.pendingOperation}).catch(()=>{});throw error;}
+    }catch(error){await this.close({confirmed:this.owned.length===0&&!this.pendingOperation&&!this.unknownTree}).catch(()=>{});throw error;}
   }
   configFor(binding){return{...this.config,dataDir:binding.data_dir,sessionDir:binding.session_dir,gatewayPort:binding.origin_port,
     configs:binding.role==='ORIGINAL'?{...this.config.configs}:{}};}
@@ -122,6 +127,7 @@ export class DesktopSupervisor extends EventEmitter {
   }
   async request(record,type,payload){
     if(record!==this.worker||payload.challenge!==record.challenge)throw new HostError('HANDOFF_UNCONFIRMED');
+    if(this.unknownTree&&type!=='stopped')throw new HostError('STOP_UNCONFIRMED');
     if(type==='ready'){
       if(record.readyReceived)throw new HostError('HANDOFF_UNCONFIRMED');record.readyReceived=true;
       await this.validateBinding(record.binding);
@@ -250,7 +256,7 @@ export class DesktopSupervisor extends EventEmitter {
   async close({confirmed=true}={}){
     if(this.closed)return this.closed;this.closing=true;
     this.closed=(async()=>{
-      let safe=confirmed;
+      let safe=confirmed&&!this.unknownTree;
       for(const record of this.owned){
         if(!record.finished){await record.channel.request('quit',{challenge:record.challenge}).catch(()=>{});}
         const budget=new Budget(this.config?.stopTimeoutMs??10000);
