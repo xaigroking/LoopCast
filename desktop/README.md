@@ -420,8 +420,10 @@ origin. The new process configures its own persistent session before ready, star
 with fresh API/gateway capabilities, and loads its first page while hidden. A
 restored process rechecks ACTIVE restore guard, restore identity, version and epoch
 through its actual API. Only then can the supervisor publish the current binding
-commit, finish the pending handoff and show the window. A lost result, failed target
-or unknown tree preserves the old binding, both profiles and pending evidence.
+commit, finish the pending handoff and show the window. Failure before commit
+preserves the old pointer, both profiles and pending evidence. Failure after
+commit preserves that committed event as a fact; unresolved pending admission
+still prevents automatic restart or recovery.
 
 The restored menu explicitly returns through the same protocol to the original
 binding, origin and profile. It inherits no provider, social, schedule or inspection
