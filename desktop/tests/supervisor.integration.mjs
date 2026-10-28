@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp,mkdir,writeFile,readFile,rm,stat,rename,symlink,readdir,cp } from 'node:fs/promises';
 import { renameSync,symlinkSync,writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prepare } from '../scripts/prepare.mjs';
@@ -17,12 +19,12 @@ const executable=process.env.LOOPCAST_ELECTRON_BINARY;
 if(!executable||!process.env.LOOPCAST_DESKTOP_PYTHON)throw new Error('An actual verified Electron and installed same-source candidate are required');
 async function until(work,timeout=30000){const budget=new Budget(timeout);while(true){const value=await budget.run(Promise.resolve().then(work));if(value)return value;await budget.run(new Promise(resolve=>setTimeout(resolve,20)));}}
 
-async function fixture(t,{pauseTarget=false}={}){
+async function fixture(t,{pauseTarget=false,locale='en'}={}){
   const cleanupApplication=await applicationFixture(),root=await mkdtemp(join(tmpdir(),'loopcast-supervisor-'));
   const data=join(root,'data'),profile=join(root,'original-profile'),home=join(root,'home');
   for(const path of [data,profile,home,join(home,'config')])await mkdir(path,{mode:0o700});
   const config=await prepare({python:process.env.LOOPCAST_DESKTOP_PYTHON,node:process.execPath,electron:executable,
-    next:process.env.LOOPCAST_DESKTOP_NEXT,data,session:profile,port:'28789',revision:process.env.LOOPCAST_DESKTOP_REVISION});
+    next:process.env.LOOPCAST_DESKTOP_NEXT,data,session:profile,port:'28789',revision:process.env.LOOPCAST_DESKTOP_REVISION,locale});
   const wrapper=join(root,'inspected-owned-port.mjs'),production=new URL('../src/linux-tree.mjs',import.meta.url).href;
   // External test tooling adds debugger listeners only. Production ownership,
   // cleanup, default sandbox, private pipes and every maintenance handler run.
@@ -109,6 +111,7 @@ test('actual supervised maintenance, guarded workspace succession and two profil
   await profileCanary(page,'original');const originalOwner=await owner(app);
   const packagePath=join(item.root,'package'),proofPath=join(item.root,'proof.json'),restoredPath=join(item.root,'restored');
   await app.evaluate(({dialog},paths)=>{
+    globalThis.nativeWorkspaceOpen=dialog.showOpenDialog.bind(dialog);
     const saves=[paths.packagePath,paths.proofPath,paths.restoredPath],opens=[paths.packagePath,paths.proofPath];
     dialog.showSaveDialog=async()=>({canceled:false,filePath:saves.shift()});dialog.showOpenDialog=async()=>({canceled:false,filePaths:[opens.shift()]});
     dialog.showMessageBox=async options=>({response:options.type==='question'?0:options.buttons.length===2?1:0});
@@ -153,6 +156,12 @@ test('actual supervised maintenance, guarded workspace succession and two profil
   await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:0});});({app,page,binding}=await item.transfer(app,()=>click(app,'maintenance-return')));
   assert.equal(binding.id,original.id);assert.equal(await idbValue(page),'original');
   assert.equal(await page.evaluate(()=>Object.keys(localStorage).filter(key=>key.startsWith('loopcast.run.create.pending.v1.')).length),0);
+  await rename(restored.session_dir,join(item.root,'missing-restored-profile'));
+  await configureOpen(app);
+  await app.evaluate(({dialog})=>{globalThis.missingProfileRejected=false;dialog.showMessageBox=async options=>{if(options.type==='error')globalThis.missingProfileRejected=true;return{response:0};};});
+  await click(app,'workspace-open');await until(()=>app.evaluate(()=>globalThis.missingProfileRejected));
+  assert.equal(item.supervisor.current.id,original.id);assert.equal(item.applications.length,5);
+  await assert.rejects(stat(restored.session_dir));assert.equal(item.supervisor.pendingOperation??null,null);
   const proof=JSON.parse(await readFile(proofPath,'utf8'));
   console.log('Owned Electron succession evidence',JSON.stringify({os:process.platform,arch:process.arch,source_revision:item.config.hostRevision,
     workspace_processes:item.applications.length,manifest_sha256:proof.manifest_sha256,backup_id:proof.backup_id,restore_id:restored.restore.restore_id,
@@ -164,6 +173,7 @@ async function restoredFixture(t,options){
   const item=await fixture(t,options),{app}=await item.current();
   const paths={packagePath:join(item.root,'package'),proofPath:join(item.root,'proof.json'),restoredPath:join(item.root,'restored')};
   await app.evaluate(({dialog},paths)=>{
+    globalThis.nativeWorkspaceOpen=dialog.showOpenDialog.bind(dialog);
     const saves=[paths.packagePath,paths.proofPath,paths.restoredPath],opens=[paths.packagePath,paths.proofPath];
     dialog.showSaveDialog=async()=>({canceled:false,filePath:saves.shift()});
     dialog.showOpenDialog=async()=>({canceled:false,filePaths:[opens.shift()]});
@@ -318,4 +328,50 @@ test('lost actual helper witness during target binding fences every workspace an
   await click(item.app,'workspace-open');await until(()=>item.app.debuggerWaiting||item.app.status);await item.app.detach();
   await until(()=>destroyed&&item.supervisor.unknownTree&&item.supervisor.closed,45000);await item.supervisor.closed;
   assert.equal(item.supervisor.state,'QUARANTINED');assert.equal(item.applications.length,1);await assertFenced(item);
+});
+
+
+test('Chinese native workspace shortcut uses a real selector and Escape, then explicit guarded narrow-window round trip',{timeout:120000},async t=>{
+  const item=await restoredFixture(t,{locale:'zh-Hans'});let app=item.app;
+  await app.evaluate(({dialog,BrowserWindow})=>{
+    globalThis.workspaceSelection={opened:false,cancelled:false,plans:[]};
+    dialog.showOpenDialog=async options=>{globalThis.workspaceSelection.opened=true;const result=await globalThis.nativeWorkspaceOpen(options);globalThis.workspaceSelection.cancelled=result.canceled;return result;};
+    dialog.showMessageBox=async()=>({response:0});BrowserWindow.getAllWindows()[0].focus();
+  });
+  const nativeWindow=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].getNativeWindowHandle().readUInt32LE(0));
+  const native=promisify(execFile);
+  await native('xdotool',['windowactivate','--sync',String(nativeWindow)],{timeout:7000});
+  await until(()=>app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isFocused()));
+  await native('xdotool',['key','--clearmodifiers','ctrl+shift+o'],{timeout:3000});
+  await until(()=>app.evaluate(()=>globalThis.workspaceSelection.opened));
+  const picker=await until(async()=>{
+    const active=(await native('xdotool',['getactivewindow'],{timeout:3000})).stdout.trim();
+    if(Number(active)===nativeWindow)return false;
+    return(await native('xdotool',['getwindowname',active],{timeout:3000})).stdout.trim()==='选择已恢复的私有工作区'?active:false;
+  });
+  await native('xdotool',['windowactivate','--sync',picker],{timeout:7000});
+  assert.equal((await native('xdotool',['getactivewindow'],{timeout:3000})).stdout.trim(),picker);
+  await native('xdotool',['key','--clearmodifiers','Escape'],{timeout:3000});
+  await until(()=>app.evaluate(()=>globalThis.workspaceSelection.cancelled));await until(()=>readyMenu(app,'workspace-open'));
+  assert.equal(item.supervisor.pendingOperation??null,null);assert.equal(item.applications.length,1);
+  await app.evaluate(({dialog},path)=>{
+    dialog.showOpenDialog=async()=>({canceled:false,filePaths:[path]});
+    dialog.showMessageBox=async options=>{if(options.title==='核对工作区交接计划'){
+      if(!options.message.includes('上传屏障')||!options.detail.includes('原工作区')||options.buttons[0]!=='执行此计划')throw new Error('Missing localized handoff');
+      globalThis.workspaceSelection.plans.push({message:options.message,detail:options.detail,buttons:options.buttons});
+    }return{response:0};};
+  },item.restoredPath);
+  const departing=app;
+  const changing=item.transfer(app,()=>click(app,'workspace-open'));
+  await until(()=>departing.debuggerWaiting||departing.status);
+  const next=await changing;app=next.app;
+  assert.equal(next.binding.role,'RESTORED');
+  const state=await app.evaluate(({BrowserWindow,Menu})=>{const window=BrowserWindow.getAllWindows()[0];window.setSize(480,640);return{
+    title:window.getTitle(),back:Menu.getApplicationMenu().getMenuItemById('maintenance-return').label,
+    width:window.getSize()[0],sandbox:window.webContents.getLastWebPreferences().sandbox};});
+  assert.match(state.title,/受控恢复工作区/);assert.equal(state.back,'返回原工作区');assert.equal(state.width,480);assert.equal(state.sandbox,true);
+  assert.equal((await next.page.evaluate(async()=>(await(await fetch('/v1/operations/status')).json()))).restore_guard.state,'ACTIVE');
+  await app.evaluate(({dialog})=>{dialog.showMessageBox=async options=>{if(!options.message.includes('正常停止'))throw new Error('Missing localized handoff');return{response:0};};});
+  const original=await item.transfer(app,()=>click(app,'maintenance-return'));assert.equal(original.binding.id,item.original.id);
+  console.log('Actual X11 restored selector/shortcut/Escape and Chinese guarded workspace/explicit Return PASS');
 });

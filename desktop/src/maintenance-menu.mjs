@@ -81,9 +81,10 @@ export function installMaintenanceMenu({ Menu, dialog, app, coordinator, locale,
     Menu.setApplicationMenu(Menu.buildFromTemplate([{ label:t.menu, submenu:[
       ...['create','verify','restore'].map(name => ({ id:`maintenance-${name}`, label:t[name], accelerator:{create:'CommandOrControl+Shift+B',verify:'CommandOrControl+Shift+V',restore:'CommandOrControl+Shift+R'}[name], enabled:ready, click:() => { void action(name); } })),
       ...(workspace ? [{id:'workspace-open',label:locale==='zh-Hans'?'打开已恢复工作区…':'Open restored workspace…',
-        enabled:ready&&workspace.role==='ORIGINAL',click:()=>{void workspace.open();}}] : []),
+        accelerator:'CommandOrControl+Shift+O',enabled:ready&&workspace.role==='ORIGINAL',click:()=>{void workspace.open();}}] : []),
       { type:'separator' }, { label:t.cancel, enabled:coordinator.busy, click:() => coordinator.cancel() },
       { id:'maintenance-return', label:t.back, enabled:!presenting && !coordinator.busy && (workspace?.role==='RESTORED'?['READY','OFFLINE','COMPLETE']:['OFFLINE','COMPLETE']).includes(coordinator.state),
+        accelerator:'CommandOrControl+Shift+U',
         click:() => { void (workspace?.role==='RESTORED'?workspace.returnOriginal():coordinator.returnOriginal()).catch(report); } },
       { type:'separator' }, { role:'quit', label:locale === 'zh-Hans' ? '退出' : 'Quit' },
     ] }]));
