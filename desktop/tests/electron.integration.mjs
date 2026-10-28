@@ -192,7 +192,7 @@ test('native maintenance menu uses the production coordinator and CLI, preserves
 });
 
 test('real native maintenance shortcut opens a save selector and native Escape cancels without stopping the owner', {timeout:70000}, async t=>{
-  const item=await fixture(t),app=await item.start(),page=await app.firstPage();await page.locator('.heading .primary').waitFor();
+  const item=await fixture(t,{locale:'zh-Hans'}),app=await item.start(),page=await app.firstPage();await page.locator('.heading .primary').waitFor();
   await app.evaluate(({dialog,BrowserWindow})=>{
     globalThis.nativeMaintenanceSelection={opened:false,cancelled:false};
     const original=dialog.showSaveDialog.bind(dialog);

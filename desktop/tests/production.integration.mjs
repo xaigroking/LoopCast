@@ -277,6 +277,10 @@ test('production maintenance coordinator stops the real owner, creates authentic
   coordinator.reserve(); coordinator.prepare('verify',{backup:packagePath,proofPath});
   assert.equal((await coordinator.execute()).state,'UNKNOWN_RESULT'); assert.equal(host.state,'READY');
   assert.equal((await fetch(origin+'/healthz',{headers:{'X-LoopCast-Desktop-Session':host.gatewayToken}})).status,200);
+  console.log('Maintenance production evidence',JSON.stringify({os:process.platform,arch:process.arch,host_revision:item.config.hostRevision,
+    api_revision:item.config.apiRevision,web_revision:item.config.webRevision,python_sha256:item.config.python.sha256,
+    node_sha256:item.config.node.sha256,tree_sha256:item.config.treeModule.sha256,manifest_sha256:created.package.manifest_sha256,
+    backup_id:created.package.backup_id,restore_id:restored.restore.restore_id,tree_confirmed:restored.tree_confirmed,audit:created.package.audit}));
 });
 
 test('maintenance cancellation during normal STOP never launches a write helper and leaves the original workspace offline', { timeout:45000 }, async t => {
@@ -291,4 +295,45 @@ test('maintenance cancellation during normal STOP never launches a write helper 
   assert.equal(result.state,'CANCELLED_BEFORE_EXECUTION');assert.equal(host.state,'STOPPED');
   await assert.rejects(stat(target));await assert.rejects(stat(join(item.dataDir,'desktop-maintenance.guard.v1')));
   journal.assertClear();
+});
+
+test('a lost real guardian witness after package publication retains the marker and receipt barrier and rejects replacement', {timeout:60000},async t=>{
+  const item=await manifest(t), wrapper=join(item.root,'interrupted-witness.mjs');
+  const productionURL=new URL('../src/linux-tree.mjs',import.meta.url).href;
+  await writeFile(wrapper,`import {createTreePort as production} from ${JSON.stringify(productionURL)};
+export function createTreePort(config){
+ const tree=production(config),launch=tree.launch.bind(tree);
+ tree.launch=spec=>{
+  const owned=launch(spec);
+  if(spec.argv.includes('loopcast.desktop_maintenance')){
+   const end=owned.child.stdin.end.bind(owned.child.stdin);
+   owned.child.stdin.end=(...args)=>{
+    if(JSON.parse(args[0]).action==='create')owned.child.stdio[5].destroy(new Error('Controlled private witness pipe loss'));
+    return end(...args);
+   };
+  }
+  return owned;
+ };
+ return tree;
+}`,{mode:0o600});
+  item.config.treeModule={path:wrapper,sha256:hash(await readFile(wrapper))};
+  await writeFile(item.filename,JSON.stringify(item.config),{mode:0o600});
+  const host=new DesktopHost(item.config,await loadTreePort(item.config)),journal=new ReceiptJournal(item.root);
+  await host.start();let shown=0;
+  const coordinator=new MaintenanceCoordinator({config:item.config,filename:item.filename,configDigest:hash(await readFile(item.filename)),host,journal,
+    freeze:async()=>{},showWorkspace:async()=>{shown++;}});
+  t.after(async()=>{await coordinator.close();journal.close();});
+  const target=join(item.root,'published-result-without-witness');
+  coordinator.reserve();coordinator.prepare('create',{target});
+  const result=await coordinator.execute();
+  assert.equal(result.state,'UNKNOWN_TREE');assert.equal(result.tree_confirmed,false);assert.equal(coordinator.state,'QUARANTINED');
+  assert.ok(await stat(join(target,'manifest.json')));assert.ok(await stat(join(item.dataDir,'desktop-maintenance.guard.v1')));
+  assert.throws(()=>journal.assertClear(),/MAINTENANCE_UNCONFIRMED/);
+  assert.throws(()=>coordinator.exportProof(result.operation_id));await assert.rejects(coordinator.returnOriginal());assert.equal(shown,0);
+  const replacement=new DesktopHost(item.config,await loadTreePort(item.config));
+  await assert.rejects(replacement.start());await replacement.stop();
+  const cli=spawn(item.config.python.path,['-I','-m','loopcast','backup','create','--data-dir',item.dataDir,'--output',join(item.root,'must-not-replace')],{env:{},stdio:['ignore','pipe','ignore']});
+  const status=await new Budget(10000).run(new Promise(resolve=>cli.once('exit',resolve)));assert.notEqual(status,0);
+  await assert.rejects(stat(join(item.root,'must-not-replace')));
+  console.log('Actual private guardian witness-pipe loss after publication -> UNKNOWN_TREE/preserved target/no trusted proof/no replacement PASS');
 });
