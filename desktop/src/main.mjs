@@ -79,6 +79,19 @@ async function report(error, fatal = true) {
   } finally { clearTimeout(timer); if (errorDialog === controller) errorDialog = undefined; }
 }
 
+async function guardEvidence() {
+  if (quitting || host?.state !== 'READY' || !window || window.isDestroyed() ||
+      new URL(window.webContents.getURL()).origin !== `http://127.0.0.1:${config.gatewayPort}`) throw new HostError('HANDOFF_UNCONFIRMED');
+  if (supervision.binding.role !== 'RESTORED') return null;
+  const budget = new Budget(config.startTimeoutMs);
+  const response = await budget.run(fetch(`http://127.0.0.1:${config.gatewayPort}/v1/operations/status`, {
+    headers:{'X-LoopCast-Desktop-Session':host.gatewayToken} }));
+  const status = await budget.run(response.json());
+  if (response.status !== 200 || status.restore_guard?.state !== 'ACTIVE' || status.upload_allowed_by_recovery !== false) throw new HostError('HANDOFF_UNCONFIRMED');
+  return { state:status.restore_guard.state, restore_id:status.restore_guard.restore_id, version:status.restore_guard.version,
+    execution_epoch:status.restore.execution_epoch, upload_allowed:false };
+}
+
 function initialize() {
   // This application-wide directory contains lock metadata, never a profile.
   // Acquire before reading a second instance's config, file or URL arguments.
@@ -97,7 +110,11 @@ function initialize() {
           !/^[a-f0-9]{64}$/.test(supervision.challenge) || !/^[a-f0-9]{64}$/.test(supervision.lease)) throw new HostError('PROTOCOL_INVALID');
       filename = supervision.filename;
       channel = new PrivateChannel(new Socket({ fd:3, readable:true, writable:true }), { onClosed:() => { if (!exiting) app.quit(); },
-        onRequest:async(type,payload) => { if (type !== 'quit' || payload.challenge !== supervision.challenge) throw new HostError('PROTOCOL_INVALID'); app.quit(); return {}; } });
+        onRequest:async(type,payload) => {
+          if (payload.challenge !== supervision.challenge) throw new HostError('PROTOCOL_INVALID');
+          if (type === 'confirm-ready') return { binding:supervision.binding.id, guard:await guardEvidence() };
+          if (type !== 'quit') throw new HostError('PROTOCOL_INVALID'); app.quit(); return {};
+        } });
     } else filename = configPath(process.argv, { packaged: app.isPackaged, resourcesPath: process.resourcesPath });
     bootstrap = readBootstrap(filename, { packaged: app.isPackaged, binding:supervision?.binding });
     if (supervision && bootstrap.digest !== supervision.config_digest) throw new HostError('MANIFEST_CHANGED');
@@ -179,14 +196,7 @@ function initialize() {
       coordinator = new MaintenanceCoordinator({ config, filename, configDigest:bootstrap.digest, host, journal,
         freeze:freezeWorkspace, showWorkspace, admission });
       if (channel) {
-        let guard = null;
-        if (supervision.binding.role === 'RESTORED') {
-          const response = await entryBudget.run(fetch(origin+'/v1/operations/status', { headers:{'X-LoopCast-Desktop-Session':host.gatewayToken} }));
-          const status = await entryBudget.run(response.json());
-          if (response.status !== 200 || status.restore_guard?.state !== 'ACTIVE' || status.upload_allowed_by_recovery !== false) throw new HostError('HANDOFF_UNCONFIRMED');
-          guard = { state:status.restore_guard.state, restore_id:status.restore_guard.restore_id, version:status.restore_guard.version,
-            execution_epoch:status.restore.execution_epoch, upload_allowed:false };
-        }
+        const guard = await entryBudget.run(guardEvidence());
         const ready = await entryBudget.run(channel.request('ready', { challenge:supervision.challenge, guard }));
         if (ready.committed !== true) throw new HostError('HANDOFF_UNCONFIRMED');
         config.admission = null; supervision.admission = null; supervision.committed = true; window.show();

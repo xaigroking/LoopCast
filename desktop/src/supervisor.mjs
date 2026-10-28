@@ -49,14 +49,25 @@ export class DesktopSupervisor extends EventEmitter {
   phase(operation,phase,payload={}){this.journal.append(operation,phase,payload);this.emit('phase',{operation,phase});}
   async entity(path){return privateCommand(this.config,'loopcast.desktop_workspace',{action:'entity',path});}
   async beginPending(operation){
-    if(this.pendingOperation)throw new HostError('HANDOFF_UNCONFIRMED');
+    this.assertOpen();if(this.pendingOperation)throw new HostError('HANDOFF_UNCONFIRMED');
     const capability=bindingId();
     await privateCommand(this.config,'loopcast.desktop_admission',{action:'begin',identity:operation,capability});
-    this.config.admission=capability;this.pendingOperation=operation;return capability;
+    this.config.admission=capability;this.pendingOperation=operation;this.assertOpen();return capability;
   }
-  async finishPending(operation){
+  assertOpen(){if(this.closing||this.unknownTree)throw new HostError('HANDOFF_UNCONFIRMED');}
+  async confirmReady(record,guard){
+    this.assertOpen();
+    if(record.failed||record.finished||record.channel.closed)throw new HostError('HANDOFF_UNCONFIRMED');
+    const evidence=await record.channel.request('confirm-ready',{challenge:record.challenge});
+    this.assertOpen();
+    if(record.failed||record.finished||record.channel.closed||evidence.binding!==record.binding.id||!equal(evidence.guard,guard))throw new HostError('HANDOFF_UNCONFIRMED');
+  }
+  async finishPending(operation,record,guard){
+    this.assertOpen();
     if(operation!==this.pendingOperation)throw new HostError('HANDOFF_UNCONFIRMED');
     this.phase(operation,'FINISHED');
+    if(record)await this.confirmReady(record,guard);
+    this.assertOpen();
     await privateCommand(this.config,'loopcast.desktop_admission',{action:'finish',identity:operation,capability:this.config.admission});
     this.config.admission=null;this.pendingOperation=null;
   }
@@ -109,7 +120,9 @@ export class DesktopSupervisor extends EventEmitter {
   configFor(binding){return{...this.config,dataDir:binding.data_dir,sessionDir:binding.session_dir,gatewayPort:binding.origin_port,
     configs:binding.role==='ORIGINAL'?{...this.config.configs}:{}};}
   async launch(binding){
+    this.assertOpen();
     await readConfig(this.filename,{expectedDigest:this.digest});await this.validateBinding(binding);
+    this.assertOpen();
     const tree=await loadTreePort(this.config),budget=new Budget(this.config.startTimeoutMs),challenge=bindingId(),operation=id();
     const owned=tree.launch({executable:this.config.electron.path,argv:[entry,'--supervised-worker'],cwd:this.config.sessionDir,
       env:this.environment,stdio:['pipe','ignore','pipe','pipe'],deadline:budget.end});
@@ -118,17 +131,23 @@ export class DesktopSupervisor extends EventEmitter {
     const ready=new Promise((resolve,reject)=>{resolveReady=resolve;rejectReady=reject;});ready.catch(()=>{});
     const record={owned,exit,binding,challenge,operation,ready,resolveReady,rejectReady,tree};this.owned.push(record);this.worker=record;
     record.channel=new PrivateChannel(owned.child.stdio[3],{timeout:this.config.startTimeoutMs,
-      onRequest:(type,payload)=>this.request(record,type,payload),onClosed:()=>{if(!record.finished)record.rejectReady(new HostError('HANDOFF_UNCONFIRMED'));}});
+      onRequest:(type,payload)=>this.request(record,type,payload),onClosed:()=>{
+        if(!record.finished&&!record.stopped){record.failed=true;record.rejectReady(new HostError('HANDOFF_UNCONFIRMED'));}
+      }});
     this.phase(operation,'TARGET_ADMITTED',{binding:binding.id,group:this.group,challenge_commitment:hash(challenge)});
     owned.child.stdin.end(JSON.stringify({format:'loopcast.supervised-worker.v1',filename:this.filename,config_digest:this.digest,
       binding,challenge,admission:this.config.admission,lease:this.config.leaseCapability,journal_root:this.lease.root}));
-    exit.exited.then(status=>{void this.exited(record,status);});
+    exit.exited.then(status=>{
+      if(status.code!==0)record.failed=true;
+      void this.exited(record,status).catch(()=>{this.state='QUARANTINED';this.emit('fault',new HostError('HANDOFF_UNCONFIRMED'));});
+    });
     return budget.run(ready).catch(async error=>{record.rejectReady(error);throw error;});
   }
   async request(record,type,payload){
     if(record!==this.worker||payload.challenge!==record.challenge)throw new HostError('HANDOFF_UNCONFIRMED');
     if(this.unknownTree&&type!=='stopped')throw new HostError('STOP_UNCONFIRMED');
     if(type==='ready'){
+      this.assertOpen();
       if(record.readyReceived)throw new HostError('HANDOFF_UNCONFIRMED');record.readyReceived=true;
       await this.validateBinding(record.binding);
       if(record.binding.role==='RESTORED'){
@@ -137,9 +156,11 @@ export class DesktopSupervisor extends EventEmitter {
           guard.execution_epoch!==facts.execution_epoch||guard.upload_allowed!==false)throw new HostError('HANDOFF_UNCONFIRMED');
       }
       this.phase(record.operation,'TARGET_READY',{binding:record.binding.id,group:this.group,guard:payload.guard??null});
+      await this.confirmReady(record,payload.guard??null);
       this.phase(record.operation,'COMMITTED',{binding:record.binding.id,group:this.group});this.current=record.binding;
+      await this.confirmReady(record,payload.guard??null);
       if(this.plan?.accepted){
-        await this.finishPending(this.plan.operation);this.disposePlan();
+        await this.finishPending(this.plan.operation,record,payload.guard??null);this.disposePlan();
       }
       this.state='READY';record.resolveReady();this.emit('ready',{binding:this.current.id,role:this.current.role});
       return{admission:null,committed:true};
@@ -237,20 +258,22 @@ export class DesktopSupervisor extends EventEmitter {
     if(this.closing)return;
     if(!record.confirmed){this.state='QUARANTINED';this.phase(record.operation,'UNKNOWN_TREE');this.emit('fault',new HostError('STOP_UNCONFIRMED'));return;}
     if(this.plan?.accepted&&record.sourceStopped&&!this.plan.cancelled){
+      const plan=this.plan;
       try{
         await this.revalidatePlan();
+        this.assertOpen();
         if(record.binding.role==='RESTORED')await this.observe(record.binding,record.binding.restore);
-        this.phase(this.plan.operation,'SOURCE_EXITED',{binding:record.binding.id});
-        const target=this.plan.target;
-        if(this.plan.newBinding){
+        this.assertOpen();this.phase(plan.operation,'SOURCE_EXITED',{binding:record.binding.id});this.assertOpen();
+        const target=plan.target;
+        if(plan.newBinding){
           const root=holdDirectory(this.lease.root);
           try{try{mkdirSync(`${root.anchor}/profiles`,{mode:0o700});}catch(error){if(error.code!=='EEXIST')throw error;}fsyncSync(root.fd);}finally{root.close();}
           const profiles=holdDirectory(join(this.lease.root,'profiles'));
           try{mkdirSync(`${profiles.anchor}/${target.id}`,{mode:0o700});fsyncSync(profiles.fd);}finally{profiles.close();}
-          target.profile=await this.entity(target.session_dir);this.phase(this.plan.operation,'BINDING',{binding:target});
+          target.profile=await this.entity(target.session_dir);this.assertOpen();this.phase(plan.operation,'BINDING',{binding:target});
         }
-        this.phase(this.plan.operation,'TARGET_BOUND',{binding:target.id});await this.launch(target);
-      }catch(error){this.state='QUARANTINED';this.phase(this.plan?.operation??record.operation,'UNKNOWN_RESULT');this.emit('fault',new HostError('HANDOFF_UNCONFIRMED'));}
+        this.assertOpen();this.phase(plan.operation,'TARGET_BOUND',{binding:target.id});this.assertOpen();await this.launch(target);
+      }catch(error){if(this.closing)return;this.state='QUARANTINED';this.phase(plan.operation,'UNKNOWN_RESULT');this.emit('fault',new HostError('HANDOFF_UNCONFIRMED'));}
     }else{this.state='STOPPED';this.emit('stopped');}
   }
   async close({confirmed=true}={}){

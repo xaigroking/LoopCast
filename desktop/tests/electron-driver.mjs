@@ -6,7 +6,7 @@ import { once } from 'node:events';
 import { chromium } from 'playwright-core';
 import { Budget } from '../src/errors.mjs';
 
-export async function launchElectron({ executable, directory, manifest, env, observe = true, trace, existingChild }) {
+export async function launchElectron({ executable, directory, manifest, env, observe = true, trace, existingChild, holdReadyLine }) {
   const args = [observe ? '--inspect-brk=0' : '--inspect=0', '--remote-debugging-port=0', directory, '--desktop-config', manifest];
   const child = existingChild ?? spawn(executable, args, { env, stdio: ['ignore', 'ignore', 'pipe'] });
   let status, inspectorURL, browserURL, pending = '', diagnostic = '', debuggerWaiting = false;
@@ -41,14 +41,16 @@ export async function launchElectron({ executable, directory, manifest, env, obs
   try {
     await until(() => inspectorURL);
     socket = new WebSocket(inspectorURL); await budget.run(once(socket, 'open'));
-    let serial = 0, entryBreakpoint, entryPaused;
+    let serial = 0, entryBreakpoint, entryPaused, readyBreakpoint, readyPaused;
+    const readyPause = new Promise(resolve => { readyPaused = resolve; });
     const entry = new Promise(resolve => { entryPaused = resolve; });
     const requests = new Map();
     socket.addEventListener('message', event => {
       const result = JSON.parse(event.data);
       if (result.id) { const task = requests.get(result.id); requests.delete(result.id); task?.resolve(result); }
       if (result.method === 'Debugger.paused') {
-        if (entryBreakpoint && result.params.hitBreakpoints?.includes(entryBreakpoint)) entryPaused();
+        if (readyBreakpoint && result.params.hitBreakpoints?.includes(readyBreakpoint)) readyPaused();
+        else if (entryBreakpoint && result.params.hitBreakpoints?.includes(entryBreakpoint)) entryPaused();
         else socket.send(JSON.stringify({ id: ++serial, method: 'Debugger.resume' }));
       }
     });
@@ -67,6 +69,11 @@ export async function launchElectron({ executable, directory, manifest, env, obs
       const result = await send('Runtime.evaluate', { expression, awaitPromise, returnByValue: true, includeCommandLineAPI: true });
       if (result.exceptionDetails) throw new Error('NATIVE_ELECTRON_EVALUATION_FAILED');
       return result.result.value;
+    }
+    if (holdReadyLine !== undefined) {
+      await send('Debugger.enable');
+      readyBreakpoint = (await send('Debugger.setBreakpointByUrl', { lineNumber:holdReadyLine, urlRegex:'/src/main\\.mjs$' })).breakpointId;
+      await send('Runtime.runIfWaitingForDebugger');
     }
     if (observe) {
       await send('Runtime.enable');
@@ -132,8 +139,10 @@ export async function launchElectron({ executable, directory, manifest, env, obs
       await send('Debugger.resume');
     }
     await until(() => browserURL);
-    browser = await chromium.connectOverCDP(browserURL, { timeout: 15000 });
-    const context = browser.contexts()[0];
+    // A held main thread cannot service browser CDP discovery. Death-boundary
+    // tests need only the native inspector until they release that breakpoint.
+    if (holdReadyLine === undefined) browser = await chromium.connectOverCDP(browserURL, { timeout: 15000 });
+    const context = browser?.contexts()[0];
     async function firstPage() {
       try {
         const page = await until(() => context.pages().find(page => page.url().startsWith('http://127.0.0.1:')));
@@ -145,6 +154,7 @@ export async function launchElectron({ executable, directory, manifest, env, obs
       }
     }
     return { child, browser, context, evaluate, firstPage, exited, get status() { return status; },
+      readyPause, async resumeReady() { await send('Debugger.removeBreakpoint',{breakpointId:readyBreakpoint});readyBreakpoint=undefined;await send('Debugger.resume'); },
       get debuggerWaiting() { return debuggerWaiting; },
       async quit() {
         const closing = new Budget(20000);
@@ -152,10 +162,10 @@ export async function launchElectron({ executable, directory, manifest, env, obs
           await evaluate(({ app }) => { app.quit(); }).catch(() => {});
           if (!status) await closing.run(Promise.race([exited, new Promise(resolve => setTimeout(resolve, 100))]));
         }
-        socket.close(); await browser.close();
+        socket.close(); await browser?.close();
         return closing.run(exited);
       },
-      async detach() { socket.close(); await browser.close(); },
+      async detach() { socket.close(); await browser?.close(); },
     };
   } catch (error) {
     socket?.close(); await browser?.close().catch(() => {});
