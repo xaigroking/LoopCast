@@ -143,6 +143,7 @@ test('actual supervised maintenance, guarded workspace succession and two profil
   assert.equal((await owner(app))[0].value,originalOwner[0].value);
   await page.locator('#create-dialog[open]').waitFor();const originalRetry=await intercept(app,page,false);assert.equal(originalRetry.keys.length,0);
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.session.clearCache());await page.reload();await page.locator('#create-dialog[open]').waitFor();
+  assert.equal((await owner(app))[0].value,originalOwner[0].value);assert.equal(await idbValue(page),'original');
   assert.equal(originalRetry.keys.length,0);await page.locator('#create-form button[type=submit]').click();await page.waitForURL('**/runs/'+first.committed[0]);assert.deepEqual(originalRetry.keys,[fixedKey]);
   assert.equal(await page.evaluate(async()=>(await(await fetch('/v1/runs?limit=100')).json()).items.length),1);
   assert.ok(first.token,'Observe the actual gateway token before its retirement');
@@ -150,7 +151,10 @@ test('actual supervised maintenance, guarded workspace succession and two profil
   await configureOpen(app);({app,page,binding}=await item.transfer(app,()=>click(app,'workspace-open')));
   assert.equal(binding.id,restored.id);assert.equal(new URL(page.url()).port,String(restored.origin_port));assert.equal(await idbValue(page),'restored');
   assert.equal((await owner(app))[0].value,restoredOwner[0].value);await page.locator('#create-dialog[open]').waitFor();
-  const restoredRetry=await intercept(app,page,false);assert.equal(restoredRetry.keys.length,0);await page.locator('#create-form button[type=submit]').click();await page.waitForURL('**/runs/'+second.committed[0]);
+  const restoredRetry=await intercept(app,page,false);assert.equal(restoredRetry.keys.length,0);
+  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.session.clearCache());await page.reload();await page.locator('#create-dialog[open]').waitFor();
+  assert.equal(restoredRetry.keys.length,0);assert.equal((await owner(app))[0].value,restoredOwner[0].value);assert.equal(await idbValue(page),'restored');
+  await page.locator('#create-form button[type=submit]').click();await page.waitForURL('**/runs/'+second.committed[0]);
   assert.deepEqual(restoredRetry.keys,[fixedKey]);assert.equal(await page.evaluate(async()=>(await(await fetch('/v1/runs?limit=100')).json()).items.length),1);
   assert.equal((await page.evaluate(async()=>(await(await fetch('/v1/operations/status')).json()))).restore_guard.state,'ACTIVE');
   await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:0});});({app,page,binding}=await item.transfer(app,()=>click(app,'maintenance-return')));
