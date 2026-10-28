@@ -19,12 +19,13 @@ const executable=process.env.LOOPCAST_ELECTRON_BINARY;
 if(!executable||!process.env.LOOPCAST_DESKTOP_PYTHON)throw new Error('An actual verified Electron and installed same-source candidate are required');
 async function until(work,timeout=30000){const budget=new Budget(timeout);while(true){const value=await budget.run(Promise.resolve().then(work));if(value)return value;await budget.run(new Promise(resolve=>setTimeout(resolve,20)));}}
 
-async function fixture(t,{pauseTarget=false,locale='en'}={}){
+async function fixture(t,{pauseTarget=false,locale='en',configs={}}={}){
   const cleanupApplication=await applicationFixture(),root=await mkdtemp(join(tmpdir(),'loopcast-supervisor-'));
   const data=join(root,'data'),profile=join(root,'original-profile'),home=join(root,'home');
   for(const path of [data,profile,home,join(home,'config')])await mkdir(path,{mode:0o700});
   const config=await prepare({python:process.env.LOOPCAST_DESKTOP_PYTHON,node:process.execPath,electron:executable,
     next:process.env.LOOPCAST_DESKTOP_NEXT,data,session:profile,port:'28789',revision:process.env.LOOPCAST_DESKTOP_REVISION,locale});
+  config.configs=configs;
   const wrapper=join(root,'inspected-owned-port.mjs'),production=new URL('../src/linux-tree.mjs',import.meta.url).href;
   // External test tooling adds debugger listeners only. Production ownership,
   // cleanup, default sandbox, private pipes and every maintenance handler run.
@@ -72,6 +73,17 @@ export function createTreePort(config){const tree=production(config),launch=tree
 async function click(app,id){await app.evaluate(({Menu},id)=>{const item=Menu.getApplicationMenu().getMenuItemById(id);if(!item?.enabled)throw new Error('Native menu action is unavailable');item.click();},id);}
 async function readyMenu(app,id){return app.evaluate(({Menu},id)=>Menu.getApplicationMenu().getMenuItemById(id)?.enabled,id);}
 async function owner(app){return app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().find(window=>window.webContents.getURL().startsWith('http:')).webContents.session.cookies.get({name:'loopcast_owner'}));}
+async function actualConfigFlags(app){return app.evaluate(()=>{
+  const fs=process.getBuiltinModule('fs'),pending=[process.pid],apis=[];
+  while(pending.length){const parent=pending.pop();let children=[];
+    try{children=fs.readFileSync(`/proc/${parent}/task/${parent}/children`,'utf8').trim().split(/\s+/).filter(Boolean).map(Number);}catch{}
+    for(const pid of children){pending.push(pid);try{
+      const argv=fs.readFileSync(`/proc/${pid}/cmdline`,'utf8').split('\0');
+      if(argv.includes('loopcast')&&argv.includes('serve')&&!argv.includes('loopcast.process_tree'))apis.push(
+        ['generator','media','social','schedule','inspection'].filter(name=>argv.includes(`--${name}-config`)));
+    }catch{}}
+  }return apis;
+});}
 async function profileCanary(page,value){return page.evaluate(async value=>{
   localStorage.setItem('workspace-isolation-canary',value);
   await new Promise((resolve,reject)=>{const request=indexedDB.open('workspace-isolation-canary',1);request.onupgradeneeded=()=>request.result.createObjectStore('value');request.onerror=reject;request.onsuccess=()=>{const db=request.result,transaction=db.transaction('value','readwrite');transaction.objectStore('value').put(value,'identity');transaction.oncomplete=()=>{db.close();resolve();};};});
@@ -107,7 +119,9 @@ async function loseWrite(app,page){
 }
 
 test('actual supervised maintenance, guarded workspace succession and two profile round trips preserve separate same-key lost responses', {timeout:240000},async t=>{
-  const item=await fixture(t);let{app,page,binding}=await item.current();const original=binding;
+  assert.ok(process.env.LOOPCAST_DESKTOP_MEDIA_CONFIG,'An actual pinned source media configuration is required');
+  const item=await fixture(t,{configs:{media:process.env.LOOPCAST_DESKTOP_MEDIA_CONFIG}});let{app,page,binding}=await item.current();const original=binding;
+  assert.deepEqual(await actualConfigFlags(app),[['media']]);
   await profileCanary(page,'original');const originalOwner=await owner(app);
   const packagePath=join(item.root,'package'),proofPath=join(item.root,'proof.json'),restoredPath=join(item.root,'restored');
   await app.evaluate(({dialog},paths)=>{
@@ -129,6 +143,7 @@ test('actual supervised maintenance, guarded workspace succession and two profil
   await configureOpen(app);
   ({app,page,binding}=await item.transfer(app,()=>click(app,'workspace-open')));const restored=binding;
   assert.equal(restored.role,'RESTORED');assert.notEqual(restored.id,original.id);assert.notEqual(restored.origin_port,original.origin_port);
+  assert.deepEqual(await actualConfigFlags(app),[[]]);
   assert.notEqual(restored.session_dir,original.session_dir);assert.equal(await page.evaluate(()=>localStorage.getItem('workspace-isolation-canary')),null);
   assert.equal(await idbValue(page),null);assert.equal(await page.evaluate(()=>Object.keys(localStorage).filter(key=>key.startsWith('loopcast.run.create.pending.v1.')).length),0);
   const restoredOwner=await owner(app);assert.notEqual(restoredOwner[0].value,originalOwner[0].value);
@@ -139,6 +154,7 @@ test('actual supervised maintenance, guarded workspace succession and two profil
   await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:0});});
   ({app,page,binding}=await item.transfer(app,()=>click(app,'maintenance-return')));
   assert.equal(binding.id,original.id);assert.equal(new URL(page.url()).port,String(original.origin_port));
+  assert.deepEqual(await actualConfigFlags(app),[['media']]);
   assert.equal(await page.evaluate(()=>localStorage.getItem('workspace-isolation-canary')),'original');assert.equal(await idbValue(page),'original');
   assert.equal((await owner(app))[0].value,originalOwner[0].value);
   await page.locator('#create-dialog[open]').waitFor();const originalRetry=await intercept(app,page,false);assert.equal(originalRetry.keys.length,0);
