@@ -191,6 +191,9 @@ def guard_probe(fd):
 def preflight(paths):
     """Safe shared startup preflight. No files, owners, DB or service are created."""
     try:
+        from .desktop_admission import check as application_admission
+        try: application_admission()
+        except (OSError, ValueError): return 'HANDOFF_UNCONFIRMED'
         for index, path in enumerate(paths):
             _, fd = directory(absolute(path))
             try:

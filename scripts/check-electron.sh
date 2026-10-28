@@ -28,3 +28,4 @@ export LOOPCAST_DESKTOP_SAMPLE="$work_dir/sample.mp4"
 openbox --sm-disable >"$work_dir/display.log" 2>&1 &
 wm_pid=$!
 node --test "$root_dir/desktop/tests/electron.integration.mjs"
+node --test "$root_dir/desktop/tests/supervisor.integration.mjs"

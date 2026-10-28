@@ -78,6 +78,8 @@ async def _serve(args, settings):
 
 
 def main():
+    from .desktop_admission import load_private
+    load_private(close=True)
     if sys.argv[1:2] == ['desktop-diagnostics']:
         from .desktop_diagnostics import cli
         raise SystemExit(cli(sys.argv[2:]))

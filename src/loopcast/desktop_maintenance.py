@@ -28,6 +28,14 @@ def same(path, fd, expected):
 def execute(request):
     action = request['action']
     if action == 'identity' and set(request) == {'action'}: return platform_info()
+    if action == 'entity' and set(request) == {'action', 'path'}:
+        from .workspace_inspection import directory_identity
+        path, fd = directory(request['path'])
+        try:
+            value = directory_identity(fd)
+            same(str(path), fd, identity(os.fstat(fd)))
+            return value
+        finally: os.close(fd)
     if action == 'verify':
         if set(request) != {'action', 'backup', 'digest'}: raise ValueError('INVALID_REQUEST')
         value = verify_backup(request['backup'], request['digest'])
@@ -82,6 +90,8 @@ def execute(request):
 
 def main():
     try:
+        from .desktop_admission import load_private
+        load_private(close=True)
         raw = sys.stdin.buffer.read(16385)
         if len(raw) > 16384: raise ValueError('INVALID_REQUEST')
         def unique(items):

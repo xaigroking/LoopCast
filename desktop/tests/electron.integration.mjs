@@ -15,16 +15,18 @@ import { Budget } from '../src/errors.mjs';
 import { message } from '../src/errors.mjs';
 import { createTreePort } from '../src/linux-tree.mjs';
 import { readiness, observeExit } from '../src/protocol.mjs';
+import { applicationFixture } from './application-fixture.mjs';
 
 const directory = fileURLToPath(new URL('../', import.meta.url));
 const executable = process.env.LOOPCAST_ELECTRON_BINARY;
 if (!executable || !process.env.LOOPCAST_DESKTOP_PYTHON) throw new Error('Verified Electron and an installed same-source Python candidate are required; no silent skip.');
 
 async function fixture(t, { locale = 'en' } = {}) {
+  const cleanupApplication=await applicationFixture();
   const root = await mkdtemp(join(tmpdir(), 'loopcast Electron 中文 '));
   const data = join(root, '业务 data'), session = join(root, '窗口 session'), home = join(root, 'home'), appData = join(home, 'config');
   for (const path of [data, session, home, appData]) await mkdir(path, { mode: 0o700 });
-  const config = await prepare({ python: process.env.LOOPCAST_DESKTOP_PYTHON, node: process.execPath,
+  const config = await prepare({ python: process.env.LOOPCAST_DESKTOP_PYTHON, node: process.execPath, electron:executable,
     next: process.env.LOOPCAST_DESKTOP_NEXT, data, session, port: '28788', revision: process.env.LOOPCAST_DESKTOP_REVISION, locale });
   config.stopTimeoutMs = 6000;
   if (process.env.LOOPCAST_DESKTOP_MEDIA_CONFIG) config.configs.media = process.env.LOOPCAST_DESKTOP_MEDIA_CONFIG;
@@ -41,6 +43,7 @@ async function fixture(t, { locale = 'en' } = {}) {
   }
   t.after(async () => {
     for (const app of applications) if (!app.status) await app.quit().catch(() => app.child.kill('SIGKILL'));
+    await cleanupApplication();
     await rm(root, { recursive: true, force: true });
   });
   return { root, data, session, home, appData, filename, env, config, start };
@@ -203,9 +206,18 @@ test('real native maintenance shortcut opens a save selector and native Escape c
   await promisify(execFile)('xdotool',['windowactivate','--sync',String(nativeWindow)],{timeout:7000});
   await until(()=>app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isFocused()));
   await promisify(execFile)('xdotool',['key','--clearmodifiers','ctrl+shift+b'],{timeout:3000});
-  await until(()=>app.evaluate(()=>globalThis.nativeMaintenanceSelection.opened));
+  await stage('MAINTENANCE_SELECTOR_REQUEST',()=>until(()=>app.evaluate(()=>globalThis.nativeMaintenanceSelection.opened)));
+  const title=item.config.locale==='zh-Hans'?'选择全新的私有目录名称':'Choose a new private directory name';
+  const picker=await stage('MAINTENANCE_SELECTOR_MAPPING',()=>until(async()=>{
+    const active=(await promisify(execFile)('xdotool',['getactivewindow'],{timeout:3000})).stdout.trim();
+    if(Number(active)===nativeWindow)return false;
+    const name=(await promisify(execFile)('xdotool',['getwindowname',active],{timeout:3000})).stdout.trim();
+    return name===title?active:false;
+  }));
+  await promisify(execFile)('xdotool',['windowactivate','--sync',picker],{timeout:7000});
+  assert.equal((await promisify(execFile)('xdotool',['getactivewindow'],{timeout:3000})).stdout.trim(),picker);
   await promisify(execFile)('xdotool',['key','--clearmodifiers','Escape'],{timeout:3000});
-  await until(()=>app.evaluate(()=>globalThis.nativeMaintenanceSelection.cancelled));
+  await stage('MAINTENANCE_SELECTOR_CANCEL',()=>until(()=>app.evaluate(()=>globalThis.nativeMaintenanceSelection.cancelled)));
   await until(()=>app.evaluate(({Menu})=>Menu.getApplicationMenu().getMenuItemById('maintenance-create').enabled));
   assert.equal(page.isClosed(),false);assert.equal((await page.evaluate(async()=>(await fetch('/healthz')).status)),200);
   assert.ok(await stat(join(item.data,'desktop-runtime.guard.v1')));await assert.rejects(stat(join(item.data,'desktop-maintenance.guard.v1')));

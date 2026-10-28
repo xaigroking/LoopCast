@@ -6,9 +6,9 @@ import { once } from 'node:events';
 import { chromium } from 'playwright-core';
 import { Budget } from '../src/errors.mjs';
 
-export async function launchElectron({ executable, directory, manifest, env, observe = true, trace }) {
+export async function launchElectron({ executable, directory, manifest, env, observe = true, trace, existingChild }) {
   const args = [observe ? '--inspect-brk=0' : '--inspect=0', '--remote-debugging-port=0', directory, '--desktop-config', manifest];
-  const child = spawn(executable, args, { env, stdio: ['ignore', 'ignore', 'pipe'] });
+  const child = existingChild ?? spawn(executable, args, { env, stdio: ['ignore', 'ignore', 'pipe'] });
   let status, inspectorURL, browserURL, pending = '', diagnostic = '', debuggerWaiting = false;
   const exited = new Promise(resolve => {
     child.once('exit', (code, signal) => { status = { code, signal }; resolve(status); });

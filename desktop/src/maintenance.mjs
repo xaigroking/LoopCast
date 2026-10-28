@@ -11,8 +11,8 @@ import { holdDirectory, readPrivate, contains, hash, sameInode } from './private
 import { operationIdentity, parseCreatedBackup, parseVerifiedBackup, parseRestoredBackup, parseIndependentProof, resultReceipt, backupProof } from './maintenance-model.mjs';
 
 export class MaintenanceCoordinator extends EventEmitter {
-  constructor({ config, filename, configDigest, host, journal, freeze, showWorkspace }) {
-    super(); Object.assign(this, { config, filename, configDigest, host, journal, freeze, showWorkspace });
+  constructor({ config, filename, configDigest, host, journal, freeze, showWorkspace, admission }) {
+    super(); Object.assign(this, { config, filename, configDigest, host, journal, freeze, showWorkspace, admission });
     this.state = host.state === 'READY' ? 'READY' : 'OFFLINE';
     this.source = holdDirectory(config.dataDir); this.profile = holdDirectory(config.sessionDir);
     this.sourceIdentity = hash(JSON.stringify(this.source.identity));
@@ -27,7 +27,7 @@ export class MaintenanceCoordinator extends EventEmitter {
   release() { this.plan?.capability.fill(0); this.plan?.parent?.close(); this.plan?.packageDirectory?.close(); this.plan = null; this.busy = false; this.emit('state', this.state); }
   abandon() { this.release(); this.transition(this.previousState); }
   protect(path) {
-    const protectedPaths = [this.config.dataDir, this.config.sessionDir, this.config.nextRoot, this.journal.root.path, this.filename,
+    const protectedPaths = [this.config.dataDir, this.config.sessionDir, this.config.nextRoot, dirname(this.journal.root.path), this.filename,
       ...['python', 'node', 'treeModule'].map(key => this.config[key].path), ...Object.values(this.config.configs ?? {})];
     if (protectedPaths.some(item => contains(item, path) || contains(path, item))) throw new HostError('PATH_UNSAFE');
   }
@@ -92,12 +92,13 @@ export class MaintenanceCoordinator extends EventEmitter {
   }
   execute() {
     if (!this.busy || this.state !== 'PLANNED' || this.running) throw new HostError('PROTOCOL_INVALID');
+    if (this.plan.action !== 'verify') this.host.gateway?.suspend();
     this.running = this.executeInternal().finally(() => { this.running = null; this.controller = null; this.plan?.capability.fill(0); this.release(); });
     return this.running;
   }
   async executeInternal() {
     const plan = this.plan; this.controller = new AbortController(); this.treeUnknown = false;
-    let marked = false, started = false, terminal;
+    let marked = false, started = false, terminal, applicationStarted = false;
     try {
       await readConfig(this.filename, { packaged: this.config.mode === 'release', expectedDigest: this.configDigest });
       const implementation = JSON.parse(await this.command({ action:'identity' }));
@@ -106,6 +107,10 @@ export class MaintenanceCoordinator extends EventEmitter {
       this.source.check(); this.profile.check(); plan.parent?.check(); plan.packageDirectory?.check();
       this.journal.append(this.receipt('PREPARED'));
       if (plan.action !== 'verify') {
+        if (this.admission) {
+          try { await this.admission.begin(plan.operationId); applicationStarted = true; }
+          catch (error) { this.treeUnknown = true; throw error; }
+        }
         this.transition('STOPPING');
         this.host.gateway?.suspend();
         const stopped = this.host.stop();
@@ -138,10 +143,21 @@ export class MaintenanceCoordinator extends EventEmitter {
         const verified = parseVerifiedBackup(await this.command({ action: 'verify', backup: plan.backup, digest: plan.proof.manifest_sha256 }), plan.proof.backup_id ?? undefined);
         const restored = plan.action === 'restore' ? parseRestoredBackup(bytes, verified.backup_id) : null;
         if (plan.action === 'verify') parseVerifiedBackup(bytes, verified.backup_id);
-        terminal = this.receipt('COMPLETE', { verified, expectedDigest: plan.proof.manifest_sha256, restored });
+        let targetEntity = null;
+        if (restored) {
+          try { targetEntity = JSON.parse(await this.command({ action:'entity', path:plan.target })); }
+          catch (error) { if (this.treeUnknown) throw error; }
+        }
+        terminal = this.receipt('COMPLETE', { verified, expectedDigest: plan.proof.manifest_sha256, restored, targetEntity });
       }
       return terminal;
     } catch (error) {
+      if (plan.action !== 'verify' && this.host.state === 'READY') {
+        try {
+          const stopped = this.host.stop(); await this.freeze();
+          if (!(await stopped)?.confirmed) this.treeUnknown = true;
+        } catch { this.treeUnknown = true; }
+      }
       terminal = this.receipt(this.treeUnknown ? 'UNKNOWN_TREE' : started || marked ? 'UNKNOWN_RESULT' : 'REJECTED',
         { treeConfirmed: !this.treeUnknown, code: this.treeUnknown ? 'STOP_UNCONFIRMED' : 'PROTOCOL_INVALID' });
       return terminal;
@@ -149,6 +165,7 @@ export class MaintenanceCoordinator extends EventEmitter {
       try {
         if (terminal) this.journal.append(terminal);
         if (marked && !this.treeUnknown && terminal) await this.marker('finish');
+        if (applicationStarted && terminal) await this.admission.finish(terminal);
         this.transition(this.treeUnknown ? 'QUARANTINED' : this.host.state === 'READY' ? 'READY' : 'COMPLETE');
       } catch { this.treeUnknown = true; try { if (terminal?.state !== 'UNKNOWN_TREE') this.journal.append(this.receipt('UNKNOWN_TREE', { treeConfirmed:false, code:'STOP_UNCONFIRMED' })); } catch {} this.transition('QUARANTINED'); }
     }
@@ -160,16 +177,26 @@ export class MaintenanceCoordinator extends EventEmitter {
       this.source.check(); this.profile.check();
       const config = await readConfig(this.filename, { packaged: this.config.mode === 'release', expectedDigest: this.configDigest });
       if (config.dataDir !== this.source.path || config.sessionDir !== this.profile.path) throw new HostError('MANIFEST_CHANGED');
+      Object.assign(this.config, config);
       this.transition('STARTING');
-      this.host = new DesktopHost(config, await loadTreePort(config));
+      this.host = new DesktopHost(this.config, await loadTreePort(this.config));
       const origin = await this.host.start(); await this.showWorkspace(this.host, origin);
       this.transition('READY');
     } catch (error) { const result = await this.host.stop(); this.transition(result?.confirmed ? 'OFFLINE' : 'QUARANTINED'); throw error; }
     finally { this.busy = false; this.emit('state', this.state); }
   }
+  async stopForHandoff() {
+    if (!this.busy || this.state !== 'SELECTING') throw new HostError('PROTOCOL_INVALID');
+    this.transition('STOPPING'); this.host.gateway?.suspend();
+    const stopped = this.host.stop(); let failure;
+    try { await this.freeze(); } catch (error) { failure = error; }
+    const result = await stopped;
+    if (!result?.confirmed || failure) { this.treeUnknown = true; this.transition('QUARANTINED'); throw new HostError('STOP_UNCONFIRMED'); }
+    this.transition('OFFLINE'); return { confirmed:true };
+  }
   exportProof(operationId) {
     const receipt = this.journal.records().find(value => value.operation_id === operationId && value.state === 'COMPLETE');
     return Buffer.from(JSON.stringify(backupProof(receipt)) + '\n');
   }
-  async close() { this.cancel(); await this.running; this.release(); const result = await this.host.stop(); this.source.close(); this.profile.close(); return { confirmed:result?.confirmed === true && this.state !== 'QUARANTINED' }; }
+  async close() { this.cancel(); await this.running; this.release(); const result = await this.host.stop(); this.source.close(); this.profile.close(); return { confirmed:result?.confirmed === true && this.treeUnknown !== true }; }
 }

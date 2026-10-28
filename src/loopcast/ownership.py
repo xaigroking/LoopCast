@@ -2,6 +2,7 @@
 import fcntl
 import os
 from pathlib import Path
+from .desktop_admission import check as application_admission
 import stat
 
 
@@ -31,6 +32,7 @@ def directory(path, create=False):
 
 class DirectoryLock:
     def __init__(self, path, create=False, *, desktop_identity=None, maintenance_identity=None):
+        application_admission()
         self.path, self.directory_fd = directory(path, create)
         self.fd = None
         self._acquire(desktop_identity, maintenance_identity)
@@ -38,6 +40,7 @@ class DirectoryLock:
     @classmethod
     def from_directory(cls, path, directory_fd):
         """Own an already held private staging directory without re-resolving it."""
+        application_admission()
         value = cls.__new__(cls)
         value.path, value.directory_fd, value.fd = Path(path), os.dup(directory_fd), None
         value._acquire(None, None)

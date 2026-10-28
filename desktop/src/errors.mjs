@@ -16,6 +16,8 @@ const messages = {
     FILE_UNSAFE: 'A protected desktop file is unsafe.',
     PERMISSION_DENIED: 'A required desktop observation was denied.',
     MAINTENANCE_UNCONFIRMED: 'An unresolved offline maintenance operation is present. Preserve the existing evidence.',
+    RESTORE_SOURCE_REQUIRED: 'A trusted completed restore receipt is required. Keep the independent backup evidence and upload barrier.',
+    HANDOFF_UNCONFIRMED: 'An application-wide handoff is unresolved. Preserve the original profiles and execution evidence.',
     OWNER_HELD: 'The existing application data is owned by another instance.',
     ENTRY_PORT_BUSY: 'The configured desktop entry port is occupied.',
     DESKTOP_CLEANUP_UNCONFIRMED: 'An unresolved desktop cleanup marker is present.',
@@ -44,6 +46,8 @@ const messages = {
     FILE_UNSAFE: '受保护的桌面文件不安全。',
     PERMISSION_DENIED: '必要的桌面取证读取被拒绝。',
     MAINTENANCE_UNCONFIRMED: '检测到尚未确认的离线维护操作，请保留现有证据。',
+    RESTORE_SOURCE_REQUIRED: '缺少可信的已完成恢复回执。请保留独立备份证据和上传屏障。',
+    HANDOFF_UNCONFIRMED: '存在应用级未决交接，请保留原工作区、浏览器配置与执行证据。',
     OWNER_HELD: '现有应用数据正被另一个实例占用。',
     ENTRY_PORT_BUSY: '配置的桌面入口端口已被占用。',
     DESKTOP_CLEANUP_UNCONFIRMED: '检测到尚未确认清理的桌面屏障。',
@@ -71,7 +75,7 @@ export function message(code, locale = 'en') {
 // Static guidance only: no offline collector or extra subprocess during failure.
 export function failureDetails(error, locale = 'en', secondary) {
   const code = safeError(error).code, extra = secondary ? safeError(secondary).code : undefined;
-  const keep = ['DESKTOP_CLEANUP_UNCONFIRMED', 'GUARD_UNSAFE', 'STOP_UNCONFIRMED'].includes(code) || extra === 'STOP_UNCONFIRMED';
+  const keep = ['DESKTOP_CLEANUP_UNCONFIRMED', 'MAINTENANCE_UNCONFIRMED', 'HANDOFF_UNCONFIRMED', 'GUARD_UNSAFE', 'STOP_UNCONFIRMED'].includes(code) || extra === 'STOP_UNCONFIRMED';
   const occupied = ['OWNER_HELD', 'ENTRY_PORT_BUSY'].includes(code);
   const unsupported = ['PLATFORM_UNSUPPORTED', 'PLATFORM_UNAVAILABLE', 'CAPABILITY_UNAVAILABLE'].includes(code);
   if (locale === 'zh-Hans') return `安全码：${code}${extra && extra !== code ? `；附加证据：${extra}` : ''}\n证据范围：仅启动观察；未收集完整离线报告。\n` +

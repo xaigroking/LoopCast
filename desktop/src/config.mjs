@@ -16,6 +16,7 @@ export function validateConfig(value) {
       !['en', 'zh-Hans'].includes(value.locale) ||
       !Number.isInteger(value.gatewayPort) || value.gatewayPort < 1 || value.gatewayPort > 65535 ||
       !['python', 'node', 'treeModule'].every(k => absolute(value[k]?.path) && sha.test(value[k]?.sha256)) ||
+      value.electron !== undefined && (!absolute(value.electron?.path) || !sha.test(value.electron?.sha256)) ||
       !['nextRoot', 'dataDir', 'sessionDir'].every(k => absolute(value[k])) ||
       !['generator', 'media', 'social', 'schedule', 'inspection'].every(k => value.configs?.[k] === undefined || absolute(value.configs[k])) ||
       !Number.isInteger(value.startTimeoutMs) || value.startTimeoutMs < 100 || value.startTimeoutMs > 120000 ||
@@ -35,7 +36,7 @@ export async function readConfig(filename, { packaged = false, expectedDigest } 
     if (packaged !== (config.mode === 'release')) throw new Error();
     // The manifest is trusted main-process input, never renderer input. Resolve
     // resource identities before hashing; the platform port validates data ACLs.
-    for (const key of ['python', 'node', 'treeModule']) {
+    for (const key of ['python', 'node', 'treeModule', ...(config.electron ? ['electron'] : [])]) {
       const item = config[key];
       const actual = await realpath(item.path);
       // Preserve a venv interpreter's launch path: dereferencing its symlink

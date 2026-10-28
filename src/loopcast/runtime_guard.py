@@ -3,6 +3,7 @@ import json
 import os
 import re
 import stat
+from .desktop_admission import check as application_admission
 
 NAME = 'desktop-runtime.guard.v1'
 FORMAT = 'loopcast.desktop-guard.v1'
@@ -22,6 +23,7 @@ def read_guard(fd, name=NAME, format=FORMAT):
     finally: os.close(handle)
 
 def check(fd, identity=None, maintenance_identity=None):
+    application_admission()
     guard = read_guard(fd)
     if guard is not None and (identity is None or guard[0]['identity'] != identity): raise ValueError('DESKTOP_CLEANUP_UNCONFIRMED')
     if identity is not None and guard is None: raise ValueError('DESKTOP_GUARD_MISSING')

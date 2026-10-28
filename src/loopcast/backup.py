@@ -19,6 +19,17 @@ FORMAT = 'loopcast.backup.v1'
 MAX_MANIFEST = 8 * 1024 * 1024
 
 
+def rollback_image(connection):
+    """Serialize a complete SQLite snapshot without rebuilding business rowids."""
+    raw = connection.serialize()
+    if len(raw) < 100 or raw[:16] != b'SQLite format 3\0' or raw[18:20] not in (b'\1\1', b'\2\2'):
+        raise ValueError('DATABASE_INVALID')
+    # SQLite documents this rollback-header conversion for serialized WAL
+    # images: https://sqlite.org/c3ref/deserialize.html. backup() has already
+    # included committed WAL pages. No application row or ledger is rewritten.
+    return raw[:18] + b'\1\1' + raw[20:]
+
+
 def checksum(path):
     with open(path, 'rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -208,7 +219,9 @@ def private_staging(target, prefix, expected_parent=None):
     name = prefix + uuid.uuid4().hex
     try:
         info = os.fstat(parent)
-        if info.st_uid != os.getuid() or info.st_mode & 0o077: raise ValueError('PRIVATE_DIRECTORY_REQUIRED')
+        # Native plans require a private selected parent. The existing CLI
+        # also permits an owned 0700 package beneath a shared parent.
+        if expected_parent is not None and (info.st_uid != os.getuid() or info.st_mode & 0o077): raise ValueError('PRIVATE_DIRECTORY_REQUIRED')
         if expected_parent is not None and [str(info.st_dev), str(info.st_ino)] != expected_parent: raise ValueError('PARENT_CHANGED')
         os.mkdir(name, 0o700, dir_fd=parent)
         handle = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
@@ -247,15 +260,12 @@ def create_owned_backup(owner, output, *, expected_parent=None):
             check_database(origin)
             with closing(sqlite3.connect(':memory:')) as copied:
                 origin.backup(copied)
-                # Rebuild the private snapshot through SQLite itself so its
-                # serialized header uses rollback mode, without WAL sidecars.
-                copied.execute('VACUUM')
                 schema = check_database(copied)
                 refs = references(copied)
                 counts = {row[0]: copied.execute('SELECT COUNT(*) FROM "' + row[0].replace('"', '""') + '"').fetchone()[0]
                           for row in copied.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")}
                 cursor = copied.execute('SELECT COALESCE(MAX(id),0) FROM events').fetchone()[0]
-                copied_bytes = copied.serialize()
+                copied_bytes = rollback_image(copied)
             with os.fdopen(os.open('state.sqlite3', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=staging_fd), 'wb') as stream:
                 stream.write(copied_bytes); stream.flush(); os.fsync(stream.fileno())
         for relative, expected in sorted(refs.items()):

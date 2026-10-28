@@ -33,6 +33,8 @@ def validate(paths):
         finally: os.close(fd)
 
 if __name__ == '__main__':
+    from .desktop_admission import load_private
+    load_private(close=True)
     if sys.argv[1:2] == ['validate-result']:
         from .desktop_diagnostics import preflight
         code = preflight(sys.argv[2:]) if len(sys.argv) == 4 else 'DIAGNOSTICS_UNAVAILABLE'

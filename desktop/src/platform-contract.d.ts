@@ -38,6 +38,9 @@ export interface TreePort {
    * throwing. Windows children must join their Job before executing user code.
    * Parent death/pipe EOF handling belongs to the platform port.
    */
+  /** Fixed offline environment; no owner preflight, inherited credentials or arbitrary environment forwarding. */
+  maintenanceEnvironment?(): Record<string, string>;
+  /** Linux guardians receive a bounded private admission frame on fd6 and forward it only to fixed Python entry modules. */
   launch(spec: LaunchSpec): OwnedTree;
   /** Clear only this launch's runtime guard after every tree and API shutdown. */
   finish?(result: { confirmed: boolean; deadline: number }): Promise<{ confirmed: boolean }>;
