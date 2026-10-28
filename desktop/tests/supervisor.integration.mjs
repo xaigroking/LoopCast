@@ -306,7 +306,7 @@ test('killing the actual outer Node supervisor leaves durable admission after al
   while(changed){changed=false;for(const[pid,parent]of processes)if(descendants.has(parent)&&!descendants.has(pid)){descendants.add(pid);changed=true;}}
   assert.ok(descendants.size>5);child.kill('SIGKILL');await exited;
   await until(async()=>{
-    for(const pid of descendants){try{const text=await readFile(`/proc/${pid}/stat`,'utf8');if(text.slice(text.lastIndexOf(')')+2).split(' ')[0]!=='Z')return false;}catch(error){if(error.code!=='ENOENT')throw error;}}
+    for(const pid of descendants){try{const text=await readFile(`/proc/${pid}/stat`,'utf8');if(text.slice(text.lastIndexOf(')')+2).split(' ')[0]!=='Z')return false;}catch(error){if(!['ENOENT','ESRCH'].includes(error.code))throw error;}}
     return true;
   },25000);
   assert.ok((await stat(join(item.supervisor.lease.root,'active'))).isFile());
